@@ -16,7 +16,8 @@ from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
                                 opening_for, remainder, split_pair, stack)
 from cabinetgen.engine import generate_job
 from cabinetgen.export_plaza import estimate_cost, summarise, write_csvs
-from cabinetgen.model import CODES, hinge_side
+from cabinetgen.model import (CODES, MATERIALS, SUPPORT_EDGES, hinge_side,
+                              material_board, tape_for)
 from cabinetgen.render import elevation_svg, plan_svg, wall_elevation_svg
 from cabinetgen.room import (LAYERS, add_wall, clashes as room_clashes, closure_error,
                              gaps as room_gaps, geometry, layer_of,
@@ -90,7 +91,10 @@ def defaults(payload):
         "face_presets": ["equal", "graduated"],
         "backs": ["four", "three", "none"],
         "bases": ["board", "melamine"],
-        "materials": ["MEL", "DECOR", "BACK"],
+        # the house board records, for a job that has not named its own
+        "materials": sorted(MATERIALS),
+        "material_records": {k: dict(v) for k, v in MATERIALS.items()},
+        "support_edges": list(SUPPORT_EDGES),
         "opening_kinds": ["door", "window", "arch"],
         "obstruction_kinds": ["plug", "isolator", "waste", "water", "pipe", "meter"],
         "layers": list(LAYERS),
@@ -115,6 +119,15 @@ def _geometry_info(job, cab, std):
             # the state back rather than working the rule out a second time
             "corner_on": cab.corner_on,
             "drawers_on": bool(cab.drawer_list),
+            # The tapes in force and where each came from. Derived values are the
+            # engine's answer read back, never worked out in the browser.
+            "tapes": cab.tapes(job.materials),
+            "tape_overrides": {"carcass_edge": cab.carcass_edge,
+                               "door_edge": cab.door_edge,
+                               "drawer_box_edge": cab.drawer_box_edge},
+            "supports": [{"edge": r.edge, "qty": r.qty} for r in cab.support_list],
+            "support_total": cab.support_total,
+            "supports_migrated": not cab.support_rows,
             "hinges": [hinge_side(cab, i, n, flip) for i in range(n)],
             "hinges_set": [cab.door_hinges[i] if i < len(cab.door_hinges) else ""
                            for i in range(n)],
@@ -178,6 +191,11 @@ def compute(payload):
     out = {
         "ok": True, "error": "",
         "name": job.name,
+        # what the board dropdowns offer, and the tape each board carries
+        "materials": {k: {"board": material_board(job.materials, k),
+                          "pvc": tape_for(job.materials, k, "pvc"),
+                          "2mm": tape_for(job.materials, k, "2mm")}
+                      for k in sorted(job.materials or {})},
         "room": _room_info(job),
         "elevation": elevation_svg(job),
         "panels": [], "issues": [], "blocking": False,

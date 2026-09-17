@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import List
 
 from .engine import front_stack_check, generate_cabinet
-from .model import Cabinet, Job, Panel
+from .model import Cabinet, Job, Panel, material_board, tape_for
 from .room import (above_ceiling, blocked_openings, cab_corner_outline,
                    clashes as room_clashes, closure_error, corner_offset,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
@@ -50,6 +50,8 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     out += _grain_on_decor(panels)
     out += _zero_quantities(panels)
     out += _drawer_boxes(job.cabinets)
+    out += _boards_and_tapes(job)
+    out += _supports(job.cabinets)
     out += _room(job, std)
     out += _gaps(job, std)
     out += _plinth(job, std)
@@ -191,6 +193,78 @@ def _drawer_boxes(cabinets):
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"drawer {i}: box {d.box_height} is not shorter than "
                                  f"its face {d.face_height}"))
+    return out
+
+
+def _boards_and_tapes(job: Job):
+    """Every board a cabinet names must exist, and must have the tape it needs.
+
+    The tapes are a lookup on the board, never a name built out of one, so a board
+    with no tape mapped is reported by name rather than guessed at (D6 / W10:
+    'SOLID' reached a real order as a tape, and it is a board). Only the tapes a
+    cabinet actually uses are asked for — a cabinet with no drawers and no
+    white-edged support never needs a drawer-box tape.
+    """
+    mats = job.materials
+    out = []
+    for c in job.cabinets:
+        if c.template == "none":
+            continue                       # its panels name their own materials
+        for board, what in ((c.carcass_board, "carcass board"),
+                            (c.exterior_board, "exterior board")):
+            if board not in (mats or {}):
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"{what} {board!r} is not one of the job's materials "
+                                 f"({', '.join(sorted(mats or {})) or 'none'})"))
+
+        wants = [("carcass_edge", c.carcass_edge, c.exterior_board, "pvc",
+                  "the fronts of its sides, top, bottom, shelves and dividers")]
+        if any(r.edge == "white" for r in c.support_list) or c.drawer_list:
+            wants.append(("drawer_box_edge", c.drawer_box_edge, c.carcass_board, "pvc",
+                          "its drawer boxes and white-edged supports"))
+        if c.doors or c.drawer_list or c.exposed_sides:
+            wants.append(("door_edge", c.door_edge, c.exterior_board, "2mm",
+                          "its doors, drawer faces and exposed panels"))
+        for field, override, board, thickness, bands in wants:
+            if override is not None:
+                continue                   # this cabinet was told what to use
+            if board in (mats or {}) and not tape_for(mats, board, thickness):
+                out.append(Issue(WARNING, str(c.number),
+                                 f"no {thickness} tape is mapped for "
+                                 f"{material_board(mats, board)!r}, so {field} cannot be "
+                                 f"derived for {bands} — map one on the material, or "
+                                 f"override it on this cabinet"))
+
+        # A drawer box is cut from the white board but banded in the carcass
+        # board's colour. Whether it should follow the carcass board has not been
+        # ruled, so it is reported rather than decided.
+        if c.drawer_list and c.carcass_board != "MEL":
+            out.append(Issue(WARNING, str(c.number),
+                             f"carcass board is {c.carcass_board} but the drawer box "
+                             f"sides and fronts are still cut from MEL, banded in the "
+                             f"{c.carcass_board} tape — confirm which board the box "
+                             f"should be"))
+    return out
+
+
+def _supports(cabinets):
+    """The three legacy support numbers, where they contradict each other.
+
+    `edged + white` greater than the total implied a negative plain count, which
+    the old engine dropped in silence. The rows model has no subtraction, so the
+    only place this can still arise is a stored job that predates it — and it is
+    named rather than migrated on a guess.
+    """
+    out = []
+    for c in cabinets:
+        if not c.legacy_supports_negative:
+            continue
+        out.append(Issue(WARNING, str(c.number),
+                         f"supports {c.supports} with {c.edged_supports} front-edged and "
+                         f"{c.white_supports} white-edged leaves {c.supports - c.edged_supports - c.white_supports} "
+                         f"plain — the three numbers contradict each other. "
+                         f"{c.support_total} supports are being cut, which is what the "
+                         f"cut list has always said; set the rows to say what was meant"))
     return out
 
 

@@ -27,6 +27,71 @@ CODES = {
 }
 
 
+# A board and the tapes that match it. The tape names are a lookup, never built
+# by sticking a thickness in front of a board name: "PVC WOOD" and "2mm WOOD"
+# are what Plazaboard call the Brookhill tapes, and nothing about the board
+# description spells either of them. A board with no tape of a given thickness
+# simply has no entry, and the validator says which board is missing one rather
+# than a plausible-looking name being invented for it (D6 / W10: 'SOLID' got
+# onto a real order as a tape, and it is a board).
+MATERIALS = {
+    "MEL": {
+        "board": "SUPER WHITE MELAMINE CHIP 9X6X16MM",
+        "pvc": "PVC WHITE",
+        "grain": 0,
+        # no 2 mm tape is established for the white board: no job has ordered one
+    },
+    "DECOR": {
+        "board": "BROOKHILL FUSION CHIP",
+        "pvc": "PVC WOOD",
+        "2mm": "2mm WOOD",
+        "grain": 1,
+    },
+    "BACK": {
+        "board": "IMPORTED WHITE DECOR 9X6X3MM",
+        "grain": 0,
+        # a 3 mm back is grooved in on all sides; it is never edged
+    },
+}
+
+# What a job written before materials carried their tapes still means. A legacy
+# entry is a bare board description, so its tapes are taken from the record above
+# only when the description is the very one that record describes. A board nobody
+# has a record for keeps its description and gets no tapes — which the validator
+# reports rather than the app guessing.
+def material_record(materials: dict, key: str) -> dict:
+    value = (materials or {}).get(key)
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        known = MATERIALS.get(key)
+        if known and known["board"] == value:
+            return known
+        return {"board": value}
+    return {}
+
+
+def material_board(materials: dict, key: str) -> str:
+    """The Plazaboard description the quote is priced against."""
+    return material_record(materials, key).get("board", key)
+
+
+def tape_for(materials: dict, key: str, thickness: str) -> str:
+    """The tape in that board's colour, or '' when none is mapped for it."""
+    return material_record(materials, key).get(thickness, "")
+
+
+def grain_of(materials: dict, key: str) -> int:
+    """Whether the board has a direction, which is what locks a panel's rotation.
+
+    It belongs to the board, not to the job it is cut for: a Brookhill carcass
+    side runs with the grain exactly as a Brookhill door does. Getting this from
+    the panel's role instead is how 60 woodgrain panels went out at grain 0 and
+    only Plazaboard's counter caught it (W8 / D9).
+    """
+    return int(material_record(materials, key).get("grain", 0))
+
+
 @dataclass
 class Panel:
     cabinet: int
@@ -73,6 +138,23 @@ class Drawer:
 
 
 @dataclass
+class Support:
+    """One line of cross supports.
+
+    A support is a cross rail spanning the internal width (W - 32 x 100, code 04)
+    that ties the two sides together. A row is a kind and a quantity, and the
+    cabinet's total is the sum of its rows — there is no total to subtract from,
+    which is what the three-number model got wrong: `edged + white` could exceed
+    `supports` and the plain count went negative in silence.
+    """
+    edge: str = "front"    # 'front' (carcass tape) | 'white' (drawer-box tape) | 'none'
+    qty: int = 1
+
+
+SUPPORT_EDGES = ("none", "front", "white")
+
+
+@dataclass
 class Cabinet:
     number: int
     width: int
@@ -83,9 +165,15 @@ class Cabinet:
     back: str = "four"           # 'four' | 'three' | 'none'
     template: str = "standard"   # 'standard' | 'none' (bespoke only — generate nothing)
 
+    # Supports, as rows: a kind and a quantity each, summing to the total. Empty
+    # means "read the three legacy numbers below", which is how every job written
+    # before the rows does. See `support_list`.
+    support_rows: List[Support] = field(default_factory=list)
+    # The three-number model these replace. Kept as the migration source and
+    # nothing else — once support_rows is set, these are not read.
     supports: int = 4
-    edged_supports: int = 0      # front rail(s), banded in carcass_edge
-    white_supports: int = 0      # rear rail(s), banded in drawer_box_edge
+    edged_supports: int = 0      # front-edged, banded in the carcass tape
+    white_supports: int = 0      # white-edged, banded in the drawer-box tape
 
     shelves: int = 0             # adjustable
     fixed_shelves: int = 0       # fitted, slightly deeper
@@ -112,11 +200,23 @@ class Cabinet:
 
     exposed_sides: int = 0
 
-    # finishes
-    carcass_edge: str = "PVC WOOD"
-    door_edge: str = "2mm WOOD"
-    drawer_box_edge: str = "PVC WHITE"
-    decor: str = "DECOR"
+    # ---- boards ------------------------------------------------------------
+    # Two boards, each a key into Job.materials. The carcass board is what the
+    # box is cut from — sides, top, bottom, supports, shelves and dividers — so a
+    # decor or microwave cupboard with a Brookhill carcass is just a cabinet with
+    # a different carcass board. The exterior board is what shows: doors, drawer
+    # faces and exposed end panels. Each nests and prices as its own material.
+    carcass_board: str = "MEL"
+    exterior_board: str = "DECOR"
+
+    # ---- edge tapes: derived from the boards, overridable per cabinet -------
+    # None means "derive it" (see carcass_tape / door_tape / drawer_box_tape).
+    # A string is an override for this cabinet only. The three are kept separate
+    # because they are genuinely different tapes: the door edge is 2 mm and the
+    # carcass edge is thin PVC, same colour, different thickness and price.
+    carcass_edge: Optional[str] = None
+    door_edge: Optional[str] = None
+    drawer_box_edge: Optional[str] = None
 
     bespoke: List[Panel] = field(default_factory=list)   # hand-specified extras
     note: str = ""
@@ -158,6 +258,63 @@ class Cabinet:
         """The drawers that are actually built. Unticking keeps `drawers` in the
         job file untouched — nothing here empties it."""
         return [] if self.has_drawers is False else list(self.drawers)
+
+    @property
+    def support_list(self) -> List[Support]:
+        """The support rows that are actually built, in cut-list order.
+
+        With rows set, they are it. With none, the three legacy numbers are read
+        in the order the engine has always emitted them — plain, then front-edged,
+        then white-edged — so a migrated cabinet cuts the same list in the same
+        order. `plain` is clamped at zero exactly as the old `if plain > 0` did,
+        and the validator names any cabinet whose numbers made it negative.
+        """
+        if self.support_rows:
+            return [r for r in self.support_rows if r.qty > 0]
+        plain = self.supports - self.edged_supports - self.white_supports
+        rows = [Support("none", plain), Support("front", self.edged_supports),
+                Support("white", self.white_supports)]
+        return [r for r in rows if r.qty > 0]
+
+    @property
+    def support_total(self) -> int:
+        """The sum of the rows. Nothing subtracts."""
+        return sum(r.qty for r in self.support_list)
+
+    @property
+    def legacy_supports_negative(self) -> bool:
+        """The three legacy numbers contradict each other: edged + white is more
+        than the total, so the plain count they imply is below zero."""
+        return (not self.support_rows
+                and self.supports - self.edged_supports - self.white_supports < 0)
+
+    # ---- tapes: the override if there is one, otherwise the board's ---------
+
+    def carcass_tape(self, materials: dict) -> str:
+        """PVC in the EXTERIOR board's colour. It bands the front edges of the
+        sides, top and bottom, and the front edges of shelves and dividers, which
+        were ruled to match the front rather than the box (14 Sept 2026)."""
+        if self.carcass_edge is not None:
+            return self.carcass_edge
+        return tape_for(materials, self.exterior_board, "pvc")
+
+    def door_tape(self, materials: dict) -> str:
+        """2 mm in the EXTERIOR board's colour: doors, drawer faces, exposed ends."""
+        if self.door_edge is not None:
+            return self.door_edge
+        return tape_for(materials, self.exterior_board, "2mm")
+
+    def drawer_box_tape(self, materials: dict) -> str:
+        """PVC in the CARCASS board's colour: drawer sides and fronts, and the
+        white-edged supports."""
+        if self.drawer_box_edge is not None:
+            return self.drawer_box_edge
+        return tape_for(materials, self.carcass_board, "pvc")
+
+    def tapes(self, materials: dict) -> dict:
+        return {"carcass_edge": self.carcass_tape(materials),
+                "door_edge": self.door_tape(materials),
+                "drawer_box_edge": self.drawer_box_tape(materials)}
 
 
 def hinge_side(cab: Cabinet, i: int, leaves: int, flip: bool = False) -> str:
@@ -289,9 +446,7 @@ class Job:
     gaps: List[GapChoice] = field(default_factory=list)
     plinths: List[PlinthChoice] = field(default_factory=list)
 
-    # material name -> Plazaboard board description, for the export and the quote
-    materials: dict = field(default_factory=lambda: {
-        "MEL": "SUPER WHITE MELAMINE CHIP 9X6X16MM",
-        "DECOR": "BROOKHILL FUSION CHIP",
-        "BACK": "IMPORTED WHITE DECOR 9X6X3MM",
-    })
+    # material name -> its record: the Plazaboard board description for the export
+    # and the quote, plus the tapes that match it. See MATERIALS.
+    materials: dict = field(default_factory=lambda: {k: dict(v)
+                                                     for k, v in MATERIALS.items()})

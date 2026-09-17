@@ -116,6 +116,13 @@
         font-variant-numeric:tabular-nums}
   .dtot .over{color:var(--crit);font-weight:700}
   .presets{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+  .tape{margin-top:8px}
+  .tape>label{font-size:11px;color:var(--muted);display:block}
+  .tape .leaf{margin-top:2px}
+  .tape .leaf select{flex:1;min-width:0}
+  .tape .leaf b{min-width:96px;font-variant-numeric:tabular-nums}
+  .tape .leaf b.over{color:var(--crit)}
+  .tape .note{display:block;margin-top:2px;line-height:1.3}
   /* seven columns in a side panel: let the numbers have the room, not the labels */
   #drawerbox table{table-layout:fixed}
   #drawerbox th,#drawerbox td{padding:2px 3px;font-size:11.5px}
@@ -299,6 +306,7 @@ function blankCabinet(number) {
   return {
     number: number, width: 600, height: 2400, depth: 500,
     kind: "tall", back: "four", template: "standard",
+    support_rows: [{edge: "none", qty: 4}],
     supports: 4, edged_supports: 0, white_supports: 0,
     shelves: 0, fixed_shelves: 0, shelf_width: null,
     divider_height: null, divider_count: 0,
@@ -306,7 +314,8 @@ function blankCabinet(number) {
     drawers: [], has_drawers: null,
     exposed_sides: 0,
     carcass_edge: "PVC WOOD", door_edge: "2mm WOOD",
-    drawer_box_edge: "PVC WHITE", decor: "DECOR",
+    carcass_board: "MEL", exterior_board: "DECOR",
+    carcass_edge: null, door_edge: null, drawer_box_edge: null,
     bespoke: [], note: "", footprint: [],
     corner_style: "", arm_a: null, arm_b: null, face_a: null, face_b: null,
     corner_unit: null,
@@ -512,16 +521,13 @@ const SECTIONS = [
     ["face_a", "Face A (open face, wall-A side)", "opt"],
     ["face_b", "Face B (open face, wall-B side)", "opt"]]},
 
-  {key: "back", name: "Back & Supports", fields: [
-    ["back", "Back", "sel:backs"], ["supports", "Supports", "int"],
-    ["edged_supports", "Edged supports", "int"],
-    ["white_supports", "White supports", "int"]]},
+  {key: "back", name: "Back & Supports", slot: "supportbox",
+   hint: "A support is a cross rail spanning the internal width, tying the two " +
+         "sides together. One row per kind; the total is the sum of the rows.",
+   fields: [["back", "Back", "sel:backs"]]},
 
-  {key: "decor", name: "Decor", fields: [
-    ["decor", "Décor material", "text"], ["exposed_sides", "Exposed sides", "int"],
-    ["carcass_edge", "Carcass edge", "sel:edge_materials"],
-    ["door_edge", "Door edge", "sel:edge_materials"],
-    ["drawer_box_edge", "Drawer box edge", "sel:edge_materials"],
+  {key: "decor", name: "Decor", slot: "boardbox", fields: [
+    ["exposed_sides", "Exposed end panels", "int"],
     ["note", "Note", "text"]]},
 ];
 
@@ -608,6 +614,7 @@ function renderEditor() {
   if (S.selRendered === S.sel) {
     refreshGeometryReadout();
     refreshSwing();
+    refreshTapes();
     return;
   }
   S.selRendered = S.sel;
@@ -623,6 +630,8 @@ function renderEditor() {
   box.innerHTML = `<h2>Cabinet ${c.number}</h2><div class="body">${sets}${bespoke}</div>`;
   renderDoorLeaves();
   renderDrawers();
+  renderSupports();
+  renderBoards();
   refreshGeometryReadout();
 }
 
@@ -653,6 +662,27 @@ $("editor").addEventListener("input", (e) => {
     else if (t === "opt") c[k] = raw === "" ? null : parseInt(raw, 10);
     else c[k] = raw === "" ? 0 : parseInt(raw, 10);
     if (k === "number") c.bespoke.forEach((p) => { p.cabinet = c.number; });
+    // a board decides three tapes and two materials, so the section is rebuilt
+    if (k === "carcass_board" || k === "exterior_board") S.selRendered = -2;
+    schedule();
+    return;
+  }
+
+  const tape = e.target.dataset.tape;
+  if (tape !== undefined) {
+    // "" is not a tape name: it means hand it back to the boards
+    c[tape] = e.target.value === "" ? null : e.target.value;
+    S.selRendered = -2;         // the value beside it is the engine's answer
+    schedule();
+    return;
+  }
+
+  const sup = e.target.dataset.sup;
+  if (sup !== undefined) {
+    const rows = supportRows();
+    const sk = e.target.dataset.sk;
+    if (sk === "qty") rows[+sup].qty = Math.max(parseInt(e.target.value, 10) || 0, 0);
+    else { rows[+sup].edge = e.target.value; renderSupports(); }
     schedule();
     return;
   }
@@ -713,6 +743,19 @@ $("editor").addEventListener("click", (e) => {
   if (rm) {
     S.job.cabinets[S.sel].drawers.splice(+rm.dataset.drm, 1);
     renderDrawers();
+    return;
+  }
+  const suprm = e.target.closest("[data-suprm]");
+  if (suprm) {
+    supportRows().splice(+suprm.dataset.suprm, 1);
+    renderSupports();
+    schedule();
+    return;
+  }
+  if (e.target.id === "supadd") {
+    supportRows().push({edge: "none", qty: 1});
+    renderSupports();
+    schedule();
     return;
   }
   const pre = e.target.closest("[data-preset]");
@@ -873,6 +916,150 @@ async function applyPreset(which) {
   if (!r.ok) { toast(r.error, true); return; }
   c.drawers.forEach((d, i) => { d.mode = "share"; d.share = r.shares[i]; });
   renderDrawers();
+}
+
+/* ---------- supports -------------------------------------------------------
+   A support is a cross rail spanning the internal width (W-32 x 100, code 04)
+   that ties the two sides together. Rows, not a total with two subsets taken
+   off it: the old model let edged + white exceed the total and the plain count
+   went negative in silence. The total here is the sum of the rows, and nothing
+   subtracts. A cabinet that predates the rows shows what its three numbers
+   migrate to, which is what the engine resolved, not what the browser guessed. */
+
+const SUPPORT_LABEL = {front: "Front-edged", white: "White-edged", none: "No edge"};
+
+function renderSupports() {
+  const box = $("supportbox");
+  if (!box) return;
+  const c = S.job.cabinets[S.sel];
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const edges = S.def.support_edges || ["none", "front", "white"];
+
+  // With no rows of its own, show what the engine migrated the old numbers to.
+  const rows = c.support_rows && c.support_rows.length
+    ? c.support_rows
+    : ((g && g.supports) || []);
+  const migrated = !(c.support_rows && c.support_rows.length);
+
+  const tapes = (g && g.tapes) || {};
+  const tapeOf = (e) => e === "front" ? tapes.carcass_edge
+                      : e === "white" ? tapes.drawer_box_edge : "";
+
+  const body = rows.map((r, i) => `<tr>
+      <td class="n">${i + 1}</td>
+      <td><select data-sup="${i}" data-sk="edge">${edges.map((e) =>
+        `<option value="${esc(e)}"${e === r.edge ? " selected" : ""}>${
+          esc(SUPPORT_LABEL[e] || e)}</option>`).join("")}</select></td>
+      <td><input type="number" step="1" min="0" data-sup="${i}" data-sk="qty"
+           value="${r.qty}"></td>
+      <td class="note">${esc(tapeOf(r.edge) || "—")}</td>
+      <td><button data-suprm="${i}" title="Remove this row">x</button></td>
+    </tr>`).join("");
+
+  const total = rows.reduce((a, r) => a + (r.qty || 0), 0);
+  box.innerHTML = `<table class="rows">
+    <colgroup><col style="width:20px"><col style="width:120px"><col style="width:56px">
+      <col><col style="width:26px"></colgroup>
+    <thead><tr><th class="n">#</th><th>Supports</th><th>Qty</th><th>Tape</th><th></th>
+    </tr></thead><tbody>${body ||
+      `<tr><td colspan="5" class="note">No supports.</td></tr>`}</tbody></table>
+    <div class="dtot"><span>total <b>${total}</b> support${total === 1 ? "" : "s"}</span>
+      ${migrated ? `<span class="note">migrated from the old
+        ${c.supports}/${c.edged_supports}/${c.white_supports} numbers — edit to keep
+        it as rows</span>` : ""}</div>
+    <div class="presets"><button id="supadd">+ Support row</button></div>`;
+}
+
+// Any edit to the rows writes them out in full, so the migrated reading becomes
+// the cabinet's own the first time it is touched. The legacy numbers are left
+// exactly where they are; nothing reads them once rows exist.
+function supportRows() {
+  const c = S.job.cabinets[S.sel];
+  if (!(c.support_rows && c.support_rows.length)) {
+    const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+    c.support_rows = ((g && g.supports) || []).map((r) => ({edge: r.edge, qty: r.qty}));
+  }
+  return c.support_rows;
+}
+
+/* ---------- boards and their tapes -----------------------------------------
+   Two boards per cabinet, each a key into the job's materials: the carcass
+   board the box is cut from, and the exterior board that shows. The three
+   tapes follow from them by lookup on the material record — never by sticking a
+   thickness in front of a board name — and each can be overridden here for this
+   cabinet alone. The value shown beside a derived tape is the engine's.        */
+
+const TAPE_FIELDS = [
+  ["carcass_edge", "Carcass edge", "PVC in the exterior board's colour — the fronts of " +
+   "the sides, top, bottom, shelves, dividers and front-edged supports"],
+  ["door_edge", "Door &amp; face edge", "2 mm in the exterior board's colour — doors, " +
+   "drawer faces and exposed end panels"],
+  ["drawer_box_edge", "Drawer box edge", "PVC in the carcass board's colour — drawer " +
+   "sides and fronts, and white-edged supports"],
+];
+
+function renderBoards() {
+  const box = $("boardbox");
+  if (!box) return;
+  const c = S.job.cabinets[S.sel];
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const mats = (S.res && S.res.materials) || {};
+  const keys = Object.keys(mats);
+  const derived = (g && g.tapes) || {};
+  const over = (g && g.tape_overrides) || {};
+
+  const boardSel = (key, label, hint) => `<div class="f wide">
+      <label>${esc(label)}</label>
+      <select data-k="${key}" data-t="text">${keys.map((k) =>
+        `<option value="${esc(k)}"${k === c[key] ? " selected" : ""}>${esc(k)} — ${
+          esc(mats[k].board)}</option>`).join("")}</select>
+      <span class="note">${esc(hint)}</span></div>`;
+
+  const tapeRow = ([key, label, why]) => {
+    const isOver = (c[key] !== null && c[key] !== undefined);
+    const value = isOver ? c[key] : (derived[key] || "");
+    return `<div class="tape">
+      <label>${label}</label>
+      <div class="leaf">
+        <select data-tape="${key}">
+          <option value=""${isOver ? "" : " selected"}>derived${
+            value ? " (" + esc(derived[key] || "none mapped") + ")" : ""}</option>
+          ${(S.def.edge_materials || []).map((t) =>
+            `<option value="${esc(t)}"${isOver && c[key] === t ? " selected" : ""}>${
+              esc(t)}</option>`).join("")}
+        </select>
+        <b class="${value ? "" : "over"}">${esc(value || "none mapped")}</b>
+      </div>
+      <span class="note">${why}</span></div>`;
+  };
+
+  box.innerHTML =
+    `<div class="grid">
+       ${boardSel("carcass_board", "Carcass board",
+                  "sides, top, bottom, supports, shelves and dividers")}
+       ${boardSel("exterior_board", "Exterior board",
+                  "doors, drawer faces and exposed end panels")}
+     </div>
+     ${TAPE_FIELDS.map(tapeRow).join("")}`;
+}
+
+// The derived tapes are the engine's answer, so they are re-read rather than
+// recomputed whenever a compute comes back for the cabinet on screen.
+function refreshTapes() {
+  const c = S.sel !== null && S.job.cabinets[S.sel];
+  const g = c && S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  if (!g) return;
+  TAPE_FIELDS.forEach(([key]) => {
+    const row = document.querySelector(`#boardbox [data-tape="${key}"]`);
+    if (!row) return;
+    const isOver = (c[key] !== null && c[key] !== undefined);
+    const value = isOver ? c[key] : (g.tapes[key] || "");
+    const shown = row.parentElement.querySelector("b");
+    if (shown) {
+      shown.textContent = value || "none mapped";
+      shown.className = value ? "" : "over";
+    }
+  });
 }
 
 /* ---------- the elevation as a control ------------------------------------

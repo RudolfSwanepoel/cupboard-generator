@@ -3,7 +3,12 @@ import json
 from dataclasses import asdict, fields
 
 from .model import (Cabinet, Drawer, GapChoice, Job, Obstruction, Opening, Panel,
-                    Placement, PlinthChoice, Room, Wall)
+                    Placement, PlinthChoice, Room, Support, Wall)
+
+
+def _only_known(cls, d: dict) -> dict:
+    known = {f.name for f in fields(cls)}
+    return {k: v for k, v in d.items() if k in known}
 
 
 def panel_to_dict(p: Panel) -> dict:
@@ -18,21 +23,31 @@ def panel_from_dict(d: dict) -> Panel:
 def cabinet_to_dict(c: Cabinet) -> dict:
     d = asdict(c)
     d["drawers"] = [asdict(x) for x in c.drawers]
+    d["support_rows"] = [asdict(x) for x in c.support_rows]
     d["bespoke"] = [panel_to_dict(x) for x in c.bespoke]
     return d
 
 
 def cabinet_from_dict(d: dict) -> Cabinet:
+    """A cabinet off the wire, with the two renames a job file may predate.
+
+    `decor` became `exterior_board` when a cabinet gained a carcass board of its
+    own, and the three edge tapes became overrides that default to "derive it
+    from the boards". A job file written before either still says exactly what it
+    always said, so it is read as it always meant: its decor is its exterior
+    board, and a tape it states is carried across as the override it now is.
+    Nothing is guessed and nothing is dropped — a field silently lost here would
+    put a different panel on a real order.
+    """
     d = dict(d)
-    d["drawers"] = [Drawer(**x) for x in d.get("drawers", [])]
+    if "exterior_board" not in d and "decor" in d:
+        d["exterior_board"] = d["decor"]
+    d["drawers"] = [Drawer(**_only_known(Drawer, x)) for x in d.get("drawers", [])]
+    d["support_rows"] = [Support(**_only_known(Support, x))
+                         for x in d.get("support_rows", [])]
     d["bespoke"] = [panel_from_dict(x) for x in d.get("bespoke", [])]
     known = {f.name for f in fields(Cabinet)}
     return Cabinet(**{k: v for k, v in d.items() if k in known})
-
-
-def _only_known(cls, d: dict) -> dict:
-    known = {f.name for f in fields(cls)}
-    return {k: v for k, v in d.items() if k in known}
 
 
 def room_to_dict(room: Room) -> dict:

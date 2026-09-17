@@ -9,7 +9,7 @@ import os
 from collections import defaultdict
 from typing import List
 
-from .model import Job, Panel
+from .model import Job, Panel, material_board
 from .standard import Standard, STANDARD
 
 HEADER = ["Component", "Material", "Length", "Width", "qty", "Invoice Number", "JOB NO ",
@@ -106,7 +106,7 @@ def estimate_cost(job: Job, summary: dict) -> dict:
     lines = []
     total = 0.0
     for mat, s in summary["materials"].items():
-        desc = job.materials.get(mat, mat)
+        desc = material_board(job.materials, mat)
         boards = s["est_boards"]
         price = RATES["board"].get(desc, 0.0)
         cut = RATES["cut"].get(mat, 0.0)

@@ -516,7 +516,7 @@ class Gap:
     front: int             # width at the front of the run
     depth: int
     height: int
-    decor: str
+    board: str             # the exterior board of the cabinet that bounds it
     proposal: str          # 'filler' | 'grow' | 'cabinet'
     treatment: str         # what was decided, or '' for undecided
 
@@ -1241,7 +1241,7 @@ def gaps(job, std: Standard = STANDARD) -> List[Gap]:
             chosen = _choice_for(job, wall_id, lay, after, before)
             out.append(Gap(wall=wall_id, layer=lay, after=after, before=before,
                            x=x, nominal=nominal, front=front, depth=depth,
-                           height=height, decor=bounds[0].decor,
+                           height=height, board=bounds[0].exterior_board,
                            proposal=proposal,
                            treatment=chosen.treatment if chosen else ""))
     return out

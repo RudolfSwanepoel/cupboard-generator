@@ -1,69 +1,91 @@
 """Panel generation. One cabinet in, its full panel list out.
 
 Every dimension here comes from Standard. There are no bare numbers in this file
-except panel codes and the 100 mm support rail width, which is a fixed detail.
+except panel codes and the 100 mm support width, which is a fixed detail.
 """
 from typing import List
 
-from .model import Cabinet, Job, Panel
+from .model import MATERIALS, Cabinet, Job, Panel, grain_of
 from .room import (gaps, plinth_butt_wall, plinth_choice_for, plinth_deduction,
                    plinth_lengths, runs)
 from .standard import Standard, STANDARD
 
-SUPPORT_W = 100
+SUPPORT_W = 100          # a support spans the internal width at this height
 
 
-def generate_cabinet(cab: Cabinet, std: Standard = STANDARD) -> List[Panel]:
+def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
+                    materials: dict = None) -> List[Panel]:
+    """One cabinet in, its full panel list out.
+
+    `materials` is the job's board records, which is where the edge tapes come
+    from: a cabinet names two boards and the tapes follow from them unless it
+    overrides one. Nothing but the tapes reads it, so a caller that only wants a
+    cabinet's geometry — room.geometry, the validator's structure checks — leaves
+    it out and gets the house records.
+    """
     if cab.template == "none":
         return list(cab.bespoke)          # the job's own panels, exactly as defined
 
+    mats = MATERIALS if materials is None else materials
     P: List[Panel] = []
     n = cab.number
     Wi = std.internal_width(cab.width)
+    # the two boards, and the three tapes those boards imply (or the overrides)
+    carc, ext = cab.carcass_board, cab.exterior_board
+    carc_tape = cab.carcass_tape(mats)
+    door_tape = cab.door_tape(mats)
+    box_tape = cab.drawer_box_tape(mats)
+    # Grain follows the board, not the panel's job: a Brookhill carcass side runs
+    # with the grain exactly as a Brookhill door does, and a white one does not.
+    carc_grain = grain_of(mats, carc)
+    ext_grain = grain_of(mats, ext)
 
     # ---- sides -------------------------------------------------------------
-    P.append(Panel(n, "01", "Side", "MEL", cab.height, cab.depth, 2,
-                   edge_l=1, edge_material=cab.carcass_edge))
+    P.append(Panel(n, "01", "Side", carc, cab.height, cab.depth, 2,
+                   edge_l=1, edge_material=carc_tape, grain=carc_grain))
 
     # ---- top and bottom ----------------------------------------------------
     if cab.kind != "base":
-        P.append(Panel(n, "02", "Top", "MEL", Wi, cab.depth, 1,
-                       edge_l=1, edge_material=cab.carcass_edge))
-    P.append(Panel(n, "03", "Bottom", "MEL", Wi, cab.depth, 1,
-                   edge_l=1, edge_material=cab.carcass_edge))
+        P.append(Panel(n, "02", "Top", carc, Wi, cab.depth, 1,
+                       edge_l=1, edge_material=carc_tape, grain=carc_grain))
+    P.append(Panel(n, "03", "Bottom", carc, Wi, cab.depth, 1,
+                   edge_l=1, edge_material=carc_tape, grain=carc_grain))
 
-    # ---- support rails -----------------------------------------------------
-    plain = cab.supports - cab.edged_supports - cab.white_supports
-    if plain > 0:
-        P.append(Panel(n, "04", "Support", "MEL", Wi, SUPPORT_W, plain))
-    if cab.edged_supports > 0:
-        P.append(Panel(n, "04", "Support", "MEL", Wi, SUPPORT_W, cab.edged_supports,
-                       edge_l=1, edge_material=cab.carcass_edge))
-    if cab.white_supports > 0:
-        P.append(Panel(n, "04", "Support", "MEL", Wi, SUPPORT_W, cab.white_supports,
-                       edge_l=1, edge_material=cab.drawer_box_edge))
+    # ---- supports ----------------------------------------------------------
+    # One line per row, in row order. `support_list` resolves them, including
+    # reading the three legacy numbers on a job that predates the rows. Nothing
+    # here subtracts anything from anything.
+    tape_for_edge = {"front": carc_tape, "white": box_tape, "none": ""}
+    for row in cab.support_list:
+        tape = tape_for_edge.get(row.edge, "")
+        P.append(Panel(n, "04", "Support", carc, Wi, SUPPORT_W, row.qty,
+                       edge_l=1 if tape else 0, edge_material=tape,
+                       grain=carc_grain))
 
     # ---- shelves -----------------------------------------------------------
     sw = cab.shelf_width or Wi
     if cab.fixed_shelves > 0:
-        P.append(Panel(n, "05", "Shelve", "MEL", sw, std.shelf_depth(cab.depth, fixed=True),
-                       cab.fixed_shelves, edge_l=1, edge_material=cab.carcass_edge,
-                       note="fixed"))
+        P.append(Panel(n, "05", "Shelve", carc, sw, std.shelf_depth(cab.depth, fixed=True),
+                       cab.fixed_shelves, edge_l=1, edge_material=carc_tape,
+                       grain=carc_grain, note="fixed"))
     if cab.shelves > 0:
-        P.append(Panel(n, "05", "Shelve", "MEL", sw, std.shelf_depth(cab.depth),
-                       cab.shelves, edge_l=1, edge_material=cab.carcass_edge))
+        P.append(Panel(n, "05", "Shelve", carc, sw, std.shelf_depth(cab.depth),
+                       cab.shelves, edge_l=1, edge_material=carc_tape,
+                       grain=carc_grain))
 
     # ---- divider -----------------------------------------------------------
     if cab.divider_count > 0:
         dh = cab.divider_height or (cab.height - 2 * std.board_t)
-        P.append(Panel(n, "09", "Divider", "MEL", dh, std.shelf_depth(cab.depth),
-                       cab.divider_count, edge_l=1, edge_material=cab.carcass_edge))
+        P.append(Panel(n, "09", "Divider", carc, dh, std.shelf_depth(cab.depth),
+                       cab.divider_count, edge_l=1, edge_material=carc_tape,
+                       grain=carc_grain))
 
     # ---- back --------------------------------------------------------------
     if cab.back != "none":
         bw, bh = std.back_size(cab.width, cab.height, cab.back)
         # house convention: the longer dimension is always Length
-        P.append(Panel(n, "06", "Backing", "BACK", max(bw, bh), min(bw, bh), 1))
+        P.append(Panel(n, "06", "Backing", "BACK", max(bw, bh), min(bw, bh), 1,
+                       grain=grain_of(mats, "BACK")))
 
     # ---- drawers -----------------------------------------------------------
     # cab.drawer_list, never cab.drawers: with "Has drawers" unticked the stack
@@ -82,33 +104,36 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD) -> List[Panel]:
             box_h, base_mat = key
             count = sum(1 for d in stack if (d.box_height, d.base) == key)
             P.append(Panel(n, "18", "Drawer Side", "MEL", runner, box_h, 2 * count,
-                           edge_l=1, edge_material=cab.drawer_box_edge))
+                           edge_l=1, edge_material=box_tape,
+                           grain=grain_of(mats, "MEL")))
             P.append(Panel(n, "19", "Drawer Front", "MEL", front_len, box_h, 2 * count,
-                           edge_l=1, edge_material=cab.drawer_box_edge))
+                           edge_l=1, edge_material=box_tape,
+                           grain=grain_of(mats, "MEL")))
             bl, bwid = std.drawer_base(front_len, runner, base_mat)
-            P.append(Panel(n, "17", "Drawer Base",
-                           "BACK" if base_mat == "board" else "MEL",
-                           bl, bwid, count))
+            base_board = "BACK" if base_mat == "board" else "MEL"
+            P.append(Panel(n, "17", "Drawer Base", base_board, bl, bwid, count,
+                           grain=grain_of(mats, base_board)))
 
         for key in _dedupe([d.face_height for d in stack]):
             count = sum(1 for d in stack if d.face_height == key)
-            P.append(Panel(n, "20", "Drawer Face", cab.decor,
+            P.append(Panel(n, "20", "Drawer Face", ext,
                            key, cab.width - std.door_single_gap, count,
-                           edge_l=2, edge_w=2, edge_material=cab.door_edge, grain=1))
+                           edge_l=2, edge_w=2, edge_material=door_tape,
+                           grain=ext_grain))
 
     # ---- doors -------------------------------------------------------------
     if cab.doors > 0:
         h = cab.door_height or (cab.height - std.door_height_gap)
         w = std.door_width(cab.width, cab.doors)
-        P.append(Panel(n, "07", "Door", cab.decor, h, w, cab.doors,
-                       edge_l=2, edge_w=2, edge_material=cab.door_edge,
-                       pot_holes=std.hinges(h), grain=1))
+        P.append(Panel(n, "07", "Door", ext, h, w, cab.doors,
+                       edge_l=2, edge_w=2, edge_material=door_tape,
+                       pot_holes=std.hinges(h), grain=ext_grain))
 
     # ---- exposed end panels ------------------------------------------------
     if cab.exposed_sides > 0:
-        P.append(Panel(n, "08", "Exposed Panel", cab.decor,
+        P.append(Panel(n, "08", "Exposed Panel", ext,
                        cab.height, cab.depth + std.exposed_extra, cab.exposed_sides,
-                       edge_l=1, edge_material=cab.door_edge, grain=1))
+                       edge_l=1, edge_material=door_tape, grain=ext_grain))
 
     return born_distinct(P, cab.bespoke)
 
@@ -168,8 +193,8 @@ def room_panels(job: Job) -> List[Panel]:
         if g.taper > std.taper_threshold:
             note += (f"; SCRIBE, gap tapers {g.taper} mm over {g.depth} mm deep "
                      f"({g.nominal} at the wall, {g.front} at the front)")
-        out.append(Panel(0, "11", "Filler", g.decor, g.height, g.filler_width(std), 1,
-                         grain=1, note=note))
+        out.append(Panel(0, "11", "Filler", g.board, g.height, g.filler_width(std), 1,
+                         grain=grain_of(job.materials, g.board), note=note))
     return out
 
 
@@ -203,8 +228,13 @@ def plinth_panels(job: Job) -> List[Panel]:
             if butts_into and i == 0:
                 note += (f"; butts into the wall {butts_into} plinth, "
                          f"{butted} mm off")
-            out.append(Panel(0, "10", "Plinth", "MEL", length, std.leg_height, 1,
-                             edge_l=2, edge_material=lead.carcass_edge, note=note))
+            # the board and the tape are the lead cabinet's carcass, not a
+            # hardcoded white: a run of Brookhill carcasses gets a Brookhill plinth
+            out.append(Panel(0, "10", "Plinth", lead.carcass_board, length,
+                             std.leg_height, 1, edge_l=2,
+                             edge_material=lead.carcass_tape(job.materials),
+                             grain=grain_of(job.materials, lead.carcass_board),
+                             note=note))
     return out
 
 
@@ -214,7 +244,7 @@ def generate_job(job: Job) -> List[Panel]:
     not a bespoke panel, not a loose one, not a code. Pinned in check_drag.py."""
     out: List[Panel] = []
     for cab in job.cabinets:
-        out.extend(generate_cabinet(cab, job.std))
+        out.extend(generate_cabinet(cab, job.std, job.materials))
     out.extend(job.loose)
     # room parts are born here too, so they are named here too: 011a, 011b
     out.extend(born_distinct(room_panels(job) + plinth_panels(job), []))

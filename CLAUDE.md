@@ -23,6 +23,7 @@ python tools/check_plinth.py
 python tools/check_drag.py
 python tools/check_elevation.py
 python tools/check_fronts.py
+python tools/check_boards.py
 ```
 
 Regenerates the October 2025 wardrobe from cabinet definitions and diffs it
@@ -103,6 +104,85 @@ docs/ROOM-LAYOUT-SPEC.md  the room / plan / 3D build spec and its phasing
   500 deep and has an 834 side; a check on the declared figure is wrong in the
   unsafe direction. See "Geometry" below.
 
+## Boards, tapes and grain
+
+**A cabinet names two boards, and everything else follows from them.**
+
+- `carcass_board` is what the box is cut from: sides (01), top (02), bottom (03),
+  supports (04), shelves (05), dividers (09), and the plinth board that covers
+  its legs. Defaults to `MEL`.
+- `exterior_board` is what shows: doors (07), drawer faces (20), exposed end
+  panels (08). It is the old `decor` field, renamed. Defaults to `DECOR`.
+
+Both are keys into `Job.materials`, so each nests and prices as its own
+material. Before this the engine typed `"MEL"` onto every carcass panel, and a
+decor or microwave cupboard with a Brookhill carcass could not be expressed at
+all.
+
+Drawer box sides and fronts (18, 19) and the melamine drawer base (17) are still
+cut from `MEL` — **not** from the carcass board. That was not ruled, so it was
+not changed; a cabinet whose carcass board is not MEL raises a warning saying so
+and asking which board the box should be. Do not guess it.
+
+`Job.materials` is a record per board, not a bare description:
+
+```python
+"DECOR": {"board": "BROOKHILL FUSION CHIP", "pvc": "PVC WOOD",
+          "2mm": "2mm WOOD", "grain": 1}
+```
+
+**The tapes are a lookup on that record, never a name built out of the board
+description.** "PVC WOOD" is nowhere in "BROOKHILL FUSION CHIP"; a concatenation
+rule would produce "PVC BROOKHILL FUSION CHIP", which is not a thing Plazaboard
+sell. `model.tape_for` reads the record and returns `""` when nothing is mapped,
+and the validator then names the board rather than the app inventing a tape.
+That is finding D6/W10 exactly — "SOLID" reached a real order as a tape, and it
+is a board. The white board deliberately has **no** 2 mm tape mapped, because no
+job has ever ordered one.
+
+The three tapes stay three fields, because a door edge is 2 mm and a carcass
+edge is thin PVC — same colour, different thickness and price:
+
+| Field | Derived as |
+|---|---|
+| `carcass_edge` | PVC in the **exterior** board's colour. Fronts of the sides, top, bottom, shelves, dividers and front-edged supports — shelf and divider fronts match the front, not the box (ruled 14 Sept 2026). |
+| `door_edge` | 2 mm in the **exterior** board's colour. Doors, drawer faces, exposed ends. |
+| `drawer_box_edge` | PVC in the **carcass** board's colour. Drawer sides and fronts, and white-edged supports. |
+
+Each is `None` for "derive it" and a string for a per-cabinet override. Every
+tape on the October job was reconciled against its stored value before the
+fields were switched over — 19 cabinets, three tapes each, zero mismatches — so
+the fixture states none of them any more and the regression is what proves the
+derivation. A job file that states a tape keeps it as an override; nothing is
+overwritten.
+
+**Grain is a property of the board too**, not of what the panel is for. It was
+hardcoded `grain=1` on doors, faces and exposed panels, which was only ever
+right because the exterior board was always the woodgrain one. A Brookhill
+carcass would have produced a carcass panel at grain 0 on every line — the exact
+shape of W8/D9, where 60 woodgrain panels went out at grain 0 and Plazaboard's
+counter caught it, not us. `model.grain_of` reads it off the record, so a
+Brookhill carcass side runs with the grain and a white door does not.
+
+## Supports
+
+**A support is a cross rail spanning the internal width** (`W - 32` x 100, code
+04) that ties the two sides together. It is called a support everywhere in the
+UI — never a rail.
+
+`Cabinet.support_rows` is a list of `Support(edge, qty)`, where `edge` is
+`'front'` (carcass tape), `'white'` (drawer-box tape) or `'none'`. **The total is
+the sum of the rows and nothing subtracts.** The old model was a total with two
+subsets taken off it, so `edged + white` could exceed `supports` and the plain
+count went negative — which `if plain > 0` then dropped in silence.
+
+`Cabinet.support_list` is what the engine reads. With no rows it migrates the
+three legacy numbers in the order the engine always emitted them — plain, then
+front-edged, then white-edged — so a migrated cabinet cuts the same list in the
+same order. A cabinet whose three numbers contradict each other keeps cutting
+exactly what it always cut and is **named in a warning**; nothing is migrated on
+a guess. `Test_Build.json` cabinet 4 is the one real case (0 total, 4 white).
+
 ## The nester
 
 `cabinetgen/nest.py`. Guillotine only — Plazaboard cut on a beam saw, so every
@@ -130,6 +210,11 @@ leftovers between jobs), and simulated annealing over the panel order. The
 The cabinet editor is eight sections, each a bold heading over its own coloured
 block: **Size · Outline · Structure · Doors · Drawers · Corner Unit · Back &
 Supports · Decor**. Drawers and Corner Unit are the tickbox sections above.
+**Back & Supports** carries the support rows; **Decor** carries the two board
+dropdowns and the three tapes, each showing the derived value with an override
+beside it. Both boards are dropdowns off `Job.materials` — free text there used
+to create a fourth material silently, which nested on its own sheet and priced
+at zero.
 
 Four tabs over one `POST /api/compute`. The handlers in `app/api.py` decide no
 dimension — every number in a response came out of the engine. Keep it that way:

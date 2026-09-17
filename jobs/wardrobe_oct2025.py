@@ -13,6 +13,12 @@ from cabinetgen.drawers import equal_faces, graduated_faces, make_drawers, openi
 from cabinetgen.model import Cabinet, Drawer, Job, Panel
 from cabinetgen.standard import STANDARD
 
+# The tapes the real order was quoted with. No template cabinet states them any
+# more — every one is what its boards derive: PVC and 2 mm in the exterior
+# board's colour, PVC in the carcass board's. That was reconciled against the
+# stored values cabinet by cabinet, with no mismatches, before the fields were
+# switched over. The names stay because the bespoke panels of cabinets 7 and 13
+# are hand-specified and carry their own edge material.
 DECOR_EDGE = "2mm WOOD"
 CARC_EDGE = "PVC WOOD"
 
@@ -20,8 +26,6 @@ CARC_EDGE = "PVC WOOD"
 def tall(number, width, **kw):
     kw.setdefault("height", 2400)
     kw.setdefault("depth", 500)
-    kw.setdefault("carcass_edge", CARC_EDGE)
-    kw.setdefault("door_edge", DECOR_EDGE)
     return Cabinet(number=number, width=width, **kw)
 
 
@@ -55,7 +59,6 @@ CABINETS = [
     # outline and the 350x350 (495 mm) mitre door face.
     Cabinet(number=7, width=850, height=2400, depth=500, back="none", supports=0,
             template="none",
-            carcass_edge=CARC_EDGE, door_edge=DECOR_EDGE,
             note="corner box, hand-built",
             corner_style="mitre", arm_a=850, arm_b=850, face_a=500, face_b=500,
             bespoke=[
@@ -80,7 +83,6 @@ CABINETS = [
     # 13 — overhead in décor board: sides and a top, no bottom, no back.
     Cabinet(number=13, width=850, height=2000, depth=500, back="none", supports=0,
             template="none",
-            carcass_edge=CARC_EDGE, door_edge=DECOR_EDGE,
             note="overhead, décor carcass",
             bespoke=[
                 Panel(13, "01", "Side", "DECOR", 2000, 500, 2, edge_l=1,
@@ -92,7 +94,7 @@ CABINETS = [
             ]),
 
     Cabinet(number=14, width=850, height=400, depth=450, kind="upper", back="four",
-            supports=2, doors=2, carcass_edge=CARC_EDGE, door_edge=DECOR_EDGE),
+            supports=2, doors=2),
 
     tall(25, 750, depth=600, supports=4, shelves=5, doors=2),
     tall(26, 350, depth=600, supports=4, shelves=3, doors=1),
@@ -100,18 +102,16 @@ CABINETS = [
     # --- vanity, 790 high -------------------------------------------------
     Cabinet(number=27, width=500, height=790, depth=570, kind="base", back="three",
             supports=4, edged_supports=1, white_supports=1,
-            carcass_edge=CARC_EDGE, door_edge=DECOR_EDGE,
             drawers=[Drawer(787, 200, "melamine")],
             note="vanity, single full-height drawer"),
     Cabinet(number=28, width=400, height=790, depth=390, kind="base", back="three",
             supports=4, edged_supports=1, white_supports=1, shelves=1, doors=1,
-            carcass_edge=CARC_EDGE, door_edge=DECOR_EDGE, note="vanity side cupboard"),
+            note="vanity side cupboard"),
     Cabinet(number=29, width=400, height=790, depth=390, kind="base", back="three",
             supports=4, edged_supports=1, white_supports=1, shelves=1, doors=1,
-            carcass_edge=CARC_EDGE, door_edge=DECOR_EDGE, note="vanity side cupboard"),
+            note="vanity side cupboard"),
     Cabinet(number=30, width=350, height=790, depth=390, kind="base", back="none",
             supports=4, edged_supports=1,
-            carcass_edge=CARC_EDGE, door_edge=DECOR_EDGE,
             # Equal faces. For a graduated stack instead, either of these works:
             #   stack(790, [1, 1.5, 1.5, 2.4], [90, 116, 116, 200])
             #   stack(790, [120, 183, 183, 296], [90, 116, 116, 200])
