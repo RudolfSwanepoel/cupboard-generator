@@ -77,7 +77,7 @@ def _cabinet_structure(cabinets, std):
     for c in cabinets:
         if c.doors and c.width <= 0:
             out.append(Issue(CRITICAL, str(c.number), "door on a cabinet with no width"))
-        if c.drawers:
+        if c.drawer_list:
             runner = std.pick_runner(c.depth)
             if runner is None:
                 out.append(Issue(
@@ -172,10 +172,21 @@ def _zero_quantities(panels):
 
 
 def _drawer_boxes(cabinets):
-    """A box side taller than its own face would show above the drawer front."""
+    """A box side taller than its own face would show above the drawer front.
+
+    A face of no height at all is caught first and said plainly: it means the
+    fixed rows in the stack have eaten the whole opening, and the share rows
+    have nothing left to divide.
+    """
     out = []
     for c in cabinets:
-        for i, d in enumerate(c.drawers, start=1):
+        for i, d in enumerate(c.drawer_list, start=1):
+            if d.face_height <= 0:
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"drawer {i}: face height is {d.face_height} — the fixed "
+                                 f"faces over-run the opening, leaving nothing for the "
+                                 f"shared ones"))
+                continue
             if d.box_height >= d.face_height:
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"drawer {i}: box {d.box_height} is not shorter than "
@@ -387,7 +398,7 @@ def _outlines(job: Job, std):
     for cab, _p, _lay in placed(job):
         g = geometry(cab, std)
         where = str(cab.number)
-        if cab.corner_style and cab_corner_outline(cab) is None:
+        if cab.corner_on and cab_corner_outline(cab) is None:
             out.append(Issue(CRITICAL, where,
                              f"cabinet {cab.number}: corner parameters do not resolve to a "
                              f"shape — check corner_style, arm_a/arm_b and face_a/face_b"))

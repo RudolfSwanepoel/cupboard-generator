@@ -360,7 +360,7 @@ def main() -> int:
         pl = Placement(24, "A", 0, flip=flip)
         jj = job([c], [pl], room=rectangular(4000, 3000, ceiling=2700))
         clear = not polygons_overlap(swing_envelopes(jj, c, pl)[0], cabinet_footprint(jj.room, pl, c))
-        return _corner_door_hinges(geometry(c), pl)[0][0], clear
+        return _corner_door_hinges(c, geometry(c), pl)[0][0], clear
     # faces: wall-A side (0,600)-(500,600) is 500 long; wall-B side (500,600)-(500,1000) is 400
     check("a 397 door fits both; it takes the 400 face, hung from its outer end, sweeping clear",
           one_door_ell(397), ((500, 1000), True))

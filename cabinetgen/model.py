@@ -56,10 +56,20 @@ class Panel:
 
 @dataclass
 class Drawer:
-    """One drawer. face_height is the visible front; box_height is the box side height."""
+    """One drawer. face_height is the visible front; box_height is the box side height.
+
+    `face_height` is the ordered figure and the only one the engine reads — what
+    was ordered is still a list of heights. `mode` and `share` are the authoring
+    recipe kept beside it so a stack can be picked up and re-divided later: a
+    'fixed' row is the height as typed, a 'share' row takes its slice of whatever
+    the fixed rows leave. Every job file written before the per-row modes existed
+    loads as 'fixed' at the heights it already carried.
+    """
     face_height: int
     box_height: int
     base: str = "board"          # 'board' (3 mm, grooved) | 'melamine' (16 mm, housed)
+    mode: str = "fixed"          # 'fixed' (height as typed) | 'share' (a slice of the rest)
+    share: float = 1.0           # the slice's weight, when mode is 'share'
 
 
 @dataclass
@@ -87,7 +97,18 @@ class Cabinet:
     doors: int = 0
     door_height: Optional[int] = None    # None = full height (H - 3)
 
+    # Which edge each door leaf hangs from, facing the cabinet: 'L' or 'R', one
+    # per leaf, top-level index 0 being the leftmost. Short or empty falls back
+    # to the default rule (a single door follows Placement.flip, a pair hangs
+    # from its outer edges), which is how every job predating the control reads.
+    door_hinges: List[str] = field(default_factory=list)
+
     drawers: List[Drawer] = field(default_factory=list)
+    # The "Has drawers" tickbox. None derives it from the list, which is how
+    # every job written before the tickbox reads. False keeps the list in the
+    # job file but builds nothing from it, so re-ticking restores the stack
+    # rather than asking for it to be typed again.
+    has_drawers: Optional[bool] = None
 
     exposed_sides: int = 0
 
@@ -118,6 +139,42 @@ class Cabinet:
     arm_b: Optional[int] = None          # how far it runs along wall B
     face_a: Optional[int] = None         # open face on the wall-A side: depth of the run butting it
     face_b: Optional[int] = None         # open face on the wall-B side: likewise
+    # The "Corner unit" tickbox. None derives it from the style, which is how
+    # every job predating the tickbox reads. False keeps all four measurements
+    # and the style in the job file but stops anything reading them.
+    corner_unit: Optional[bool] = None
+
+    # ---- what is actually live, once the tickboxes have had their say ------
+
+    @property
+    def corner_on(self) -> bool:
+        """Whether the corner measurements drive this cabinet's plan outline."""
+        if self.corner_unit is None:
+            return bool(self.corner_style)
+        return bool(self.corner_unit) and bool(self.corner_style)
+
+    @property
+    def drawer_list(self) -> List[Drawer]:
+        """The drawers that are actually built. Unticking keeps `drawers` in the
+        job file untouched — nothing here empties it."""
+        return [] if self.has_drawers is False else list(self.drawers)
+
+
+def hinge_side(cab: Cabinet, i: int, leaves: int, flip: bool = False) -> str:
+    """Which edge door leaf `i` of `leaves` hangs from, facing the cabinet: 'L' or 'R'.
+
+    One function, so the elevation's hinge marks and the plan's swing arcs cannot
+    disagree. The per-leaf choice on the cabinet wins. With none set it falls back
+    to the rule that was always here — a single door hangs left unless the
+    placement is flipped, a pair hangs from its outer edges — which is what every
+    job predating `Cabinet.door_hinges` still does.
+    """
+    chosen = cab.door_hinges[i] if 0 <= i < len(cab.door_hinges) else ""
+    if chosen in ("L", "R"):
+        return chosen
+    if leaves <= 1:
+        return "R" if flip else "L"
+    return "L" if i < leaves / 2 else "R"
 
 
 @dataclass

@@ -8,14 +8,15 @@ import json
 import os
 import re
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, fields as dc_fields
 from http.server import BaseHTTPRequestHandler
 
 from cabinetgen import nest as N
-from cabinetgen.drawers import opening_for, stack
+from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
+                                opening_for, remainder, split_pair, stack)
 from cabinetgen.engine import generate_job
 from cabinetgen.export_plaza import estimate_cost, summarise, write_csvs
-from cabinetgen.model import CODES
+from cabinetgen.model import CODES, hinge_side
 from cabinetgen.render import elevation_svg, plan_svg, wall_elevation_svg
 from cabinetgen.room import (LAYERS, add_wall, clashes as room_clashes, closure_error,
                              gaps as room_gaps, geometry, layer_of,
@@ -84,6 +85,9 @@ def defaults(payload):
         "edge_materials": sorted(x for x in ALLOWED_EDGE if x),
         "kinds": ["tall", "upper", "base"],
         "corner_styles": ["", "mitre", "ell"],
+        "hinge_sides": ["L", "R"],
+        "face_modes": ["share", "fixed"],
+        "face_presets": ["equal", "graduated"],
         "backs": ["four", "three", "none"],
         "bases": ["board", "melamine"],
         "materials": ["MEL", "DECOR", "BACK"],
@@ -93,14 +97,30 @@ def defaults(payload):
     }
 
 
-def _geometry_info(cab, std):
+def _geometry_info(job, cab, std):
     g = geometry(cab, std)
+    # One leaf per door panel that was actually cut, so a bespoke or corner unit
+    # gets a hinge control too — cab.doors is 0 on those. The side is the engine's
+    # own answer, the same one the plan swings from and the elevation draws.
+    p = placement_for(job, cab.number)
+    flip = bool(p.flip) if p is not None else False
+    n = len(g.door_widths)
     return {"width": g.width, "depth": g.depth, "height": g.height,
             "source": g.source, "points": len(g.footprint),
             "footprint": [list(pt) for pt in g.footprint],
             "mitre_deg": g.mitre_deg,               # an output, never an input
             "face_lengths": g.face_lengths,
-            "doors": g.door_widths}
+            "doors": g.door_widths,
+            # what the two tickboxes actually resolve to, so the browser reads
+            # the state back rather than working the rule out a second time
+            "corner_on": cab.corner_on,
+            "drawers_on": bool(cab.drawer_list),
+            "hinges": [hinge_side(cab, i, n, flip) for i in range(n)],
+            "hinges_set": [cab.door_hinges[i] if i < len(cab.door_hinges) else ""
+                           for i in range(n)],
+            "opening": opening_for(cab.height,
+                                   (cab.door_height or (cab.height - std.door_height_gap))
+                                   if cab.doors else 0, std)}
 
 
 def _room_info(job):
@@ -182,7 +202,8 @@ def compute(payload):
     out["panels"] = [_panel_row(p, job.std) for p in panels]
     # what each cabinet actually is, off its panels — the editor shows it beside
     # the declared figures so a bespoke cabinet's label cannot pass for its size
-    out["geometry"] = {str(c.number): _geometry_info(c, job.std) for c in job.cabinets}
+    out["geometry"] = {str(c.number): _geometry_info(job, c, job.std)
+                       for c in job.cabinets}
 
     with NEST_LOCK:
         nested = N.nest_job(N.nestable(panels, job.std), job.std)
@@ -223,6 +244,81 @@ def drawer_stack(payload):
         "opening": opening_for(height, door_height),
         "drawers": [asdict(d) for d in ds],
     }
+
+
+def drawer_solve(payload):
+    """Face heights for a stack described row by row — Share or Fixed.
+
+    Every number in the reply is drawers.divide's, including the running total
+    and what is left over. The browser shows them; it works none of them out.
+    """
+    height = int(payload["height"])
+    door_height = int(payload.get("door_height") or 0)
+    rows = payload.get("rows") or []
+    modes = ["fixed" if str(r.get("mode")) == "fixed" else "share" for r in rows]
+    values = [float(r.get("value") or 0) for r in rows]
+    opening = opening_for(height, door_height)
+    heights = divide(opening, modes, values)
+    used = sum(heights) + STANDARD.stack_gap * max(len(heights) - 1, 0)
+    return {"ok": True, "opening": opening, "heights": heights,
+            "used": used, "left": opening - used,
+            "share_left": remainder(opening, modes, values),
+            "gap": STANDARD.stack_gap}
+
+
+def drawer_preset(payload):
+    """Share numbers for the Equal and Graduated buttons. Both come from
+    Standard, so the browser is not the one deciding what 'graduated' means."""
+    n = max(int(payload.get("count") or 0), 0)
+    which = str(payload.get("preset") or "equal")
+    shares = graduated_shares(n) if which == "graduated" else equal_shares(n)
+    return {"ok": True, "preset": which, "shares": shares}
+
+
+def drawer_divider(payload):
+    """Where a dragged join between two faces actually lands.
+
+    The browser projects the pointer onto the pair's span, exactly as a plan drag
+    projects onto a wall track, and posts the millimetre it reached. The two
+    heights come back from drawers.split_pair; the rest of the stack is untouched.
+    """
+    top, bottom = split_pair(int(payload["top"]), int(payload["bottom"]),
+                             int(payload["at"]),
+                             int(payload.get("top_box") or 0),
+                             int(payload.get("bottom_box") or 0))
+    return {"ok": True, "top": top, "bottom": bottom}
+
+
+def what_if(payload):
+    """Which cut-list lines a change to one cabinet would take away.
+
+    Asked before a tickbox is turned off, so nothing leaves the order without
+    being named. It answers in designations and never proposes a new one: a
+    designation belongs to its panel for good, so a change either leaves a panel
+    alone or removes it — it never renames or reuses one.
+    """
+    job = _job(payload)
+    number = int(payload["cabinet"])
+    before = {}
+    for p in generate_job(job):
+        if p.cabinet == number:
+            before.setdefault(p.label, p)
+
+    cab = next((c for c in job.cabinets if c.number == number), None)
+    if cab is None:
+        return {"ok": False, "error": f"no cabinet {number}"}
+    for k, v in (payload.get("set") or {}).items():
+        # fields only: the resolved properties are read-only by design
+        if any(f.name == k for f in dc_fields(cab)):
+            setattr(cab, k, v)
+
+    after = {p.label for p in generate_job(job) if p.cabinet == number}
+    gone = [before[lab] for lab in before if lab not in after]
+    return {"ok": True,
+            "removed": [{"label": p.label, "role": p.role, "material": p.material,
+                         "length": p.length, "width": p.width, "qty": p.qty}
+                        for p in gone],
+            "kept": sorted(after)}
 
 
 def export(payload):
@@ -370,6 +466,10 @@ ROUTES = {
     "/api/defaults": defaults,
     "/api/compute": compute,
     "/api/drawers": drawer_stack,
+    "/api/drawer-solve": drawer_solve,
+    "/api/drawer-preset": drawer_preset,
+    "/api/drawer-divider": drawer_divider,
+    "/api/what-if": what_if,
     "/api/export": export,
     "/api/jobs": job_list,
     "/api/save": job_save,

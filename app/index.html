@@ -71,7 +71,7 @@
   #layers button.on,#elevpick button.on{background:var(--ink);color:#fff;
                                         border-color:var(--ink)}
   #cablist{flex:1;min-width:0}
-  #editor{width:430px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
+  #editor{width:500px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
           overflow:auto}
   #cablist tr.sel td{background:var(--door)}
   #cablist tbody tr{cursor:pointer}
@@ -87,6 +87,50 @@
   .f label{font-size:11px;color:var(--muted)}
   .f.wide{grid-column:1/-1}
 
+  /* One coloured block per section, so the eye finds Doors without reading. */
+  .sec{border:1px solid var(--line);border-radius:5px;padding:8px 10px 10px;
+       margin-bottom:9px}
+  .sec>h3{margin:0;font-size:12.5px;font-weight:700;letter-spacing:.01em;
+          display:flex;align-items:center;gap:8px}
+  .sec>.hint{font-size:11px;color:var(--muted);margin:3px 0 0;line-height:1.35}
+  .sec>.off{font-size:11.5px;color:var(--muted);margin:5px 0 0}
+  .sec .tick{margin-left:auto;font-weight:400;font-size:11px;color:var(--muted);
+             display:flex;align-items:center;gap:5px;cursor:pointer}
+  .sec .tick input{width:auto;cursor:pointer}
+  .sec .grid{margin-top:7px}
+  .sec.s-size{background:#e7eef5;border-color:#cfdce8}
+  .sec.s-outline{background:#e5f0e7;border-color:#c9ded0}
+  .sec.s-structure{background:#f3efe2;border-color:#e0d8c2}
+  .sec.s-doors{background:#dceaee;border-color:#c1dae0}
+  .sec.s-drawers{background:#f7ead2;border-color:#e6d5b4}
+  .sec.s-corner{background:#ece5f3;border-color:#d7cbe5}
+  .sec.s-back{background:#eaeee9;border-color:#d3dad1}
+  .sec.s-decor{background:#f5e6df;border-color:#e4cec3}
+  .leaf{display:flex;gap:6px;align-items:center;margin-top:4px}
+  .leaf b{font-weight:600;min-width:74px}
+  .leaf select{width:auto}
+  .swing{font-size:11.5px;margin-top:6px}
+  .swing.bad{color:var(--warn)}
+  .swing.ok{color:var(--ok)}
+  .dtot{display:flex;gap:16px;align-items:baseline;margin-top:7px;
+        font-variant-numeric:tabular-nums}
+  .dtot .over{color:var(--crit);font-weight:700}
+  .presets{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+  /* seven columns in a side panel: let the numbers have the room, not the labels */
+  #drawerbox table{table-layout:fixed}
+  #drawerbox th,#drawerbox td{padding:2px 3px;font-size:11.5px}
+  #drawerbox input,#drawerbox select{padding:2px 3px}
+  #drawerbox col.c-n{width:20px}
+  #drawerbox col.c-mode{width:74px}
+  #drawerbox col.c-val{width:64px}
+  #drawerbox col.c-mm{width:52px}
+  #drawerbox col.c-box{width:56px}
+  #drawerbox col.c-base{width:auto}
+  #drawerbox col.c-rm{width:26px}
+  #elevation svg .edoor{cursor:pointer}
+  #elevation svg .edoor:hover{stroke:var(--ink);stroke-width:1.6}
+  #elevation svg .fdiv{cursor:ns-resize}
+  #elevation svg .fdiv:hover{stroke-opacity:.9}
   .rows td,.rows th{padding:3px 5px}
   .note{color:var(--muted);font-size:11.5px}
   .mono{font-variant-numeric:tabular-nums}
@@ -175,7 +219,7 @@
         <h2>Walls</h2>
         <div id="room"></div>
       </div>
-      <div class="card" style="width:430px;flex:none">
+      <div class="card" style="width:500px;flex:none">
         <h2>Placements</h2>
         <div id="places"></div>
       </div>
@@ -185,7 +229,7 @@
         <h2>Gaps</h2>
         <div id="gaps"></div>
       </div>
-      <div class="card" style="width:430px;flex:none">
+      <div class="card" style="width:500px;flex:none">
         <h2>Plinth</h2>
         <div id="plinth"></div>
       </div>
@@ -219,10 +263,7 @@ const S = {
   selRendered: -2,  // which index the editor DOM currently shows
   tab: "cabinets",
   def: null,        // /api/defaults
-  gen: null,        // drawer-stack generator settings, not part of the job
 };
-
-const GEN_DEFAULT = {mode: "equal", spec: "4", box: "150", base: "board"};
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s === null || s === undefined ? "" : s)
@@ -261,12 +302,14 @@ function blankCabinet(number) {
     supports: 4, edged_supports: 0, white_supports: 0,
     shelves: 0, fixed_shelves: 0, shelf_width: null,
     divider_height: null, divider_count: 0,
-    doors: 0, door_height: null, drawers: [],
+    doors: 0, door_height: null, door_hinges: [],
+    drawers: [], has_drawers: null,
     exposed_sides: 0,
     carcass_edge: "PVC WOOD", door_edge: "2mm WOOD",
     drawer_box_edge: "PVC WHITE", decor: "DECOR",
     bespoke: [], note: "", footprint: [],
     corner_style: "", arm_a: null, arm_b: null, face_a: null, face_b: null,
+    corner_unit: null,
   };
 }
 
@@ -369,7 +412,9 @@ $("elevpick").addEventListener("click", (e) => {
 function frontsText(c) {
   const bits = [];
   if (c.doors) bits.push(c.doors + (c.doors > 1 ? " doors" : " door"));
-  if (c.drawers.length) bits.push(c.drawers.length + " drw");
+  // an unticked stack is still in the job file, but nothing is built from it
+  const n = tickOn(c, "has_drawers") ? (c.drawers || []).length : 0;
+  if (n) bits.push(n + " drw");
   return bits.join(", ") || "—";
 }
 
@@ -434,43 +479,64 @@ $("add").addEventListener("click", async () => {
 
 /* ---------- cabinet editor ---------------------------------------------- */
 
-const FIELDS = [
-  ["Size", [
+/* Eight sections, each in its own colour block, in the order a cabinet gets
+   described: what it is, what shape it makes on the floor, what is inside it,
+   what closes it, and what it is finished in. */
+const SECTIONS = [
+  {key: "size", name: "Size", fields: [
     ["width", "Width", "int"], ["height", "Height", "int"],
     ["depth", "Depth", "int"], ["kind", "Kind", "sel:kinds"],
-    ["number", "Number", "int"],
-    ["footprint", "Outline (x,y pairs; blank = its panels' rectangle)", "poly"],
-  ]],
-  ["Corner unit", [
+    ["number", "Number", "int"]]},
+
+  {key: "outline", name: "Outline",
+   hint: "Actual plan shape, x along the wall, y out from the wall. " +
+         "All geometry checks read this, not the declared width/depth.",
+   fields: [["footprint", "Footprint outline", "poly"]]},
+
+  {key: "structure", name: "Structure", fields: [
+    ["shelves", "Shelves", "int"], ["fixed_shelves", "Fixed shelves", "int"],
+    ["shelf_width", "Shelf width", "opt"],
+    ["divider_count", "Dividers", "int"], ["divider_height", "Divider height", "opt"]]},
+
+  {key: "doors", name: "Doors", slot: "doorbox", fields: [
+    ["doors", "How many", "int"], ["door_height", "Door height", "opt"]]},
+
+  {key: "drawers", name: "Drawers", slot: "drawerbox",
+   toggle: "has_drawers", tick: "Has drawers", fields: []},
+
+  {key: "corner", name: "Corner Unit", toggle: "corner_unit", tick: "Corner unit",
+   fields: [
     ["corner_style", "Style", "sel:corner_styles"],
     ["arm_a", "Arm A (along wall A)", "opt"],
     ["arm_b", "Arm B (along wall B)", "opt"],
     ["face_a", "Face A (open face, wall-A side)", "opt"],
-    ["face_b", "Face B (open face, wall-B side)", "opt"],
-  ]],
-  ["Structure", [
-    ["back", "Back", "sel:backs"],
-    ["supports", "Supports", "int"],
+    ["face_b", "Face B (open face, wall-B side)", "opt"]]},
+
+  {key: "back", name: "Back & Supports", fields: [
+    ["back", "Back", "sel:backs"], ["supports", "Supports", "int"],
     ["edged_supports", "Edged supports", "int"],
-    ["white_supports", "White supports", "int"],
-    ["shelves", "Shelves", "int"],
-    ["fixed_shelves", "Fixed shelves", "int"],
-    ["shelf_width", "Shelf width", "opt"],
-    ["divider_count", "Dividers", "int"],
-    ["divider_height", "Divider height", "opt"],
-  ]],
-  ["Fronts", [
-    ["doors", "Doors", "int"],
-    ["door_height", "Door height", "opt"],
-  ]],
-  ["Finishes", [
-    ["decor", "Décor material", "text"],
-    ["exposed_sides", "Exposed sides", "int"],
+    ["white_supports", "White supports", "int"]]},
+
+  {key: "decor", name: "Decor", fields: [
+    ["decor", "Décor material", "text"], ["exposed_sides", "Exposed sides", "int"],
     ["carcass_edge", "Carcass edge", "sel:edge_materials"],
     ["door_edge", "Door edge", "sel:edge_materials"],
     ["drawer_box_edge", "Drawer box edge", "sel:edge_materials"],
-  ]],
+    ["note", "Note", "text"]]},
 ];
+
+// Whether a tickbox is on. An explicit choice wins; failing that the engine's
+// own answer is read back; failing that (a cabinet not yet computed) the same
+// rule the model uses — a style, or a stack, that is already there.
+function tickOn(c, key) {
+  if (c[key] === true) return true;
+  if (c[key] === false) return false;
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  if (g && g.corner_on !== undefined) {
+    return key === "corner_unit" ? g.corner_on : g.drawers_on;
+  }
+  return key === "corner_unit" ? !!c.corner_style : (c.drawers || []).length > 0;
+}
 
 function fieldHTML(c, [key, label, type]) {
   const v = c[key];
@@ -492,6 +558,24 @@ function fieldHTML(c, [key, label, type]) {
              ${type === "opt" ? 'placeholder="auto"' : ""}>`;
   }
   return `<div class="f${type === "poly" ? " wide" : ""}"><label>${esc(label)}</label>${input}</div>`;
+}
+
+function sectionHTML(c, sec) {
+  const on = sec.toggle ? tickOn(c, sec.toggle) : true;
+  const tick = sec.toggle
+    ? `<label class="tick"><input type="checkbox" data-tick="${sec.toggle}"
+         ${on ? "checked" : ""}>${esc(sec.tick)}</label>` : "";
+  const hint = sec.hint ? `<p class="hint">${esc(sec.hint)}</p>` : "";
+  let body;
+  if (sec.toggle && !on) {
+    body = `<p class="off">Off — nothing is built from it. What you typed stays in
+            the job file, so ticking it back brings it all with it.</p>`;
+  } else {
+    body = (sec.fields.length
+            ? `<div class="grid">${sec.fields.map((f) => fieldHTML(c, f)).join("")}</div>`
+            : "") + (sec.slot ? `<div id="${sec.slot}"></div>` : "");
+  }
+  return `<div class="sec s-${sec.key}"><h3>${esc(sec.name)}${tick}</h3>${hint}${body}</div>`;
 }
 
 // The engine's reading of the selected cabinet — off its panels, not its labels.
@@ -521,17 +605,15 @@ function renderEditor() {
   }
   // Already showing this cabinet: leave the DOM alone. Rebuilding it mid-edit
   // would take the caret out of whatever field is being typed into.
-  if (S.selRendered === S.sel) { refreshGeometryReadout(); return; }
+  if (S.selRendered === S.sel) {
+    refreshGeometryReadout();
+    refreshSwing();
+    return;
+  }
   S.selRendered = S.sel;
-  S.gen = Object.assign({}, GEN_DEFAULT);
 
   const c = S.job.cabinets[S.sel];
-  const sets = FIELDS.map(([name, fields]) => `<fieldset><legend>${esc(name)}</legend>
-      <div class="grid">${fields.map((f) => fieldHTML(c, f)).join("")}
-      ${name === "Fronts" ? `<div class="f wide" id="drawerbox"></div>` : ""}
-      ${name === "Finishes" ? `<div class="f wide"><label>Note</label>
-        <input data-k="note" data-t="text" value="${esc(c.note)}"></div>` : ""}
-      </div></fieldset>`).join("");
+  const sets = SECTIONS.map((sec) => sectionHTML(c, sec)).join("");
 
   const bespoke = c.template === "none"
     ? `<div class="bespoke"><b>Bespoke cabinet.</b> The template generates nothing;
@@ -539,6 +621,7 @@ function renderEditor() {
        by hand in the job file. Size and finish fields above do not drive them.</div>` : "";
 
   box.innerHTML = `<h2>Cabinet ${c.number}</h2><div class="body">${sets}${bespoke}</div>`;
+  renderDoorLeaves();
   renderDrawers();
   refreshGeometryReadout();
 }
@@ -546,6 +629,18 @@ function renderEditor() {
 $("editor").addEventListener("input", (e) => {
   const c = S.job.cabinets[S.sel];
   if (!c) return;
+
+  const leaf = e.target.dataset.leaf;
+  if (leaf !== undefined) {
+    const n = +leaf;
+    if (!Array.isArray(c.door_hinges)) c.door_hinges = [];
+    while (c.door_hinges.length <= n) c.door_hinges.push("");
+    c.door_hinges[n] = e.target.value;      // "" hands it back to the default rule
+    S.selRendered = -2;        // the side shown beside it is the engine's answer
+    schedule();
+    return;
+  }
+
   const k = e.target.dataset.k;
   if (k) {
     const t = e.target.dataset.t;
@@ -561,101 +656,297 @@ $("editor").addEventListener("input", (e) => {
     schedule();
     return;
   }
+
   const i = e.target.dataset.d;
   if (i === undefined) return;
   const d = c.drawers[+i];
   const dk = e.target.dataset.dk;
-  d[dk] = dk === "base" ? e.target.value : (parseInt(e.target.value, 10) || 0);
+  if (dk === "mode") { d.mode = e.target.value; renderDrawers(); return; }
+  if (dk === "base") d.base = e.target.value;
+  else if (dk === "share") d.share = parseFloat(e.target.value) || 0;
+  else d[dk] = parseInt(e.target.value, 10) || 0;
+  solveStack();
+});
+
+/* ---------- the two tickboxes ---------------------------------------------
+   Unticking never empties anything: the drawer list and the corner
+   measurements stay in the job file exactly as they were, so ticking the box
+   again brings the section back whole. What unticking can do is take panels
+   off the cut list, and that is never silent — the engine is asked which
+   designations would go, and they are named before anything happens. A
+   designation is only ever removed, never renamed and never reused.         */
+
+$("editor").addEventListener("change", async (e) => {
+  const key = e.target.dataset.tick;
+  if (key === undefined) return;
+  const c = S.job.cabinets[S.sel];
+  if (!c) return;
+  const on = e.target.checked;
+
+  if (!on) {
+    const r = await post("/api/what-if",
+                         {job: S.job, cabinet: c.number, set: {[key]: false}});
+    if (!r.ok) { toast(r.error, true); e.target.checked = true; return; }
+    if (r.removed.length) {
+      const n = r.removed.length;
+      const qty = r.removed.reduce((a, x) => a + x.qty, 0);
+      const lines = r.removed.map((x) =>
+        `    ${x.label}   ${x.role}   ${x.length} x ${x.width}  x${x.qty}`).join("\n");
+      const ok = window.confirm(
+        `Turning this off removes ${n} cut-list line${n === 1 ? "" : "s"} ` +
+        `(${qty} panel${qty === 1 ? "" : "s"}) from cabinet ${c.number}:\n\n${lines}\n\n` +
+        `Everything you typed stays in the job file, so ticking it back restores ` +
+        `these unchanged. No designation is renamed or reused — these are removed, ` +
+        `not renumbered.\n\nRemove them?`);
+      if (!ok) { e.target.checked = true; return; }
+    }
+  }
+
+  c[key] = on;
+  S.selRendered = -2;
+  renderEditor();
   schedule();
 });
 
-/* ---------- drawers ------------------------------------------------------ */
+$("editor").addEventListener("click", (e) => {
+  const rm = e.target.closest("[data-drm]");
+  if (rm) {
+    S.job.cabinets[S.sel].drawers.splice(+rm.dataset.drm, 1);
+    renderDrawers();
+    return;
+  }
+  const pre = e.target.closest("[data-preset]");
+  if (pre) { applyPreset(pre.dataset.preset); return; }
+  if (e.target.id === "dadd") {
+    const c = S.job.cabinets[S.sel];
+    const std = S.def.standard || {};
+    c.drawers.push({face_height: 0, box_height: std.box_height_default,
+                    base: (S.def.bases || ["board"])[0], mode: "share", share: 1});
+    renderDrawers();
+  }
+});
+
+/* ---------- doors: which edge each leaf hangs from -------------------------
+   One control per door panel the engine actually cut, so a bespoke or corner
+   unit gets one too — those carry no `doors` count. The side beside each row
+   is the engine's own answer, the one the plan swings from and the elevation
+   draws, so the two can never drift apart.                                  */
+
+function renderDoorLeaves() {
+  const box = $("doorbox");
+  if (!box) return;
+  const c = S.job.cabinets[S.sel];
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const sides = (g && g.hinges) || [];
+  if (!sides.length) {
+    box.innerHTML = `<p class="off">No door panel on this cabinet yet.</p>`;
+    return;
+  }
+  const set = (g && g.hinges_set) || [];
+  box.innerHTML = sides.map((side, i) => `<div class="leaf">
+      <b>Leaf ${i + 1}</b>
+      <span class="note">${g.doors[i] || "?"} wide</span>
+      <select data-leaf="${i}">
+        <option value=""${set[i] ? "" : " selected"}>default (${esc(side)})</option>
+        <option value="L"${set[i] === "L" ? " selected" : ""}>Left</option>
+        <option value="R"${set[i] === "R" ? " selected" : ""}>Right</option>
+      </select>
+      <span class="note">hinged ${side === "L" ? "left" : "right"}</span>
+    </div>`).join("") +
+    `<p class="hint">Click a door in the elevation to turn it round.</p>
+     <div class="swing" id="swingnote"></div>`;
+  refreshSwing();
+}
+
+// The swing check the server just ran, read back. It re-runs on every change,
+// because every change goes through /api/compute.
+function refreshSwing() {
+  const el = $("swingnote");
+  const c = S.sel !== null && S.job.cabinets[S.sel];
+  if (!el || !c || !S.res) return;
+  const rm = S.res.room;
+  if (!rm) {
+    el.className = "swing";
+    el.textContent = "No room yet, so there is nothing for a door to foul — " +
+                     "the swing check needs a plan to run against.";
+    return;
+  }
+  const bad = (rm.clashes || []).filter((x) => x.cabinet === c.number && x.kind === "door");
+  el.className = "swing " + (bad.length ? "bad" : "ok");
+  el.textContent = bad.length
+    ? "Door swing fouls " + bad.map((x) => x.against).join(", ")
+    : "Door swing checked and clear.";
+}
+
+/* ---------- drawer faces: one row per face, Share or Fixed -----------------
+   Fixed rows take their millimetres. The gaps come from the standard, never
+   typed per drawer. Whatever is left is split among the Share rows in
+   proportion to their share numbers — and every one of those numbers is
+   drawers.divide's, fetched, not worked out here.                           */
 
 function renderDrawers() {
   const box = $("drawerbox");
   if (!box) return;
   const c = S.job.cabinets[S.sel];
-  const rows = c.drawers.map((d, i) => `<tr>
+  const std = S.def.standard || {};
+
+  const rows = c.drawers.map((d, i) => {
+    const share = (d.mode || "fixed") === "share";
+    const val = share ? (d.share === undefined ? 1 : d.share) : d.face_height;
+    return `<tr>
       <td class="n">${i + 1}</td>
-      <td><input type="number" step="1" data-d="${i}" data-dk="face_height" value="${d.face_height}"></td>
-      <td><input type="number" step="1" data-d="${i}" data-dk="box_height" value="${d.box_height}"></td>
+      <td><select data-d="${i}" data-dk="mode">
+        <option value="share"${share ? " selected" : ""}>Share</option>
+        <option value="fixed"${share ? "" : " selected"}>Fixed</option></select></td>
+      <td><input type="number" step="${share ? "0.1" : "1"}" data-d="${i}"
+           data-dk="${share ? "share" : "face_height"}" value="${val}"></td>
+      <td class="n mono" data-mm="${i}">${d.face_height}</td>
+      <td><input type="number" step="1" data-d="${i}" data-dk="box_height"
+           value="${d.box_height}"></td>
       <td><select data-d="${i}" data-dk="base">${(S.def.bases || []).map((b) =>
         `<option${b === d.base ? " selected" : ""}>${esc(b)}</option>`).join("")}</select></td>
-      <td><button data-drm="${i}">×</button></td>
-    </tr>`).join("");
+      <td><button data-drm="${i}" title="Remove this face">x</button></td>
+    </tr>`;
+  }).join("");
 
-  box.innerHTML = `<label>Drawers</label>
-    <table class="rows"><thead><tr><th class="n">#</th><th>Face</th><th>Box</th>
-      <th>Base</th><th></th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="5" class="note">none</td></tr>`}</tbody></table>
-    <div class="grid" style="margin-top:6px">
-      <div class="f"><label>Face mode</label>
-        <select id="dmode">${["equal", "ratio", "exact"].map((m) =>
-          `<option value="${m}"${m === S.gen.mode ? " selected" : ""}>${
-            m === "exact" ? "exact heights" : m}</option>`).join("")}</select></div>
-      <div class="f"><label id="dspeclab"></label>
-        <input id="dspec" value="${esc(S.gen.spec)}"></div>
-      <div class="f"><label>Box height(s)</label>
-        <input id="dbox" value="${esc(S.gen.box)}"></div>
-      <div class="f"><label>Base</label><select id="dbase">${(S.def.bases || []).map((b) =>
-        `<option${b === S.gen.base ? " selected" : ""}>${esc(b)}</option>`).join("")}</select></div>
-      <div class="f wide"><button id="dgen">Build stack</button>
-        <span class="note" id="dhint"></span></div>
-    </div>`;
-
-  const hint = () => {
-    const m = $("dmode").value;
-    $("dspeclab").textContent = m === "equal" ? "Count"
-      : m === "ratio" ? "Weights, top to bottom" : "Heights, top to bottom";
-    $("dhint").textContent = m === "exact"
-      ? "used exactly as given — a shortfall is reported, never adjusted"
-      : c.doors
-        ? `fills what a ${c.door_height || c.height - 3} door leaves over`
-        : "fills the full opening";
-  };
-  // The generator settings outlive a rebuild, so weights can be nudged and rebuilt.
-  ["dmode", "dspec", "dbox", "dbase"].forEach((id) => {
-    $(id).addEventListener("input", () => {
-      S.gen = {mode: $("dmode").value, spec: $("dspec").value,
-               box: $("dbox").value, base: $("dbase").value};
-      hint();
-    });
-  });
-  hint();
-  $("dgen").addEventListener("click", buildStack);
+  box.innerHTML = `<table class="rows">
+    <colgroup><col class="c-n"><col class="c-mode"><col class="c-val"><col class="c-mm">
+      <col class="c-box"><col class="c-base"><col class="c-rm"></colgroup>
+    <thead><tr>
+      <th class="n">#</th><th>Mode</th><th>Value</th><th class="n">mm</th>
+      <th>Box</th><th>Base</th><th></th>
+    </tr></thead><tbody>${rows ||
+      `<tr><td colspan="7" class="note">No faces yet — add one.</td></tr>`}</tbody></table>
+    <div class="dtot" id="dtot"></div>
+    <div class="presets">
+      <button data-preset="equal">Equal</button>
+      <button data-preset="graduated">Graduated</button>
+      <button id="dadd">+ Face</button>
+    </div>
+    <p class="hint">Listed top to bottom. The ${std.stack_gap} mm gap between faces
+      comes from the standard and is never typed per drawer. Drag the join between
+      two faces in the elevation to pin just those two at the heights you drag to.</p>`;
+  solveStack();
 }
 
-async function buildStack() {
+let solveSeq = 0;
+
+async function solveStack() {
   const c = S.job.cabinets[S.sel];
-  const mode = $("dmode").value;
-  const nums = (s) => String(s).split(/[, ]+/).filter((x) => x !== "").map(Number);
-  let spec;
-  if (mode === "equal") spec = parseInt($("dspec").value, 10) || 0;
-  else spec = nums($("dspec").value);
-  if (mode === "ratio" && spec.some((v) => v >= 50)) {
-    toast("Ratio weights must each be under 50 — 50 and above is read as an exact height.", true);
-    return;
-  }
-  const boxes = nums($("dbox").value);
-  const r = await post("/api/drawers", {
-    height: c.height, spec: spec,
-    boxes: boxes.length === 1 ? boxes[0] : boxes,
+  if (!c) return;
+  const seq = ++solveSeq;
+  const r = await post("/api/drawer-solve", {
+    height: c.height,
     door_height: c.doors ? (c.door_height || 0) : 0,
-    base: $("dbase").value,
+    rows: c.drawers.map((d) => {
+      const mode = d.mode || "fixed";
+      return {mode: mode,
+              value: mode === "share" ? (d.share === undefined ? 1 : d.share)
+                                      : d.face_height};
+    }),
   });
+  if (seq !== solveSeq) return;          // a newer stack is already being solved
   if (!r.ok) { toast(r.error, true); return; }
-  c.drawers = r.drawers;
-  renderDrawers();
+
+  // what is ordered is still a list of heights: the engine's, written straight in
+  r.heights.forEach((h, i) => { if (c.drawers[i]) c.drawers[i].face_height = h; });
+  document.querySelectorAll("#drawerbox [data-mm]").forEach((td) => {
+    td.textContent = r.heights[+td.dataset.mm];
+  });
+  const tot = $("dtot");
+  if (tot) {
+    const over = r.left < 0 || r.heights.some((h) => h <= 0);
+    tot.innerHTML =
+      `<span>opening <b>${r.opening}</b></span>` +
+      `<span>faces + gaps <b>${r.used}</b></span>` +
+      `<span class="${over ? "over" : ""}">remainder <b>${r.left}</b></span>` +
+      (over ? `<span class="over">the fixed faces over-run the opening —
+               export is blocked until they fit</span>` : "");
+  }
   schedule();
 }
 
-$("editor").addEventListener("click", (e) => {
-  const rm = e.target.closest("[data-drm]");
-  if (!rm) return;
-  S.job.cabinets[S.sel].drawers.splice(+rm.dataset.drm, 1);
+async function applyPreset(which) {
+  const c = S.job.cabinets[S.sel];
+  if (!c.drawers.length) { toast("Add a face first.", true); return; }
+  const r = await post("/api/drawer-preset", {count: c.drawers.length, preset: which});
+  if (!r.ok) { toast(r.error, true); return; }
+  c.drawers.forEach((d, i) => { d.mode = "share"; d.share = r.shares[i]; });
   renderDrawers();
-  schedule();
+}
+
+/* ---------- the elevation as a control ------------------------------------
+   Clicking a door turns it round. Dragging the join between two faces pins
+   those two and leaves the rest of the stack alone. The browser works out no
+   dimension in either: the SVG carries each pair's span in both millimetres
+   and pixels, so a drag reads back into millimetres the same way a plan drag
+   projects onto a wall track, and the engine divides the pair on drop.      */
+
+$("elevation").addEventListener("click", (e) => {
+  const leaf = e.target.closest(".edoor");
+  if (!leaf) return;
+  const c = S.job.cabinets.find((x) => x.number === +leaf.dataset.cab);
+  if (!c) return;
+  const i = +leaf.dataset.door;
+  if (!Array.isArray(c.door_hinges)) c.door_hinges = [];
+  while (c.door_hinges.length <= i) c.door_hinges.push("");
+  c.door_hinges[i] = leaf.dataset.hinge === "L" ? "R" : "L";
+  S.selRendered = -2;
+  compute();                   // redraws, and re-runs the swing check with it
 });
+
+let FDRAG = null;
+
+function svgY(svg, evt) {
+  const r = svg.getBoundingClientRect();
+  return (evt.clientY - r.top) * (svg.viewBox.baseVal.height || r.height) / r.height;
+}
+
+$("elevation").addEventListener("pointerdown", (e) => {
+  const line = e.target.closest(".fdiv");
+  if (!line) return;
+  const c = S.job.cabinets.find((x) => x.number === +line.dataset.cab);
+  if (!c) return;
+  FDRAG = {line: line, cab: c, svg: line.ownerSVGElement,
+           above: +line.dataset.above, below: +line.dataset.below,
+           mm: +line.dataset.mm, top: +line.dataset.top, px: +line.dataset.px,
+           at: null, moved: false};
+  // on the window, not the line: a drag that runs off the drawing must finish
+  window.addEventListener("pointermove", onFaceDrag);
+  window.addEventListener("pointerup", endFaceDrag);
+  window.addEventListener("pointercancel", endFaceDrag);
+  e.preventDefault();
+});
+
+function onFaceDrag(e) {
+  if (!FDRAG) return;
+  const y = svgY(FDRAG.svg, e);
+  const perMm = FDRAG.px / FDRAG.mm;   // both came from the engine; this only reads back
+  FDRAG.at = Math.round((y - FDRAG.top) / perMm);
+  FDRAG.moved = true;
+  FDRAG.line.setAttribute("y1", y.toFixed(2));
+  FDRAG.line.setAttribute("y2", y.toFixed(2));
+  FDRAG.line.setAttribute("stroke-opacity", "1");
+}
+
+async function endFaceDrag() {
+  const d = FDRAG;
+  FDRAG = null;
+  window.removeEventListener("pointermove", onFaceDrag);
+  window.removeEventListener("pointerup", endFaceDrag);
+  window.removeEventListener("pointercancel", endFaceDrag);
+  if (!d || !d.moved) return;
+  const a = d.cab.drawers[d.above], b = d.cab.drawers[d.below];
+  if (!a || !b) return;
+  const r = await post("/api/drawer-divider", {
+    top: a.face_height, bottom: b.face_height, at: d.at,
+    top_box: a.box_height, bottom_box: b.box_height});
+  if (!r.ok) { toast(r.error, true); return; }
+  a.mode = "fixed"; a.face_height = r.top;
+  b.mode = "fixed"; b.face_height = r.bottom;
+  S.selRendered = -2;          // those two rows are Fixed now; the rest is untouched
+  compute();
+}
 
 /* ---------- room --------------------------------------------------------- */
 

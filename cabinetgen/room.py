@@ -21,7 +21,7 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from .model import Room, Wall
+from .model import Room, Wall, hinge_side
 from .standard import STANDARD, Standard
 
 Point = Tuple[float, float]
@@ -266,8 +266,12 @@ def corner_outline(style: str, arm_a, arm_b, face_a, face_b) -> Optional[List[Tu
 
 
 def cab_corner_outline(cab) -> Optional[List[Tuple[int, int]]]:
-    """corner_outline read off a Cabinet's own fields, or None if it isn't one."""
-    if not cab.corner_style:
+    """corner_outline read off a Cabinet's own fields, or None if it isn't one.
+
+    `corner_on`, not `corner_style`: with the Corner unit tickbox off the four
+    measurements stay in the job file untouched and nothing reads them.
+    """
+    if not cab.corner_on:
         return None
     return corner_outline(cab.corner_style, cab.arm_a, cab.arm_b, cab.face_a, cab.face_b)
 
@@ -659,7 +663,7 @@ def _edge_hinge(outline, p0: Point, p1: Point, hinge_at_p0: bool):
     return p1, math.atan2(p0[1] - p1[1], p0[0] - p1[0]), -turn
 
 
-def _corner_door_hinges(g: CabinetGeometry, p):
+def _corner_door_hinges(cab, g: CabinetGeometry, p):
     """Hinge points for a corner unit's doors, off its real front face(s) —
     the mitre edge, or for an ell whichever of its two faces carries the door —
     rather than the outline's extreme corners (ruled 14 Sept 2026, spec item
@@ -671,9 +675,13 @@ def _corner_door_hinges(g: CabinetGeometry, p):
     inner end (the notch) if flipped.
     """
     outline = g.footprint
+    n = len(g.door_widths)
+    # 'R' is the wall-B-side end on a mitre and the notch end on an ell — the
+    # same handedness Placement.flip has always meant, now nameable per leaf.
+    right = [hinge_side(cab, i, n, p.flip) == "R" for i in range(max(n, 1))]
     if len(outline) == 5:                    # mitre: one diagonal front face
         d, e = outline[3], outline[4]
-        pt, a0, sign = _edge_hinge(outline, d, e, hinge_at_p0=bool(p.flip))
+        pt, a0, sign = _edge_hinge(outline, d, e, hinge_at_p0=right[0])
         return [(pt, a0, sign, g.door_widths[0])]
     d, e, f = outline[3], outline[4], outline[5]     # ell: two faces off the notch
     if len(g.door_widths) >= 2:
@@ -687,16 +695,18 @@ def _corner_door_hinges(g: CabinetGeometry, p):
     fits = [fc for fc in faces if fc[2] >= w]
     (p0, p1), outer_is_p0, _ = min(fits, key=lambda fc: fc[2]) if fits \
         else max(faces, key=lambda fc: fc[2])
-    hinge = _edge_hinge(outline, p0, p1, hinge_at_p0=outer_is_p0 != bool(p.flip))
+    hinge = _edge_hinge(outline, p0, p1, hinge_at_p0=outer_is_p0 != right[0])
     return [(*hinge, w)]
 
 
 def swing_envelopes(job, cab, p, std: Standard = STANDARD):
     """The quarter discs a cabinet's doors sweep, in world plan coordinates.
 
-    A pair is hinged at its outer edges and opens from the middle. A single door
-    is hinged left unless the placement is flipped, which is what `flip` is for.
-    A corner unit hinges off its real front face instead — see
+    Which edge each leaf hangs from is `model.hinge_side` — the per-leaf choice on
+    the cabinet, or the old rule when none is set: a pair at its outer edges
+    opening from the middle, a single door left unless the placement is flipped.
+    The elevation's hinge marks read the same function, so the two drawings
+    cannot disagree. A corner unit hinges off its real front face instead — see
     `_corner_door_hinges`.
     """
     if job.room is None:
@@ -708,21 +718,28 @@ def swing_envelopes(job, cab, p, std: Standard = STANDARD):
     span = math.radians(std.door_open_deg)
 
     if g.source == "corner":
-        hinge_specs = _corner_door_hinges(g, p)
+        hinge_specs = _corner_door_hinges(cab, g, p)
     else:
         xs = [x for x, _ in g.footprint]
         left, right = min(xs), max(xs)
+        n = len(g.door_widths)
 
         def front_at(x):    # the outline's front edge at that end, where a hinge sits
-            return max(y for px, y in g.footprint if px == x)
+            at = [y for px, y in g.footprint if px == x]
+            return max(at) if at else max(y for _, y in g.footprint)
 
-        if len(g.door_widths) >= 2:
-            hinge_specs = [((left, front_at(left)), 0.0, +1, g.door_widths[0]),
-                           ((right, front_at(right)), math.pi, -1, g.door_widths[-1])]
-        elif p.flip:
-            hinge_specs = [((right, front_at(right)), math.pi, -1, g.door_widths[0])]
-        else:
-            hinge_specs = [((left, front_at(left)), 0.0, +1, g.door_widths[0])]
+        # Each leaf hangs off its own end, not the carcass's: leaf i covers its
+        # share of the opening, and hinges left or right within that share. With
+        # no per-leaf choice set this is exactly what it always was — a single
+        # door on the carcass edge, a pair on the two outer edges.
+        hinge_specs = []
+        for i, w in enumerate(g.door_widths):
+            a = left + (right - left) * i / n
+            b = left + (right - left) * (i + 1) / n
+            if hinge_side(cab, i, n, p.flip) == "R":
+                hinge_specs.append(((b, front_at(b)), math.pi, -1, w))
+            else:
+                hinge_specs.append(((a, front_at(a)), 0.0, +1, w))
 
     out = []
     for (hx, hy), a0, sign, w in hinge_specs:

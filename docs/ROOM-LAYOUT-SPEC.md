@@ -461,3 +461,54 @@ cut list is worse than a form that produces a right one.
     outer side wraps another (see 14) — so it is an approximation, not a
     measurement, and the warning text should say which cabinet is running on
     it.
+
+## Ruled — 17 September 2026 (fronts and the editor)
+
+16. **A tickbox turns a section off; it never throws its values away.**
+    "Corner unit" and "Has drawers" are tri-state fields on the `Cabinet`
+    (`None` derives the answer from what is stored, which is how every earlier
+    job reads). Unticking keeps the drawer stack and the four corner
+    measurements in the job file exactly as they were, so ticking it back
+    restores the cabinet panel for panel. Clearing the fields instead would
+    make the tickbox a destructive control, which is the one thing it must
+    not be.
+
+17. **Removing panels is allowed; renaming them is not.** Unticking can take
+    lines off the cut list. It is never silent — `/api/what-if` is asked first
+    and the designations that would go are named in the confirmation. Nothing
+    that survives a change comes back under a different designation, which is
+    the 14 September 2026 rule applied to the new controls.
+
+18. **Hinge side is per door leaf, and there is one function that answers.**
+    `model.hinge_side` is read by the plan's swing arcs, by the elevation's
+    hinge marks and by its clickable door leaves. `Cabinet.door_hinges` holds
+    one 'L'/'R' per leaf; blank falls back to the standing rule (a single door
+    follows `Placement.flip`, a pair hinges at its outer edges), so nothing
+    that predates the control changes. A leaf hangs off its own edge, not the
+    carcass end — turning one half of a pair round puts its hinge in the middle
+    of the opening, which is where it really is. The swing check re-runs on
+    every change because every change goes through `/api/compute`, and the
+    envelope comes off `room.geometry(cab)` — for a corner unit, its mitred
+    face, never the declared width.
+
+19. **Drawer faces are authored one row per face, Share or Fixed.** Fixed rows
+    take their millimetres; the gaps come from `Standard` and are never typed
+    per drawer; whatever is left is split among the Share rows in proportion to
+    their share numbers. `drawers.divide` does it and the browser shows the
+    result — the live millimetres beside each row, the running total and the
+    remainder are all the engine's. Fixed rows that over-run the opening leave
+    the Share rows at zero, which is a critical and blocks the export rather
+    than ordering a negative panel. `Equal` and `Graduated` are presets off
+    `Standard.graduated_step`, an authoring aid and not a construction
+    dimension. `face_height` is still the ordered figure and still the only one
+    the engine reads; `mode` and `share` ride alongside so a stack can be
+    re-divided later instead of retyped.
+
+20. **Dragging the join between two faces moves those two and no others.** The
+    pair's own span is fixed, so what the top face gains the bottom one loses,
+    and both rows become Fixed at the dragged heights. Each face is held back
+    far enough to clear its own box side — the existing rule that a box the
+    same height as its face shows above the front, not a new number. The
+    browser reads the drag back into millimetres from the span the SVG carries
+    in both mm and pixels, exactly as a plan drag projects onto a wall track;
+    `drawers.split_pair` does the dividing.

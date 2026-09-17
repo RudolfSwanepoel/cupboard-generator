@@ -35,6 +35,12 @@ class Standard:
     runner_clearance: int = 40  # minimum space behind the runner
     drawer_front_deduct: int = 59   # front/back length = internal width - this
     drawer_base_offset: int = 16    # base groove sits this far up from the bottom edge
+    # Authoring aids for the face-height editor, not construction dimensions. The
+    # heights they produce are what gets ordered; these only decide where a stack
+    # starts before it is adjusted. They live here so the browser does not invent
+    # them, the same reason every other number does.
+    box_height_default: int = 150   # the box height a new drawer row starts at
+    graduated_step: float = 0.5     # each face's share, going down, over the one above
 
     # ---- exposed panels ----------------------------------------------------
     exposed_extra: int = 16     # exposed side depth = carcass depth + this (finishes flush with the door)

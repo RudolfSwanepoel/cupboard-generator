@@ -77,6 +77,113 @@ def faces_with_fixed(opening: int, n: int, fixed: Dict[int, int], gap: int = Non
     return out
 
 
+# --- one row per face: Share or Fixed ----------------------------------------
+#
+# The way a stack is authored now. Each row is either 'fixed' — the height as
+# typed — or 'share', a slice of whatever the fixed rows leave, in proportion to
+# its share number. Gaps come from Standard and are never typed per drawer.
+#
+# What is ordered is still a list of heights: `divide` produces them and the
+# engine reads nothing else. The modes and shares ride along on the Drawer so a
+# stack can be picked up and re-divided later instead of retyped.
+
+
+def _gap(gap, std) -> int:
+    return std.stack_gap if gap is None else gap
+
+
+def remainder(opening: int, modes: Sequence[str], values: Sequence[float],
+              gap: int = None, std=STANDARD) -> int:
+    """What the share rows have left to divide, once the fixed rows and the gaps
+    are taken out. Negative means the fixed rows over-run the opening.
+
+        remainder(787, ["fixed", "share", "share"], [300, 1, 1])   ->   483
+        remainder(790, ["fixed", "fixed"], [400, 400])   ->   -12
+    """
+    g = _gap(gap, std)
+    fixed = sum(int(v) for m, v in zip(modes, values) if m == "fixed")
+    return opening - fixed - g * max(len(modes) - 1, 0)
+
+
+def divide(opening: int, modes: Sequence[str], values: Sequence[float],
+           gap: int = None, std=STANDARD) -> List[int]:
+    """Face heights, top to bottom, for a stack described row by row.
+
+    Fixed rows take their millimetres as typed. Whatever is left after them and
+    the gaps is split among the share rows in proportion to their share numbers,
+    the bottom-most share row carrying the rounding.
+
+        divide(787, ["share", "share", "share", "share"], [1, 1, 1, 1])   ->   [195, 195, 195, 196]
+        divide(787, ["fixed", "share", "share"], [300, 1, 1])   ->   [300, 241, 242]
+        divide(787, ["fixed", "fixed"], [400, 400])   ->   [400, 400]
+
+    A fixed-only stack is honoured exactly as given even when it does not fill
+    the opening — the shortfall is reported by the validator, never silently
+    corrected, the same discipline `stack`'s exact heights have always had. When
+    the fixed rows over-run, the share rows come back at zero, which the
+    validator turns into a critical rather than inventing a negative face.
+    """
+    out = [int(v) for v in values]
+    share_at = [i for i, m in enumerate(modes) if m != "fixed"]
+    if not share_at:
+        return out
+    left = remainder(opening, modes, values, gap, std)
+    if left <= 0:
+        for i in share_at:
+            out[i] = 0
+        return out
+    weights = [max(float(values[i]), 0.0) for i in share_at]
+    if not sum(weights):
+        weights = [1.0] * len(weights)
+    total = sum(weights)
+    got = [int(left * w / total) for w in weights]
+    got[-1] += left - sum(got)
+    for i, h in zip(share_at, got):
+        out[i] = h
+    return out
+
+
+def equal_shares(n: int) -> List[float]:
+    """Every face the same.
+
+        equal_shares(4)   ->   [1.0, 1.0, 1.0, 1.0]
+    """
+    return [1.0] * n
+
+
+def graduated_shares(n: int, std=STANDARD) -> List[float]:
+    """Smallest face at the top, each one a step more than the one above.
+
+        graduated_shares(4)   ->   [1.0, 1.5, 2.0, 2.5]
+    """
+    return [round(1.0 + i * std.graduated_step, 3) for i in range(n)]
+
+
+def split_pair(top_h: int, bottom_h: int, at: int, top_box: int = 0,
+               bottom_box: int = 0, gap: int = None, std=STANDARD) -> tuple:
+    """Move the join between two faces, leaving the rest of the stack alone.
+
+    The pair's own span — the two faces and the gap between them — does not
+    change, so whatever the top face gains the bottom one loses. `at` is how far
+    down that span the join was dragged to.
+
+    Each face is held back far enough to still clear its own box side, which is
+    a rule that was already there rather than a new number: a box the same height
+    as its face shows above the drawer front, and the validator calls it a
+    critical. With no box heights given the join may go anywhere in the span.
+
+        split_pair(200, 300, 250)   ->   (250, 250)
+        split_pair(200, 300, 10, 90, 116)   ->   (91, 409)
+    """
+    g = _gap(gap, std)
+    span = int(top_h) + g + int(bottom_h)
+    lo, hi = top_box + 1, span - g - (bottom_box + 1)
+    if lo > hi:                      # the pair cannot house both boxes; split it evenly
+        lo, hi = 0, span - g
+    top = max(lo, min(int(at), hi))
+    return top, span - g - top
+
+
 def make_drawers(faces: Sequence[int], boxes, base: str = "board") -> List[Drawer]:
     """Pair face heights with box heights.
 

@@ -66,7 +66,10 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD) -> List[Panel]:
         P.append(Panel(n, "06", "Backing", "BACK", max(bw, bh), min(bw, bh), 1))
 
     # ---- drawers -----------------------------------------------------------
-    if cab.drawers:
+    # cab.drawer_list, never cab.drawers: with "Has drawers" unticked the stack
+    # stays in the job file and nothing is built from it.
+    stack = cab.drawer_list
+    if stack:
         runner = std.pick_runner(cab.depth)
         if runner is None:
             raise ValueError(
@@ -75,9 +78,9 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD) -> List[Panel]:
         front_len = std.drawer_front_length(cab.width)
 
         # group identical drawers so the cut list stays short
-        for key in _dedupe([(d.box_height, d.base) for d in cab.drawers]):
+        for key in _dedupe([(d.box_height, d.base) for d in stack]):
             box_h, base_mat = key
-            count = sum(1 for d in cab.drawers if (d.box_height, d.base) == key)
+            count = sum(1 for d in stack if (d.box_height, d.base) == key)
             P.append(Panel(n, "18", "Drawer Side", "MEL", runner, box_h, 2 * count,
                            edge_l=1, edge_material=cab.drawer_box_edge))
             P.append(Panel(n, "19", "Drawer Front", "MEL", front_len, box_h, 2 * count,
@@ -87,8 +90,8 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD) -> List[Panel]:
                            "BACK" if base_mat == "board" else "MEL",
                            bl, bwid, count))
 
-        for key in _dedupe([d.face_height for d in cab.drawers]):
-            count = sum(1 for d in cab.drawers if d.face_height == key)
+        for key in _dedupe([d.face_height for d in stack]):
+            count = sum(1 for d in stack if d.face_height == key)
             P.append(Panel(n, "20", "Drawer Face", cab.decor,
                            key, cab.width - std.door_single_gap, count,
                            edge_l=2, edge_w=2, edge_material=cab.door_edge, grain=1))
@@ -220,11 +223,12 @@ def generate_job(job: Job) -> List[Panel]:
 
 def front_stack_check(cab: Cabinet, std: Standard = STANDARD):
     """Door + drawer faces + 2 mm gaps must fill H - 3. Returns (expected, actual, gap)."""
-    faces = sum(d.face_height for d in cab.drawers)
+    stack = cab.drawer_list
+    faces = sum(d.face_height for d in stack)
     door = 0
     if cab.doors:
         door = cab.door_height or (cab.height - std.door_height_gap)
-    n_items = len(cab.drawers) + (1 if cab.doors else 0)
+    n_items = len(stack) + (1 if cab.doors else 0)
     if n_items == 0:
         return None
     expected = cab.height - std.door_height_gap

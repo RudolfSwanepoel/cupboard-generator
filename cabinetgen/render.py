@@ -7,7 +7,7 @@ wrong here it is wrong in the cut list too.
 from html import escape
 from typing import List
 
-from .model import Cabinet, Job
+from .model import Cabinet, Job, hinge_side
 from .room import (LAYERS, cabinet_footprint, carcass_z, clashes, corner_points,
                    gap_outline, gaps, geometry, overlaps, placed, plinth_choice_for,
                    plinth_lengths, pullout_envelope, run_key, runs, swing_envelopes,
@@ -571,13 +571,12 @@ def _plan_label(rm, cab, p, T):
 def _hinge_side(c: Cabinet, i: int, flip: bool) -> str:
     """Which edge door i hangs from, facing the cabinet: 'L' or 'R'.
 
-    The same rule as room.swing_envelopes, so the elevation and the plan's swing
-    arcs cannot disagree: a single door hangs left unless the placement is
-    flipped, and a pair hangs from its outer edges.
+    The one function room.swing_envelopes reads too, so the elevation and the
+    plan's swing arcs cannot disagree: the per-leaf choice on the cabinet, or,
+    with none set, a single door hanging left unless the placement is flipped and
+    a pair hanging from its outer edges.
     """
-    if c.doors == 1:
-        return "R" if flip else "L"
-    return "L" if i < c.doors / 2 else "R"
+    return hinge_side(c, i, c.doors, bool(flip))
 
 
 def _hinge_marks(c: Cabinet, x0, top, dw, dh, door_h, flip, std: Standard):
@@ -620,17 +619,28 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None):
 
     `flip` turns on the hinge marks and says which way a single door hangs. Left
     as None it draws exactly what the side-by-side sanity check always drew.
+
+    Two things here are handles rather than drawing: each door leaf carries its
+    cabinet, its index and the edge it hangs from, so clicking it can turn it
+    round; and each join between two drawer faces carries the pair's span in both
+    mm and pixels, so a drag can be read back into millimetres. The browser
+    projects onto them exactly as it projects onto the plan's wall tracks — it
+    picks a position along a span the engine gave it, and the engine re-divides
+    the stack on drop.
     """
     out = []
-    face_total = sum(d.face_height for d in c.drawers)
+    stack = c.drawer_list
     door_h = 0
     if c.doors:
         door_h = c.door_height or (c.height - std.door_height_gap)
 
     cursor = y + h                      # bottom of the cabinet, in svg y
-    for d in reversed(c.drawers):
+    tops = [0.0] * len(stack)           # svg y of each face's top edge
+    for i in range(len(stack) - 1, -1, -1):
+        d = stack[i]
         fh = d.face_height * scale
         cursor -= fh
+        tops[i] = cursor
         out.append(f'<rect x="{x + 2:.1f}" y="{cursor + 1:.1f}" width="{w - 4:.1f}" '
                    f'height="{max(fh - 2, 1):.1f}" fill="{FACE}" stroke="{RULE}" '
                    f'stroke-width="0.8"/>')
@@ -640,12 +650,26 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None):
                        f'{d.face_height}</text>')
         cursor -= std.stack_gap * scale
 
+    # the join between two faces, as a grab handle. Its span is the two faces and
+    # the gap between them — dragging divides that span and leaves the rest alone.
+    for k in range(len(stack) - 1):
+        pair_mm = stack[k].face_height + std.stack_gap + stack[k + 1].face_height
+        line_y = tops[k] + stack[k].face_height * scale + std.stack_gap * scale / 2
+        out.append(f'<line class="fdiv" data-cab="{c.number}" data-above="{k}" '
+                   f'data-below="{k + 1}" data-mm="{pair_mm}" '
+                   f'data-top="{tops[k]:.2f}" data-px="{pair_mm * scale:.2f}" '
+                   f'x1="{x + 2:.1f}" y1="{line_y:.2f}" x2="{x + w - 2:.1f}" '
+                   f'y2="{line_y:.2f}" stroke="{RULE}" stroke-width="5" '
+                   f'stroke-opacity="0" pointer-events="stroke"/>')
+
     if c.doors:
         dh = door_h * scale
         top = cursor - dh
         dw = (w - 4) / c.doors
         for i in range(c.doors):
-            out.append(f'<rect x="{x + 2 + i * dw:.1f}" y="{top:.1f}" '
+            side = _hinge_side(c, i, bool(flip))
+            out.append(f'<rect class="edoor" data-cab="{c.number}" data-door="{i}" '
+                       f'data-hinge="{side}" x="{x + 2 + i * dw:.1f}" y="{top:.1f}" '
                        f'width="{dw - 1:.1f}" height="{dh:.1f}" fill="{DOOR}" '
                        f'stroke="{RULE}" stroke-width="0.8"/>')
         if flip is not None:
@@ -658,7 +682,7 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None):
 
     # shelves, spread through whatever the doors cover
     n = c.shelves + c.fixed_shelves
-    if n and not c.drawers:
+    if n and not stack:
         span = y + h - cursor if c.doors else h
         base = cursor if c.doors else y
         for i in range(1, n + 1):

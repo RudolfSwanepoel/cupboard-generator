@@ -22,6 +22,7 @@ python tools/check_fillers.py
 python tools/check_plinth.py
 python tools/check_drag.py
 python tools/check_elevation.py
+python tools/check_fronts.py
 ```
 
 Regenerates the October 2025 wardrobe from cabinet definitions and diffs it
@@ -31,7 +32,7 @@ against the cut list that was really sent to Plazaboard. Current state:
 - 272 MEL / 59 DECOR / 30 BACK panels — matches the real job exactly
 - 92 pot holes — matches the invoice exactly
 - board counts from the nester: 18 / 9 / 6 — matches the invoice exactly
-- estimated cost within R41 of the R28,322.75 actually quoted
+- estimated cost within R41 of the R28,322.75 actually quoted (R28,363.50)
 
 If a change drops the clean-cabinet count or moves the cost estimate, it broke
 something. The eight cabinets that do not reproduce are listed in `KNOWN` in
@@ -80,6 +81,17 @@ docs/ROOM-LAYOUT-SPEC.md  the room / plan / 3D build spec and its phasing
   exactly as the job defines it, so a bespoke cabinet with two sides of
   different sizes must define them as 01a and 01b itself. The D13 warning is
   what tells you it did not; the fix is in the job, never in the generator.
+- **Two tickboxes gate a section: "Corner unit" and "Has drawers".** Both are
+  tri-state on the `Cabinet` — `corner_unit` / `has_drawers`, `None` meaning
+  "derive it from what is stored", which is how every job written before them
+  reads. Unticking sets `False` and **keeps every value**: the drawer stack and
+  the four corner measurements stay in the job file untouched, so re-ticking
+  restores the cabinet panel for panel. `Cabinet.corner_on` and
+  `Cabinet.drawer_list` are what everything downstream reads; nothing reads
+  `corner_style` or `drawers` directly any more.
+  Unticking can take panels off the cut list, and that is never silent:
+  `/api/what-if` is asked first and names the designations that would go. A
+  designation is only ever removed — never renamed, never reused.
 - Bespoke cabinets set `template="none"` and supply `bespoke=[Panel(...)]`.
   The corner unit and the overhead are both like this — do not try to
   generalise a template to fit them.
@@ -115,6 +127,10 @@ leftovers between jobs), and simulated annealing over the panel order. The
 
 `python run_app.py`. See `docs/UI-BRIEF.md` for why it is shaped the way it is.
 
+The cabinet editor is eight sections, each a bold heading over its own coloured
+block: **Size · Outline · Structure · Doors · Drawers · Corner Unit · Back &
+Supports · Decor**. Drawers and Corner Unit are the tickbox sections above.
+
 Four tabs over one `POST /api/compute`. The handlers in `app/api.py` decide no
 dimension — every number in a response came out of the engine. Keep it that way:
 if the UI needs a number, add it to `cabinetgen`, do not compute it in the
@@ -122,10 +138,27 @@ browser. `nest.nestable()` exists for exactly that reason — the UI and
 `regen_check` must agree on which panels reach the nester or the board counts
 drift apart.
 
-Drawer face heights are generated through `/api/drawers` (which calls
-`drawers.stack`) and then stored as plain heights in the job file. The
-equal/ratio/exact mode is an authoring aid and is deliberately not persisted:
-what was ordered is a list of heights.
+Drawer face heights are authored **one row per face**, top to bottom. A row is
+either **Fixed** — the height as typed — or **Share**, a slice of whatever the
+fixed rows leave, split in proportion to its share number. The gaps come from
+`Standard` and are never typed per drawer. `drawers.divide` does the arithmetic
+and `/api/drawer-solve` hands it back, so the millimetres shown live beside each
+row as it is typed are the engine's, not the browser's; `Equal` and `Graduated`
+come from `/api/drawer-preset` for the same reason (`Standard.graduated_step`).
+Fixed rows that over-run the opening leave the share rows at zero, which is a
+critical and blocks the export rather than ordering a negative panel.
+
+`face_height` is still the ordered figure and still the only one the engine
+reads — what was ordered is a list of heights. `Drawer.mode` and `Drawer.share`
+ride alongside it so a stack can be picked up and re-divided later instead of
+retyped; nothing downstream reads them.
+
+Dragging the join between two faces in the elevation pins **those two only**: the
+SVG carries each pair's span in both mm and pixels (`class="fdiv"`), the browser
+reads its drop back into millimetres the same way a plan drag projects onto a
+wall track, and `drawers.split_pair` divides the pair server-side. The rest of
+the stack is untouched, and each face is held back far enough to clear its own
+box side — which is the existing rule, not a new number.
 
 Not editable in the UI yet: loose panels, the bespoke panel lists on
 `template="none"` cabinets, and a wall's openings and obstructions. All are
@@ -346,8 +379,23 @@ arc. Two things about the checks that are easy to get wrong:
 
 `Standard.door_open_deg` is 90 — the drawing convention, not a construction
 dimension. If a real job needs 110 the clash check follows the constant.
-Hinge side comes from `Placement.flip` for a single door; a pair always hinges
-at its outer edges.
+
+**Hinge side has one answer: `model.hinge_side`.** The plan's swing arcs, the
+elevation's hinge marks and the clickable door leaves all read it, so they
+cannot drift apart. `Cabinet.door_hinges` holds a per-leaf 'L'/'R' — one entry
+per leaf, blank meaning "use the rule" — and the rule, when nothing is set, is
+the one that was always here: a single door follows `Placement.flip`, a pair
+hinges at its outer edges. A leaf hangs off **its own** edge, so turning one half
+of a pair round puts its hinge in the middle of the opening, which is where it
+really is.
+
+The editor gives one Left/Right control per door panel the engine actually cut —
+`len(geometry(cab).door_widths)`, not `cab.doors` — so a bespoke or corner unit
+gets one too. Clicking a door in the elevation toggles it. Every change goes
+through `/api/compute`, so the swing check re-runs on each one and the editor
+reads the result back. The elevation only draws leaves for template cabinets
+(`render._interior` works off the spec that made the panels, on purpose), so a
+bespoke cabinet's leaf is turned round from the editor rather than the drawing.
 
 ## Per-wall elevations
 
