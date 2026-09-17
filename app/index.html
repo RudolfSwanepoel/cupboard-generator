@@ -1,0 +1,1412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CupboardApp</title>
+<style>
+  :root{
+    /* the elevation and nest SVGs already use these — the page matches them */
+    --ink:#191c1a; --muted:#767e78; --rule:#aab1a9; --faint:#d3d7d0;
+    --carc:#f2f3f0; --door:#dceaea; --face:#f5ebd6;
+    --bg:#fbfbfa; --panel:#fff; --line:#e3e5e0;
+    --crit:#a4303f; --warn:#8a6d1f; --ok:#2f6b4f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:13px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+  button{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--rule);
+         border-radius:4px;padding:4px 10px;cursor:pointer}
+  button:hover{background:var(--carc)}
+  button.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+  button.primary:hover{background:#333836}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input,select{font:inherit;color:inherit;background:var(--panel);
+               border:1px solid var(--line);border-radius:4px;padding:3px 6px;width:100%}
+  input:focus,select:focus{outline:2px solid var(--door);outline-offset:-1px;
+                           border-color:var(--rule)}
+  table{border-collapse:collapse;width:100%}
+  th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);
+        white-space:nowrap}
+  th{font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;
+     letter-spacing:.04em;position:sticky;top:0;background:var(--bg);z-index:1}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+
+  header{display:flex;gap:8px;align-items:center;padding:8px 14px;
+         background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header h1{font-size:14px;margin:0 10px 0 0;font-weight:700;letter-spacing:.02em}
+  header .grow{flex:1}
+  #jobname{width:190px}
+  #joblist{width:170px}
+
+  #strip{display:flex;gap:22px;align-items:center;padding:9px 14px;
+         background:var(--carc);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  #strip .cell{display:flex;flex-direction:column;gap:1px}
+  #strip .k{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  #strip .v{font-size:15px;font-variant-numeric:tabular-nums}
+  .pill{border-radius:10px;padding:1px 8px;font-size:12px;display:inline-block}
+  .pill.crit{background:#f6e0e3;color:var(--crit)}
+  .pill.warn{background:#f6efd9;color:var(--warn)}
+  .pill.ok{background:#dfeee6;color:var(--ok)}
+
+  nav{display:flex;gap:2px;padding:0 14px;background:var(--panel);
+      border-bottom:1px solid var(--line)}
+  nav button{border:none;border-bottom:2px solid transparent;border-radius:0;
+             padding:8px 14px;background:none;color:var(--muted)}
+  nav button:hover{background:var(--carc)}
+  nav button.on{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
+
+  main{padding:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+        margin-bottom:14px}
+  .card>h2{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
+           margin:0;padding:8px 12px;border-bottom:1px solid var(--line)}
+  .card>.body{padding:10px 12px}
+  .scroll{overflow:auto}
+
+  #cabwrap,.split{display:flex;gap:14px;align-items:flex-start}
+  #layers,#elevpick{float:right;margin-top:-3px;display:flex;gap:3px}
+  #layers button,#elevpick button{padding:2px 9px;font-size:11px;text-transform:none;
+                                  letter-spacing:0}
+  #layers button.on,#elevpick button.on{background:var(--ink);color:#fff;
+                                        border-color:var(--ink)}
+  #cablist{flex:1;min-width:0}
+  #editor{width:430px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
+          overflow:auto}
+  #cablist tr.sel td{background:var(--door)}
+  #cablist tbody tr{cursor:pointer}
+  #cablist tbody tr:hover td{background:var(--carc)}
+  #cablist tr.sel:hover td{background:var(--door)}
+
+  fieldset{border:none;border-top:1px solid var(--line);margin:0;padding:10px 0 4px}
+  fieldset:first-of-type{border-top:none;padding-top:0}
+  legend{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+         padding:0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:7px 10px;margin-top:7px}
+  .f{display:flex;flex-direction:column;gap:2px}
+  .f label{font-size:11px;color:var(--muted)}
+  .f.wide{grid-column:1/-1}
+
+  .rows td,.rows th{padding:3px 5px}
+  .note{color:var(--muted);font-size:11.5px}
+  .mono{font-variant-numeric:tabular-nums}
+  .bespoke{background:var(--face);border:1px solid var(--rule);border-radius:4px;
+           padding:7px 9px;font-size:12px;margin-top:8px}
+
+  .issue{display:flex;gap:9px;padding:6px 12px;border-bottom:1px solid var(--line);
+         align-items:baseline}
+  .issue .lvl{flex:none;width:64px;font-size:10.5px;text-transform:uppercase;
+              letter-spacing:.04em;font-weight:700}
+  .issue.critical .lvl{color:var(--crit)}
+  .issue.warning .lvl{color:var(--warn)}
+  .issue .where{flex:none;width:70px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .issue .msg{flex:1}
+  .issue .ref{flex:none;color:var(--muted);font-size:11px}
+  tr.hasissue td{background:#fdf6f7}
+  .rowissue{font-size:11.5px;padding:2px 8px 5px 18px}
+  .rowissue.critical{color:var(--crit)}
+  .rowissue.warning{color:var(--warn)}
+
+  .empty{padding:26px 12px;text-align:center;color:var(--muted)}
+  #toast{position:fixed;right:14px;bottom:14px;max-width:520px;background:var(--ink);
+         color:#fff;padding:9px 13px;border-radius:5px;display:none;white-space:pre-wrap;
+         box-shadow:0 3px 14px rgba(0,0,0,.22);z-index:9}
+  #toast.bad{background:var(--crit)}
+  #plan svg .cab{cursor:grab}
+  #plan svg .cab.dragging{cursor:grabbing}
+  #plan svg .front{transition:opacity .08s}
+  #plan.showfronts svg .front{opacity:1 !important}
+  #dragreadout{position:absolute;background:var(--ink);color:#fff;font-size:11px;
+               padding:2px 7px;border-radius:3px;pointer-events:none;display:none;
+               white-space:nowrap;z-index:5}
+  #plan{position:relative}
+  .sheetsvg{overflow:auto;border-top:1px solid var(--line);padding:8px 12px}
+  .sheetsvg svg{display:block}
+  .matline{display:flex;gap:18px;align-items:baseline;padding:8px 12px;flex-wrap:wrap}
+  .matline b{font-size:14px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>CupboardApp</h1>
+  <input id="jobname" placeholder="job name" title="job name">
+  <button id="new">New</button>
+  <button id="save">Save</button>
+  <select id="joblist" title="saved jobs"></select>
+  <button id="load">Load</button>
+  <button id="fixture" title="the October 2025 wardrobe regression fixture">Oct 2025</button>
+  <span class="grow"></span>
+  <button id="export" class="primary">Export cut list</button>
+</header>
+
+<div id="strip"></div>
+
+<nav>
+  <button data-tab="cabinets" class="on">Cabinets</button>
+  <button data-tab="room">Room</button>
+  <button data-tab="cutlist">Cut list</button>
+  <button data-tab="nesting">Nesting</button>
+  <button data-tab="validation">Validation</button>
+</nav>
+
+<main>
+  <section id="tab-cabinets">
+    <div class="card">
+      <h2>Elevation <span id="elevpick"></span></h2>
+      <div class="scroll" id="elevation" style="padding:8px 12px"></div>
+    </div>
+    <div id="cabwrap">
+      <div class="card" id="cablist">
+        <h2>Cabinets <button id="add" style="float:right;margin-top:-3px">Add cabinet</button></h2>
+        <div class="scroll" id="cabtable"></div>
+      </div>
+      <div class="card" id="editor"></div>
+    </div>
+  </section>
+
+  <section id="tab-room" hidden>
+    <div class="card">
+      <h2>Plan <span id="layers"></span></h2>
+      <div class="scroll" id="plan" style="padding:8px 12px"></div>
+    </div>
+    <div class="split">
+      <div class="card" style="flex:1;min-width:0">
+        <h2>Walls</h2>
+        <div id="room"></div>
+      </div>
+      <div class="card" style="width:430px;flex:none">
+        <h2>Placements</h2>
+        <div id="places"></div>
+      </div>
+    </div>
+    <div class="split">
+      <div class="card" style="flex:1;min-width:0">
+        <h2>Gaps</h2>
+        <div id="gaps"></div>
+      </div>
+      <div class="card" style="width:430px;flex:none">
+        <h2>Plinth</h2>
+        <div id="plinth"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-cutlist" hidden>
+    <div class="card"><h2>Cut list</h2><div class="scroll" id="cutlist"></div></div>
+  </section>
+
+  <section id="tab-nesting" hidden>
+    <div id="nesting"></div>
+  </section>
+
+  <section id="tab-validation" hidden>
+    <div class="card"><h2>Validation</h2><div id="validation"></div></div>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+/* ---------- state ------------------------------------------------------- */
+
+const S = {
+  job: null,        // the job, exactly as store.py serialises it
+  res: null,        // last /api/compute response
+  sel: null,        // selected cabinet index
+  selRendered: -2,  // which index the editor DOM currently shows
+  tab: "cabinets",
+  def: null,        // /api/defaults
+  gen: null,        // drawer-stack generator settings, not part of the job
+};
+
+const GEN_DEFAULT = {mode: "equal", spec: "4", box: "150", base: "board"};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s === null || s === undefined ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;");
+
+async function post(path, body) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body || {}),
+  });
+  return r.json();
+}
+
+let toastTimer = null;
+function toast(msg, bad) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = bad ? "bad" : "";
+  t.style.display = "block";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.display = "none"; }, bad ? 9000 : 4000);
+}
+
+/* ---------- the job ----------------------------------------------------- */
+
+function blankJob() {
+  return {name: "untitled", materials: null, cabinets: [], loose: []};
+}
+
+function blankCabinet(number) {
+  return {
+    number: number, width: 600, height: 2400, depth: 500,
+    kind: "tall", back: "four", template: "standard",
+    supports: 4, edged_supports: 0, white_supports: 0,
+    shelves: 0, fixed_shelves: 0, shelf_width: null,
+    divider_height: null, divider_count: 0,
+    doors: 0, door_height: null, drawers: [],
+    exposed_sides: 0,
+    carcass_edge: "PVC WOOD", door_edge: "2mm WOOD",
+    drawer_box_edge: "PVC WHITE", decor: "DECOR",
+    bespoke: [], note: "", footprint: [],
+    corner_style: "", arm_a: null, arm_b: null, face_a: null, face_b: null,
+  };
+}
+
+/* ---------- compute ----------------------------------------------------- */
+
+let computeTimer = null;
+function schedule() {
+  clearTimeout(computeTimer);
+  computeTimer = setTimeout(compute, 180);
+}
+
+let computeSeq = 0;
+
+async function compute() {
+  S.job.name = $("jobname").value.trim() || "untitled";
+  const seq = ++computeSeq;
+  const res = await post("/api/compute", {job: S.job});
+  if (seq !== computeSeq) return;   // a newer job is already being computed
+  S.res = res;
+  if (!res.ok) toast(res.error, true);
+  renderStrip();
+  renderElevation();
+  renderList();
+  renderTab();
+}
+
+/* ---------- summary strip ----------------------------------------------- */
+
+function renderStrip() {
+  const r = S.res;
+  if (!r) { $("strip").innerHTML = ""; return; }
+  const cells = [];
+  const cell = (k, v) => cells.push(
+    `<div class="cell"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`);
+
+  const panels = Object.values(r.summary.materials)
+    .reduce((a, m) => a + m.panels, 0);
+  cell("Cabinets", S.job.cabinets.length);
+  cell("Panels", panels);
+
+  const mats = Object.keys(r.summary.materials).sort();
+  const boards = mats.map((m) =>
+    `${esc(m)}&nbsp;<b>${r.summary.materials[m].est_boards}</b>`).join(" &nbsp;·&nbsp; ");
+  cell("Boards", boards || "—");
+
+  cell("Pot holes", r.summary.potholes);
+  cell("Estimated", "R&nbsp;" + (r.cost.total_incl_vat || 0)
+    .toLocaleString("en-ZA", {minimumFractionDigits: 2, maximumFractionDigits: 2}));
+
+  const crit = r.issues.filter((i) => i.level === "critical").length;
+  const warn = r.issues.length - crit;
+  let v;
+  if (!r.ok) v = `<span class="pill crit">engine error</span>`;
+  else if (crit) v = `<span class="pill crit">${crit} critical</span>` +
+    (warn ? ` <span class="pill warn">${warn} warning${warn > 1 ? "s" : ""}</span>` : "");
+  else if (warn) v = `<span class="pill warn">${warn} warning${warn > 1 ? "s" : ""}</span>`;
+  else v = `<span class="pill ok">clear</span>`;
+  cell("Validation", v);
+
+  $("strip").innerHTML = cells.join("");
+  $("export").disabled = !r.ok || r.blocking;
+  $("export").title = r.blocking
+    ? "Blocked — criticals must be cleared first" : "Write the Plazaboard CSVs";
+}
+
+/* ---------- elevation --------------------------------------------------- */
+
+// null shows the whole job side by side; a wall id shows that wall face on.
+S.elev = null;
+let elevSeq = 0;
+
+async function renderElevation() {
+  const rm = S.job.room;
+  if (!rm || !rm.walls.some((w) => w.id === S.elev)) S.elev = null;
+  $("elevpick").innerHTML = rm && rm.walls.length
+    ? [["", "Run"]].concat(rm.walls.map((w) => [w.id, "Wall " + w.id]))
+        .map(([k, label]) => `<button data-elev="${esc(k)}" class="${
+          (S.elev || "") === k ? "on" : ""}">${esc(label)}</button>`).join("")
+    : "";
+  if (S.elev === null) {
+    $("elevation").innerHTML = (S.res && S.res.elevation) || "";
+    return;
+  }
+  const seq = ++elevSeq;
+  const r = await post("/api/elevation", {job: S.job, wall: S.elev});
+  if (seq !== elevSeq) return;             // a newer wall or job has been asked for
+  if (!r.ok) { toast(r.error, true); return; }
+  $("elevation").innerHTML = r.svg;
+}
+
+$("elevpick").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-elev]");
+  if (!b) return;
+  S.elev = b.dataset.elev || null;
+  renderElevation();
+});
+
+/* ---------- cabinet list ------------------------------------------------ */
+
+function frontsText(c) {
+  const bits = [];
+  if (c.doors) bits.push(c.doors + (c.doors > 1 ? " doors" : " door"));
+  if (c.drawers.length) bits.push(c.drawers.length + " drw");
+  return bits.join(", ") || "—";
+}
+
+function renderList() {
+  const rows = S.job.cabinets.map((c, i) => {
+    const shelves = (c.shelves || 0) + (c.fixed_shelves || 0);
+    return `<tr data-i="${i}" class="${i === S.sel ? "sel" : ""}">
+      <td class="n">${c.number}</td>
+      <td class="n">${c.width}</td><td class="n">${c.height}</td><td class="n">${c.depth}</td>
+      <td>${esc(c.kind)}</td>
+      <td>${esc(frontsText(c))}</td>
+      <td class="n">${shelves || ""}</td>
+      <td>${c.template === "none" ? "bespoke" : ""}</td>
+      <td class="note">${esc(c.note || "")}</td>
+      <td><button data-dup="${i}" title="Duplicate">Dup</button>
+          <button data-del="${i}" title="Delete">Del</button></td>
+    </tr>`;
+  }).join("");
+
+  $("cabtable").innerHTML = S.job.cabinets.length ? `<table>
+    <thead><tr><th class="n">#</th><th class="n">W</th><th class="n">H</th><th class="n">D</th>
+      <th>Kind</th><th>Fronts</th><th class="n">Shv</th><th></th><th>Note</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table>`
+    : `<div class="empty">No cabinets yet. <b>Add cabinet</b> to start,
+       or load the Oct 2025 job to see a real one.</div>`;
+
+  renderEditor();
+}
+
+$("cabtable").addEventListener("click", async (e) => {
+  const dup = e.target.closest("[data-dup]");
+  if (dup) {
+    const i = +dup.dataset.dup;
+    const copy = JSON.parse(JSON.stringify(S.job.cabinets[i]));
+    const r = await post("/api/next-number", {job: S.job});
+    copy.number = r.number;
+    copy.bespoke.forEach((p) => { p.cabinet = copy.number; });
+    S.job.cabinets.splice(i + 1, 0, copy);
+    S.sel = i + 1;
+    schedule(); renderList();
+    return;
+  }
+  const del = e.target.closest("[data-del]");
+  if (del) {
+    const i = +del.dataset.del;
+    S.job.cabinets.splice(i, 1);
+    if (S.sel === i) S.sel = null;
+    else if (S.sel > i) S.sel -= 1;
+    schedule(); renderList();
+    return;
+  }
+  const tr = e.target.closest("tr[data-i]");
+  if (tr) { S.sel = +tr.dataset.i; renderList(); }
+});
+
+$("add").addEventListener("click", async () => {
+  const r = await post("/api/next-number", {job: S.job});
+  S.job.cabinets.push(blankCabinet(r.number));
+  S.sel = S.job.cabinets.length - 1;
+  schedule(); renderList();
+});
+
+/* ---------- cabinet editor ---------------------------------------------- */
+
+const FIELDS = [
+  ["Size", [
+    ["width", "Width", "int"], ["height", "Height", "int"],
+    ["depth", "Depth", "int"], ["kind", "Kind", "sel:kinds"],
+    ["number", "Number", "int"],
+    ["footprint", "Outline (x,y pairs; blank = its panels' rectangle)", "poly"],
+  ]],
+  ["Corner unit", [
+    ["corner_style", "Style", "sel:corner_styles"],
+    ["arm_a", "Arm A (along wall A)", "opt"],
+    ["arm_b", "Arm B (along wall B)", "opt"],
+    ["face_a", "Face A (open face, wall-A side)", "opt"],
+    ["face_b", "Face B (open face, wall-B side)", "opt"],
+  ]],
+  ["Structure", [
+    ["back", "Back", "sel:backs"],
+    ["supports", "Supports", "int"],
+    ["edged_supports", "Edged supports", "int"],
+    ["white_supports", "White supports", "int"],
+    ["shelves", "Shelves", "int"],
+    ["fixed_shelves", "Fixed shelves", "int"],
+    ["shelf_width", "Shelf width", "opt"],
+    ["divider_count", "Dividers", "int"],
+    ["divider_height", "Divider height", "opt"],
+  ]],
+  ["Fronts", [
+    ["doors", "Doors", "int"],
+    ["door_height", "Door height", "opt"],
+  ]],
+  ["Finishes", [
+    ["decor", "Décor material", "text"],
+    ["exposed_sides", "Exposed sides", "int"],
+    ["carcass_edge", "Carcass edge", "sel:edge_materials"],
+    ["door_edge", "Door edge", "sel:edge_materials"],
+    ["drawer_box_edge", "Drawer box edge", "sel:edge_materials"],
+  ]],
+];
+
+function fieldHTML(c, [key, label, type]) {
+  const v = c[key];
+  let input;
+  if (type.startsWith("sel:")) {
+    const opts = (S.def[type.slice(4)] || []).map((o) =>
+      `<option value="${esc(o)}"${o === v ? " selected" : ""}>${esc(o)}</option>`).join("");
+    input = `<select data-k="${key}" data-t="${type}">${opts}</select>`;
+  } else if (type === "text") {
+    input = `<input data-k="${key}" data-t="text" value="${esc(v)}">`;
+  } else if (type === "poly") {
+    const text = (v || []).map((pt) => pt[0] + "," + pt[1]).join("  ");
+    input = `<input data-k="${key}" data-t="poly" value="${esc(text)}"
+             placeholder="e.g. 0,834  850,834  850,0  0,0">
+             <span class="note" id="geomreadout"></span>`;
+  } else {
+    input = `<input type="number" step="1" data-k="${key}" data-t="${type}"
+             value="${v === null || v === undefined ? "" : v}"
+             ${type === "opt" ? 'placeholder="auto"' : ""}>`;
+  }
+  return `<div class="f${type === "poly" ? " wide" : ""}"><label>${esc(label)}</label>${input}</div>`;
+}
+
+// The engine's reading of the selected cabinet — off its panels, not its labels.
+function refreshGeometryReadout() {
+  const el = $("geomreadout");
+  const c = S.sel !== null && S.job.cabinets[S.sel];
+  if (!el || !c || !S.res || !S.res.geometry) return;
+  const g = S.res.geometry[String(c.number)];
+  if (!g) { el.textContent = ""; return; }
+  const how = g.source === "corner"
+      ? "corner unit, derived from its arm/face measurements" +
+        (g.mitre_deg !== null ? `; mitre ${g.mitre_deg}°` : "") +
+        `; front face${g.face_lengths.length > 1 ? "s" : ""} ${g.face_lengths.join(" + ")} mm` +
+        (g.doors.length ? `, door${g.doors.length > 1 ? "s" : ""} ${g.doors.join(" + ")}` : "")
+    : g.source === "outline" ? `outline as entered, ${g.points} points`
+    : g.source === "panels" ? "rectangle its panels make"
+    : "declared width — its panels give none";
+  el.textContent = `Checks use ${g.width} × ${g.depth}, ${g.height} high (${how}).`;
+}
+
+function renderEditor() {
+  const box = $("editor");
+  if (S.sel === null || S.sel === undefined || !S.job.cabinets[S.sel]) {
+    box.innerHTML = `<h2>Cabinet</h2><div class="empty">Select a cabinet to edit it.</div>`;
+    S.selRendered = -2;
+    return;
+  }
+  // Already showing this cabinet: leave the DOM alone. Rebuilding it mid-edit
+  // would take the caret out of whatever field is being typed into.
+  if (S.selRendered === S.sel) { refreshGeometryReadout(); return; }
+  S.selRendered = S.sel;
+  S.gen = Object.assign({}, GEN_DEFAULT);
+
+  const c = S.job.cabinets[S.sel];
+  const sets = FIELDS.map(([name, fields]) => `<fieldset><legend>${esc(name)}</legend>
+      <div class="grid">${fields.map((f) => fieldHTML(c, f)).join("")}
+      ${name === "Fronts" ? `<div class="f wide" id="drawerbox"></div>` : ""}
+      ${name === "Finishes" ? `<div class="f wide"><label>Note</label>
+        <input data-k="note" data-t="text" value="${esc(c.note)}"></div>` : ""}
+      </div></fieldset>`).join("");
+
+  const bespoke = c.template === "none"
+    ? `<div class="bespoke"><b>Bespoke cabinet.</b> The template generates nothing;
+       its ${c.bespoke.length} panel${c.bespoke.length === 1 ? " is" : "s are"} specified
+       by hand in the job file. Size and finish fields above do not drive them.</div>` : "";
+
+  box.innerHTML = `<h2>Cabinet ${c.number}</h2><div class="body">${sets}${bespoke}</div>`;
+  renderDrawers();
+  refreshGeometryReadout();
+}
+
+$("editor").addEventListener("input", (e) => {
+  const c = S.job.cabinets[S.sel];
+  if (!c) return;
+  const k = e.target.dataset.k;
+  if (k) {
+    const t = e.target.dataset.t;
+    const raw = e.target.value;
+    if (t === "text" || t.startsWith("sel:")) c[k] = raw;
+    // data entry only: pairs of numbers as typed; the engine reads the shape
+    else if (t === "poly") c[k] = raw.trim() === "" ? []
+      : raw.trim().split(/[\s;]+/).map((pt) => pt.split(",").map((n) => parseInt(n, 10)))
+          .filter((pt) => pt.length === 2 && pt.every((n) => !isNaN(n)));
+    else if (t === "opt") c[k] = raw === "" ? null : parseInt(raw, 10);
+    else c[k] = raw === "" ? 0 : parseInt(raw, 10);
+    if (k === "number") c.bespoke.forEach((p) => { p.cabinet = c.number; });
+    schedule();
+    return;
+  }
+  const i = e.target.dataset.d;
+  if (i === undefined) return;
+  const d = c.drawers[+i];
+  const dk = e.target.dataset.dk;
+  d[dk] = dk === "base" ? e.target.value : (parseInt(e.target.value, 10) || 0);
+  schedule();
+});
+
+/* ---------- drawers ------------------------------------------------------ */
+
+function renderDrawers() {
+  const box = $("drawerbox");
+  if (!box) return;
+  const c = S.job.cabinets[S.sel];
+  const rows = c.drawers.map((d, i) => `<tr>
+      <td class="n">${i + 1}</td>
+      <td><input type="number" step="1" data-d="${i}" data-dk="face_height" value="${d.face_height}"></td>
+      <td><input type="number" step="1" data-d="${i}" data-dk="box_height" value="${d.box_height}"></td>
+      <td><select data-d="${i}" data-dk="base">${(S.def.bases || []).map((b) =>
+        `<option${b === d.base ? " selected" : ""}>${esc(b)}</option>`).join("")}</select></td>
+      <td><button data-drm="${i}">×</button></td>
+    </tr>`).join("");
+
+  box.innerHTML = `<label>Drawers</label>
+    <table class="rows"><thead><tr><th class="n">#</th><th>Face</th><th>Box</th>
+      <th>Base</th><th></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="5" class="note">none</td></tr>`}</tbody></table>
+    <div class="grid" style="margin-top:6px">
+      <div class="f"><label>Face mode</label>
+        <select id="dmode">${["equal", "ratio", "exact"].map((m) =>
+          `<option value="${m}"${m === S.gen.mode ? " selected" : ""}>${
+            m === "exact" ? "exact heights" : m}</option>`).join("")}</select></div>
+      <div class="f"><label id="dspeclab"></label>
+        <input id="dspec" value="${esc(S.gen.spec)}"></div>
+      <div class="f"><label>Box height(s)</label>
+        <input id="dbox" value="${esc(S.gen.box)}"></div>
+      <div class="f"><label>Base</label><select id="dbase">${(S.def.bases || []).map((b) =>
+        `<option${b === S.gen.base ? " selected" : ""}>${esc(b)}</option>`).join("")}</select></div>
+      <div class="f wide"><button id="dgen">Build stack</button>
+        <span class="note" id="dhint"></span></div>
+    </div>`;
+
+  const hint = () => {
+    const m = $("dmode").value;
+    $("dspeclab").textContent = m === "equal" ? "Count"
+      : m === "ratio" ? "Weights, top to bottom" : "Heights, top to bottom";
+    $("dhint").textContent = m === "exact"
+      ? "used exactly as given — a shortfall is reported, never adjusted"
+      : c.doors
+        ? `fills what a ${c.door_height || c.height - 3} door leaves over`
+        : "fills the full opening";
+  };
+  // The generator settings outlive a rebuild, so weights can be nudged and rebuilt.
+  ["dmode", "dspec", "dbox", "dbase"].forEach((id) => {
+    $(id).addEventListener("input", () => {
+      S.gen = {mode: $("dmode").value, spec: $("dspec").value,
+               box: $("dbox").value, base: $("dbase").value};
+      hint();
+    });
+  });
+  hint();
+  $("dgen").addEventListener("click", buildStack);
+}
+
+async function buildStack() {
+  const c = S.job.cabinets[S.sel];
+  const mode = $("dmode").value;
+  const nums = (s) => String(s).split(/[, ]+/).filter((x) => x !== "").map(Number);
+  let spec;
+  if (mode === "equal") spec = parseInt($("dspec").value, 10) || 0;
+  else spec = nums($("dspec").value);
+  if (mode === "ratio" && spec.some((v) => v >= 50)) {
+    toast("Ratio weights must each be under 50 — 50 and above is read as an exact height.", true);
+    return;
+  }
+  const boxes = nums($("dbox").value);
+  const r = await post("/api/drawers", {
+    height: c.height, spec: spec,
+    boxes: boxes.length === 1 ? boxes[0] : boxes,
+    door_height: c.doors ? (c.door_height || 0) : 0,
+    base: $("dbase").value,
+  });
+  if (!r.ok) { toast(r.error, true); return; }
+  c.drawers = r.drawers;
+  renderDrawers();
+  schedule();
+}
+
+$("editor").addEventListener("click", (e) => {
+  const rm = e.target.closest("[data-drm]");
+  if (!rm) return;
+  S.job.cabinets[S.sel].drawers.splice(+rm.dataset.drm, 1);
+  renderDrawers();
+  schedule();
+});
+
+/* ---------- room --------------------------------------------------------- */
+
+// Rebuild the form only when its shape changes, so typing in a wall field is
+// not interrupted by the compute that the typing triggered.
+let roomSig = null;
+
+function renderRoom(force) {
+  const rm = S.job.room;
+  const sig = rm ? "r" + rm.walls.length : "none";
+  if (!force && sig === roomSig) { renderClosure(); return; }
+  roomSig = sig;
+
+  if (!rm) {
+    $("room").innerHTML = `<div class="empty">
+      This job has no room. Cabinets are drawn side by side in list order.<br>
+      <button id="roomadd" style="margin-top:10px">Add a room</button></div>`;
+    return;
+  }
+
+  const walls = rm.walls.map((w, i) => `<tr>
+    <td><input data-w="${i}" data-wk="id" value="${esc(w.id)}" style="width:46px"></td>
+    <td><input type="number" step="1" data-w="${i}" data-wk="length" value="${w.length}"></td>
+    <td><input type="number" step="1" data-w="${i}" data-wk="offset_start" value="${w.offset_start}"></td>
+    <td><input type="number" step="1" data-w="${i}" data-wk="offset_end" value="${w.offset_end}"></td>
+    <td class="n note">${w.openings.length || ""}</td>
+    <td class="n note">${w.obstructions.length || ""}</td>
+    <td><button data-wrm="${i}">×</button></td></tr>`).join("");
+
+  $("room").innerHTML = `<div class="body">
+    <div class="grid" style="grid-template-columns:repeat(4,1fr)">
+      <div class="f"><label>Name</label>
+        <input data-r="name" value="${esc(rm.name)}"></div>
+      <div class="f"><label>Ceiling</label>
+        <input type="number" step="1" data-r="ceiling" placeholder="required — measure it"
+               value="${rm.ceiling === null || rm.ceiling === undefined ? "" : rm.ceiling}"></div>
+      <div class="f"><label>Offset depth</label>
+        <input type="number" step="1" data-r="offset_depth" value="${rm.offset_depth}"></div>
+      <div class="f"><label>Walls form a loop</label>
+        <select data-r="closed">
+          <option value="yes"${rm.closed ? " selected" : ""}>closed</option>
+          <option value="no"${rm.closed ? "" : " selected"}>open run</option>
+        </select></div>
+    </div>
+    <div id="closure" style="margin:12px 0"></div>
+    <table class="rows"><thead><tr>
+      <th>Wall</th><th>Length</th><th>Offset start</th><th>Offset end</th>
+      <th class="n">Op</th><th class="n">Obs</th><th></th>
+    </tr></thead><tbody>${walls}</tbody></table>
+    <div style="margin-top:9px">
+      <button data-walladd="start">+ Wall before ${esc(rm.walls.length ? rm.walls[0].id : "the first")}</button>
+      <button data-walladd="end">+ Wall after ${esc(rm.walls.length ? rm.walls[rm.walls.length - 1].id : "the last")}</button>
+      <button id="roomdel" style="float:right">Remove room</button>
+    </div>
+    <p class="note" style="margin-top:14px;max-width:64ch">
+      Walls run clockwise, first to last. To build an L or a U run, set
+      <b>open run</b> and add walls before the first or after the last — each new
+      wall turns the corner at that end and starts square. A closed room is a
+      loop, so a wall added to it shows as a miss until the shape closes again.
+      <b>Offsets</b> are the deviation from square at each
+      corner, measured ${rm.offset_depth} mm out from the wall face — zero is
+      square, positive means the return wall opens away from the room. Each
+      corner is measured twice, once from each wall; enter whichever you took,
+      and the two are cross-checked. Openings and obstructions are carried in the
+      job file and are not editable here yet.</p>
+  </div>`;
+  renderClosure();
+}
+
+function renderClosure() {
+  const box = $("closure");
+  if (!box) return;
+  const info = S.res && S.res.room;
+  if (!info) { box.innerHTML = ""; return; }
+  const std = S.def.standard || {};
+  const e = info.closure_error;
+  let pill;
+  if (!info.closed) pill = `<span class="pill ok">open run — nothing to close</span>`;
+  else if (e > (std.closure_block || 20))
+    pill = `<span class="pill crit">misses closing by ${e} mm — remeasure</span>`;
+  else if (e > (std.closure_warn || 5))
+    pill = `<span class="pill warn">misses closing by ${e} mm</span>`;
+  else pill = `<span class="pill ok">walls close${e ? " within " + e + " mm" : ""}</span>`;
+  box.innerHTML = `${pill} <span class="note">${info.walls.length} walls,
+    ${info.placed} cabinet${info.placed === 1 ? "" : "s"} placed</span>`;
+}
+
+/* ---------- plan view ----------------------------------------------------- */
+
+// null means every layer solid; otherwise that one is solid and the rest ghost.
+S.layer = null;
+
+function renderLayers() {
+  const info = S.res && S.res.room;
+  const box = $("layers");
+  if (!info) { box.innerHTML = ""; return; }
+  const names = {base: "Base", wall: "Wall", tall: "Tall"};
+  box.innerHTML = [["all", "All"]].concat((S.def.layers || []).map((l) => [l, names[l] || l]))
+    .map(([k, label]) => {
+      const on = S.layer === null ? k === "all" : k === S.layer;
+      const n = k === "all" ? info.placed : (info.layers[k] || 0);
+      return `<button data-layer="${k}" class="${on ? "on" : ""}">${label} ${n}</button>`;
+    }).join("");
+}
+
+async function renderPlan() {
+  const rm = S.job.room;
+  if (!rm) {
+    $("plan").innerHTML = `<div class="empty">No room yet — add one below.</div>`;
+    $("layers").innerHTML = "";
+    return;
+  }
+  renderLayers();
+  const show = S.layer ? [S.layer] : (S.def.layers || []);
+  const ghost = S.layer ? (S.def.layers || []).filter((l) => l !== S.layer) : [];
+  const r = await post("/api/plan", {job: S.job, show: show, ghost: ghost});
+  if (!r.ok) { toast(r.error, true); return; }
+  const un = (S.res && S.res.room && S.res.room.unplaced) || [];
+  $("plan").innerHTML = r.svg
+    + `<div id="dragreadout"></div>`
+    + (un.length ? `<div class="note" style="padding:6px 2px">
+        Not placed, so not drawn: ${un.join(", ")}</div>` : "");
+}
+
+/* ---------- drag placement ------------------------------------------------
+   The engine hands over every position this drag is allowed to settle on, and
+   the wall tracks to project the pointer onto. Nothing here works out a
+   dimension of its own: it picks the nearest candidate the server supplied, and
+   on drop the whole job is recomputed server-side, so the cut list is always
+   the engine's answer rather than the interface's.                          */
+
+let DRAG = null;
+
+function tracks() {
+  return [...document.querySelectorAll("#plan .track")].map((t) => {
+    const x1 = +t.getAttribute("x1"), y1 = +t.getAttribute("y1");
+    const x2 = +t.getAttribute("x2"), y2 = +t.getAttribute("y2");
+    return {wall: t.dataset.wall, len: +t.dataset.len,
+            x1: x1, y1: y1, dx: x2 - x1, dy: y2 - y1};
+  });
+}
+
+// Where a point falls along a wall: how far along it in mm, and how far off it.
+function project(track, px, py) {
+  const sq = track.dx * track.dx + track.dy * track.dy;
+  if (!sq) return null;
+  let t = ((px - track.x1) * track.dx + (py - track.y1) * track.dy) / sq;
+  const offX = track.x1 + t * track.dx - px;
+  const offY = track.y1 + t * track.dy - py;
+  return {mm: Math.round(Math.max(0, Math.min(1, t)) * track.len),
+          away: Math.hypot(offX, offY),
+          pxPerMm: Math.sqrt(sq) / track.len};
+}
+
+function svgPoint(evt) {
+  const svg = document.querySelector("#plan svg");
+  const r = svg.getBoundingClientRect();
+  return {x: (evt.clientX - r.left) * (svg.viewBox.baseVal.width || r.width) / r.width,
+          y: (evt.clientY - r.top) * (svg.viewBox.baseVal.height || r.height) / r.height,
+          svg: svg, rect: r};
+}
+
+$("plan").addEventListener("pointerdown", async (e) => {
+  const poly = e.target.closest(".cab");
+  if (!poly || !S.job.room) return;
+  const number = +poly.dataset.cab;
+  // Wall units drag only while their layer is the one being shown solid.
+  if (S.layer !== null && poly.dataset.layer !== S.layer) return;
+
+  const model = await post("/api/drag", {job: S.job, cabinet: number});
+  if (!model.ok) { toast(model.error, true); return; }
+
+  const p = S.job.placements.find((x) => x.cabinet === number);
+  if (!p) return;
+  DRAG = {model: model, poly: poly, place: p, from: {wall: p.wall, x: p.x},
+          tracks: tracks(), moved: false};
+  poly.classList.add("dragging");
+  // On the window, not the element: a drag that runs off the plan must still
+  // finish rather than stick to the pointer.
+  window.addEventListener("pointermove", onDragMove);
+  window.addEventListener("pointerup", endDrag);
+  window.addEventListener("pointercancel", endDrag);
+  e.preventDefault();
+});
+
+function onDragMove(e) {
+  if (!DRAG) return;
+  const pt = svgPoint(e);
+  let best = null;
+  for (const t of DRAG.tracks) {
+    const pr = project(t, pt.x, pt.y);
+    if (pr && (best === null || pr.away < best.pr.away)) best = {t: t, pr: pr};
+  }
+  if (!best) return;
+
+  const wall = DRAG.model.walls[best.t.wall];
+  if (!wall) return;
+  let x = Math.max(0, Math.min(best.pr.mm - Math.round(DRAG.model.width / 2),
+                               wall.max_x));
+  let why = "";
+  for (const s of wall.snaps) {
+    if (Math.abs(s.x - x) <= DRAG.model.tolerance) { x = s.x; why = s.why; break; }
+  }
+
+  DRAG.moved = true;
+  DRAG.place.wall = best.t.wall;
+  DRAG.place.x = x;
+
+  // Preview only — slide the drawn shape along the wall it now belongs to.
+  const shift = (x - DRAG.from.x) * best.pr.pxPerMm;
+  const unit = Math.hypot(best.t.dx, best.t.dy) || 1;
+  if (best.t.wall === DRAG.from.wall) {
+    DRAG.poly.setAttribute("transform",
+      `translate(${best.t.dx / unit * shift} ${best.t.dy / unit * shift})`);
+  } else {
+    DRAG.poly.setAttribute("opacity", "0.35");
+  }
+
+  const out = $("dragreadout");
+  if (out) {
+    out.style.display = "block";
+    out.style.left = (e.clientX - pt.rect.left + 14) + "px";
+    out.style.top = (e.clientY - pt.rect.top + 14) + "px";
+    out.textContent = `wall ${best.t.wall} · ${x} mm` + (why ? ` · ${why}` : "");
+  }
+}
+
+function endDrag() {
+  if (!DRAG) return;
+  const d = DRAG;
+  DRAG = null;
+  window.removeEventListener("pointermove", onDragMove);
+  window.removeEventListener("pointerup", endDrag);
+  window.removeEventListener("pointercancel", endDrag);
+  d.poly.classList.remove("dragging");
+  d.poly.removeAttribute("transform");
+  d.poly.removeAttribute("opacity");
+  const out = $("dragreadout");
+  if (out) out.style.display = "none";
+  if (!d.moved) return;
+  if (d.place.wall !== d.from.wall) placesSig = null;   // the table's shape changed
+  compute();
+}
+
+// Door swings and drawer pull-outs are already in the SVG, hidden. Hovering a
+// cabinet just reveals its own.
+$("plan").addEventListener("pointerover", (e) => {
+  const poly = e.target.closest(".cab");
+  document.querySelectorAll("#plan .front").forEach((g) => {
+    g.style.opacity = (poly && g.dataset.front === poly.dataset.cab) ? "1" : "0";
+  });
+});
+
+$("layers").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-layer]");
+  if (!b) return;
+  S.layer = b.dataset.layer === "all" ? null : b.dataset.layer;
+  renderPlan();
+});
+
+/* ---------- placements ---------------------------------------------------- */
+
+// Same discipline as the other forms: rebuild only when the shape changes, so
+// typing an X does not pull the caret out of the field that triggered it.
+let placesSig = null;
+
+function renderPlaces(force) {
+  const rm = S.job.room;
+  const sig = !rm ? "none"
+    : S.job.cabinets.map((c) => c.number).join(",") + "|" +
+      S.job.placements.map((p) => p.cabinet + p.wall).join(",") + "|" +
+      rm.walls.map((w) => w.id).join(",");
+  if (!force && sig === placesSig) { refreshLayerCells(); return; }
+  placesSig = sig;
+
+  if (!rm) { $("places").innerHTML = `<div class="empty">No room.</div>`; return; }
+  if (!S.job.cabinets.length) {
+    $("places").innerHTML = `<div class="empty">No cabinets to place.</div>`;
+    return;
+  }
+  const wallOpts = rm.walls.map((w) => w.id);
+  const rows = S.job.cabinets.map((c) => {
+    const i = S.job.placements.findIndex((p) => p.cabinet === c.number);
+    const p = i < 0 ? null : S.job.placements[i];
+    return `<tr data-cab="${c.number}">
+      <td class="n">${c.number}</td>
+      <td><select data-p="${c.number}" data-pk="wall">
+        <option value="">—</option>
+        ${wallOpts.map((w) => `<option${p && p.wall === w ? " selected" : ""}>${esc(w)}</option>`).join("")}
+      </select></td>
+      <td><input type="number" step="1" data-p="${c.number}" data-pk="x"
+           value="${p ? p.x : ""}" ${p ? "" : "disabled"}></td>
+      <td><input type="number" step="1" data-p="${c.number}" data-pk="z"
+           value="${p ? p.z : ""}" ${p ? "" : "disabled"}></td>
+      <td class="note">${esc(placedLayer(c.number))}</td>
+    </tr>`;
+  }).join("");
+  $("places").innerHTML = `<div class="body">
+    <table class="rows"><thead><tr>
+      <th class="n">Cab</th><th>Wall</th><th>X</th><th>Z</th><th>Layer</th>
+    </tr></thead><tbody>${rows}</tbody></table>
+    <p class="note" style="margin-top:10px">
+      X is from the wall's start corner to the cabinet's left edge, facing the
+      wall. Z is 0 for anything standing on the floor — it stands on its legs,
+      which the engine allows for, plinth board or not. Set Z only for a hung
+      unit, to its underside. Layer is read from the cabinet's kind and its Z.
+      Pick a wall to place a cabinet, or “—” to take it out.</p>
+  </div>`;
+}
+
+// A cabinet's layer changes when its Z does, so that one cell refreshes in place.
+function refreshLayerCells() {
+  document.querySelectorAll("#places tr[data-cab]").forEach((tr) => {
+    tr.lastElementChild.textContent = placedLayer(+tr.dataset.cab);
+  });
+}
+
+// The layer is derived by the engine and read back, never worked out here.
+function placedLayer(number) {
+  const places = (S.res && S.res.room && S.res.room.placements) || {};
+  const p = places[String(number)];
+  return p ? (p.layer + (p.override ? " (set)" : "")) : "";
+}
+
+$("places").addEventListener("input", (e) => {
+  const num = e.target.dataset.p;
+  if (num === undefined) return;
+  const n = +num;
+  const pk = e.target.dataset.pk;
+  const i = S.job.placements.findIndex((p) => p.cabinet === n);
+  if (pk === "wall") {
+    if (!e.target.value) {
+      if (i >= 0) S.job.placements.splice(i, 1);
+    } else if (i < 0) {
+      S.job.placements.push({cabinet: n, wall: e.target.value, x: 0, z: 0,
+                             flip: false, layer: null});
+    } else {
+      S.job.placements[i].wall = e.target.value;
+    }
+    renderPlaces(true);
+  } else if (i >= 0) {
+    S.job.placements[i][pk] = parseInt(e.target.value, 10) || 0;
+  }
+  schedule();
+});
+
+$("room").addEventListener("click", async (e) => {
+  if (e.target.id === "roomadd") {
+    const r = await post("/api/room-new", {name: S.job.name});
+    if (!r.ok) { toast(r.error, true); return; }
+    S.job.room = r.room;
+    renderRoom(true); schedule();
+    return;
+  }
+  if (e.target.id === "roomdel") {
+    S.job.room = null;
+    S.job.placements = [];
+    renderRoom(true); schedule();
+    return;
+  }
+  const end = e.target.closest("[data-walladd]");
+  if (end) {
+    // the engine adds and names the wall, the same way it built the room
+    const r = await post("/api/room-extend", {room: S.job.room, at: end.dataset.walladd});
+    if (!r.ok) { toast(r.error, true); return; }
+    S.job.room = r.room;
+    renderRoom(true); schedule();
+    return;
+  }
+  const rm = e.target.closest("[data-wrm]");
+  if (rm) {
+    S.job.room.walls.splice(+rm.dataset.wrm, 1);
+    renderRoom(true); schedule();
+  }
+});
+
+$("room").addEventListener("input", (e) => {
+  const rm = S.job.room;
+  if (!rm) return;
+  const rk = e.target.dataset.r;
+  if (rk) {
+    rm[rk] = rk === "name" ? e.target.value
+      : rk === "closed" ? e.target.value === "yes"
+      // blank is "not measured", never 0 — the validator blocks on it until it is
+      : rk === "ceiling" ? (e.target.value === "" ? null : (parseInt(e.target.value, 10) || null))
+      : (parseInt(e.target.value, 10) || 0);
+    schedule();
+    return;
+  }
+  const i = e.target.dataset.w;
+  if (i === undefined) return;
+  const wk = e.target.dataset.wk;
+  rm.walls[+i][wk] = wk === "id" ? e.target.value
+    : (parseInt(e.target.value, 10) || 0);
+  schedule();
+});
+
+/* ---------- gaps ---------------------------------------------------------- */
+
+const GAP_KEY = (g) => [g.wall, g.layer, g.after, g.before].join("|");
+const SUGGEST = {filler: "fit a filler", grow: "grow a cabinet",
+                 cabinet: "add a cabinet or a blind corner"};
+
+let gapsSig = null;
+
+function renderGaps(force) {
+  const info = S.res && S.res.room;
+  if (!info) { $("gaps").innerHTML = `<div class="empty">No room.</div>`; gapsSig = null; return; }
+  const list = info.gaps || [];
+  if (!list.length) {
+    $("gaps").innerHTML = `<div class="empty">No gaps — every run meets its corners.</div>`;
+    gapsSig = "empty";
+    return;
+  }
+  const sig = list.map((g) => GAP_KEY(g) + ":" + g.width + ":" + g.treatment).join(";");
+  if (!force && sig === gapsSig) return;
+  gapsSig = sig;
+
+  const rows = list.map((g) => {
+    const between = (g.after === null ? "wall start" : "cab " + g.after) + " → " +
+                    (g.before === null ? "wall end" : "cab " + g.before);
+    const taper = g.taper
+      ? `<span class="pill warn">tapers ${g.taper}</span>` : "";
+    const chosen = g.treatment || "";
+    return `<tr class="${chosen ? "" : "hasissue"}">
+      <td>${esc(g.wall)}</td><td>${esc(g.layer)}</td><td>${esc(between)}</td>
+      <td class="n">${g.width}</td>
+      <td class="n note">${g.nominal}→${g.front}</td>
+      <td>${taper}</td>
+      <td class="note">${esc(SUGGEST[g.proposal] || g.proposal)}</td>
+      <td><select data-gap="${esc(GAP_KEY(g))}">
+        <option value=""${chosen ? "" : " selected"}>— undecided —</option>
+        <option value="filler"${chosen === "filler" ? " selected" : ""}>filler</option>
+        <option value="blind"${chosen === "blind" ? " selected" : ""}>blind corner</option>
+        <option value="open"${chosen === "open" ? " selected" : ""}>leave open</option>
+      </select></td>
+      <td class="n note">${chosen === "filler" ? g.filler_width + " cut" : ""}</td>
+    </tr>`;
+  }).join("");
+
+  const undecided = list.filter((g) => !g.treatment).length;
+  $("gaps").innerHTML = `
+    <div class="matline" style="border-bottom:1px solid var(--line)">
+      ${undecided ? `<span class="pill crit">${undecided} undecided</span>`
+                  : `<span class="pill ok">every gap ruled on</span>`}
+      <span class="note">The app suggests; it never fits a filler on its own.</span>
+    </div>
+    <div class="scroll"><table><thead><tr>
+      <th>Wall</th><th>Layer</th><th>Between</th><th class="n">Widest</th>
+      <th class="n">Back→front</th><th></th><th>Suggestion</th>
+      <th>Treatment</th><th class="n">Panel</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="note" style="padding:8px 12px 12px">
+      A filler ships as a rectangle at the gap's widest point plus a
+      ${(S.def.standard || {}).scribe_allowance} mm scribe allowance, trimmed on
+      site — the beam saw cuts edge to edge and cannot make a taper.</p>`;
+}
+
+$("gaps").addEventListener("input", (e) => {
+  const key = e.target.dataset.gap;
+  if (key === undefined) return;
+  const [wall, layer, after, before] = key.split("|");
+  const num = (v) => (v === "null" ? null : parseInt(v, 10));
+  const match = (g) => g.wall === wall && g.layer === layer &&
+                       g.after === num(after) && g.before === num(before);
+  const i = S.job.gaps.findIndex(match);
+  if (!e.target.value) {
+    if (i >= 0) S.job.gaps.splice(i, 1);
+  } else if (i < 0) {
+    S.job.gaps.push({wall: wall, after: num(after), before: num(before),
+                     layer: layer, treatment: e.target.value, note: ""});
+  } else {
+    S.job.gaps[i].treatment = e.target.value;
+  }
+  schedule();
+});
+
+/* ---------- plinth -------------------------------------------------------- */
+
+let plinthSig = null;
+
+function renderPlinth(force) {
+  const info = S.res && S.res.room;
+  if (!info) { $("plinth").innerHTML = `<div class="empty">No room.</div>`;
+               plinthSig = null; return; }
+  const list = (info.runs || []).filter((r) => r.on_floor);
+  if (!list.length) {
+    $("plinth").innerHTML = `<div class="empty">No runs on the floor to plinth.</div>`;
+    plinthSig = "empty";
+    return;
+  }
+  const sig = list.map((r) => [r.wall, r.layer, r.first, r.length, r.fitted,
+                               r.boards.join("/")].join(":")).join(";");
+  if (!force && sig === plinthSig) return;
+  plinthSig = sig;
+
+  const std = S.def.standard || {};
+  const rows = list.map((r) => `<tr>
+    <td>${esc(r.wall)}</td>
+    <td class="note">${r.cabinets[0]}–${r.cabinets[r.cabinets.length - 1]}</td>
+    <td class="n">${r.length}</td>
+    <td><input type="checkbox" data-run="${esc([r.wall, r.layer, r.first].join("|"))}"
+         ${r.fitted ? "checked" : ""} style="width:auto"></td>
+    <td class="n note">${r.boards.length ? r.boards.join(" + ") : ""}</td>
+  </tr>`).join("");
+
+  $("plinth").innerHTML = `<div class="body">
+    <table class="rows"><thead><tr>
+      <th>Wall</th><th>Cabinets</th><th class="n">Run</th><th>Plinth</th>
+      <th class="n">Boards</th>
+    </tr></thead><tbody>${rows}</tbody></table>
+    <p class="note" style="margin-top:10px">
+      A ${std.leg_height} mm board to cover the legs, set back
+      ${std.plinth_setback} mm behind the door face. Every standing carcass is on
+      legs (${std.leg_min}–${std.leg_max} mm) whether or not a board is fitted —
+      the board is the operator's choice per run, and it moves no height. Carcass
+      board, banded both long edges to seal it at floor level. A run over
+      ${std.sheet_l} mm splits at a cabinet division, and internal corners butt.</p>
+  </div>`;
+}
+
+$("plinth").addEventListener("change", (e) => {
+  const key = e.target.dataset.run;
+  if (key === undefined) return;
+  const [wall, layer, first] = key.split("|");
+  const n = parseInt(first, 10);
+  const i = S.job.plinths.findIndex(
+    (p) => p.wall === wall && p.layer === layer && p.first === n);
+  if (e.target.checked) {
+    if (i < 0) S.job.plinths.push({wall: wall, layer: layer, first: n,
+                                   fitted: true, note: ""});
+    else S.job.plinths[i].fitted = true;
+  } else if (i >= 0) {
+    S.job.plinths.splice(i, 1);
+  }
+  schedule();
+});
+
+/* ---------- cut list ----------------------------------------------------- */
+
+function issueIndex() {
+  const byLabel = {}, byCab = {};
+  ((S.res && S.res.issues) || []).forEach((i) => {
+    (byLabel[i.where] = byLabel[i.where] || []).push(i);
+    if (/^\d+$/.test(i.where)) (byCab[i.where] = byCab[i.where] || []).push(i);
+  });
+  return {byLabel, byCab};
+}
+
+function renderCutlist() {
+  const r = S.res;
+  if (!r || !r.panels.length) {
+    $("cutlist").innerHTML = `<div class="empty">Nothing to cut yet.</div>`;
+    return;
+  }
+  const {byLabel, byCab} = issueIndex();
+  const groups = {};
+  r.panels.forEach((p) => { (groups[p.cabinet] = groups[p.cabinet] || []).push(p); });
+
+  const edges = (p) => [p.edge_l ? "L×" + p.edge_l : "", p.edge_w ? "W×" + p.edge_w : ""]
+    .filter(Boolean).join(" ");
+
+  const out = Object.keys(groups).map(Number).sort((a, b) => a - b).map((cab) => {
+    const cabIssues = (byCab[String(cab)] || []).map((i) =>
+      `<tr><td colspan="12" class="rowissue ${i.level}">${esc(i.message)}${
+        i.ref ? " [" + esc(i.ref) + "]" : ""}</td></tr>`).join("");
+
+    const rows = groups[cab].map((p) => {
+      const iss = byLabel[p.label] || [];
+      const main = `<tr class="${iss.length ? "hasissue" : ""}">
+        <td class="mono">${esc(p.label)}</td><td>${esc(p.role)}</td>
+        <td>${esc(p.material)}</td>
+        <td class="n">${p.length}</td><td class="n">${p.width}</td>
+        <td class="n">${p.qty}</td>
+        <td>${esc(edges(p))}</td><td>${esc(p.edge_material)}</td>
+        <td class="n">${p.edging_m || ""}</td>
+        <td class="n">${p.holes_total || ""}</td>
+        <td class="n">${p.grain || ""}</td>
+        <td class="note">${esc(p.note)}</td></tr>`;
+      const extra = iss.map((i) =>
+        `<tr><td colspan="12" class="rowissue ${i.level}">${esc(i.message)}${
+          i.ref ? " [" + esc(i.ref) + "]" : ""}</td></tr>`).join("");
+      return main + extra;
+    }).join("");
+
+    return `<tr><th colspan="12" style="background:var(--carc);color:var(--ink);
+       font-size:12px;text-transform:none;letter-spacing:0">Cabinet ${cab}</th></tr>`
+      + cabIssues + rows;
+  }).join("");
+
+  $("cutlist").innerHTML = `<table>
+    <thead><tr><th>Label</th><th>Role</th><th>Mat</th><th class="n">Length</th>
+      <th class="n">Width</th><th class="n">Qty</th><th>Edges</th><th>Edge mat</th>
+      <th class="n">Edging m</th><th class="n">Holes</th><th class="n">Grain</th>
+      <th>Note</th></tr></thead><tbody>${out}</tbody></table>`;
+}
+
+/* ---------- nesting ------------------------------------------------------ */
+
+function renderNest() {
+  const r = S.res;
+  const mats = r ? Object.keys(r.nest).sort() : [];
+  if (!mats.length) {
+    $("nesting").innerHTML = `<div class="card"><div class="empty">Nothing nested yet.</div></div>`;
+    return;
+  }
+  const rejects = r.rejects.length
+    ? `<div class="card"><h2>Not nested</h2><div class="body">
+       ${r.rejects.map((x) => `<div class="rowissue critical">${esc(x.label)} —
+         ${x.length}×${x.width} does not fit a bare board</div>`).join("")}</div></div>`
+    : "";
+
+  $("nesting").innerHTML = rejects + mats.map((m) => {
+    const n = r.nest[m];
+    return `<div class="card">
+      <h2>${esc(m)}</h2>
+      <div class="matline">
+        <span><b>${n.sheets}</b> boards</span>
+        <span>yield <b>${n.yield}%</b></span>
+        <span class="note">${n.used_m2} of ${n.area_m2} m²</span>
+        <span class="note">won by ${esc(n.sort)} / ${esc(n.rule)}</span>
+        <span class="note">${n.detail.map((d, i) =>
+          `sheet ${i + 1}: ${d.panels}p ${d.yield}%`).join(" · ")}</span>
+      </div>
+      <div class="sheetsvg">${n.svg}</div></div>`;
+  }).join("");
+}
+
+/* ---------- validation --------------------------------------------------- */
+
+function renderValidation() {
+  const r = S.res;
+  if (!r) { $("validation").innerHTML = ""; return; }
+  let head = "";
+  if (!r.ok) {
+    head = `<div class="issue critical"><span class="lvl">Engine</span>
+      <span class="where"></span><span class="msg">${esc(r.error)}</span></div>`;
+  }
+  if (!r.issues.length && r.ok) {
+    $("validation").innerHTML = `<div class="empty">No issues. Export is allowed.</div>`;
+    return;
+  }
+  const crit = r.issues.filter((i) => i.level === "critical").length;
+  const banner = `<div class="matline" style="border-bottom:1px solid var(--line)">
+    ${crit ? `<span class="pill crit">${crit} critical — export blocked</span>`
+           : `<span class="pill ok">no criticals — export allowed</span>`}
+    <span class="note">${r.issues.length - crit} warning(s) do not block.</span></div>`;
+
+  $("validation").innerHTML = banner + head + r.issues.map((i) =>
+    `<div class="issue ${esc(i.level)}">
+      <span class="lvl">${i.level === "critical" ? "Critical" : "Warning"}</span>
+      <span class="where">${esc(i.where)}</span>
+      <span class="msg">${esc(i.message)}</span>
+      <span class="ref" title="see docs/RULES.md">${i.ref ? esc(i.ref) : ""}</span>
+    </div>`).join("");
+}
+
+/* ---------- tabs ---------------------------------------------------------- */
+
+function renderTab() {
+  if (S.tab === "room") {
+    renderRoom(); renderPlaces(); renderGaps(); renderPlinth(); renderPlan();
+  }
+  else if (S.tab === "cutlist") renderCutlist();
+  else if (S.tab === "nesting") renderNest();
+  else if (S.tab === "validation") renderValidation();
+}
+
+document.querySelector("nav").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-tab]");
+  if (!b) return;
+  S.tab = b.dataset.tab;
+  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("on", x === b));
+  ["cabinets", "room", "cutlist", "nesting", "validation"].forEach((t) => {
+    $("tab-" + t).hidden = t !== S.tab;
+  });
+  renderTab();
+});
+
+/* ---------- job files ----------------------------------------------------- */
+
+async function refreshJobs() {
+  const r = await post("/api/jobs", {});
+  $("joblist").innerHTML = (r.jobs || [])
+    .map((n) => `<option>${esc(n)}</option>`).join("") ||
+    `<option value="">(no saved jobs)</option>`;
+}
+
+function adopt(job) {
+  S.job = job;
+  S.sel = null;
+  S.selRendered = -2;
+  roomSig = null;
+  placesSig = null;
+  gapsSig = null;
+  plinthSig = null;
+  $("jobname").value = job.name || "untitled";
+  compute();
+}
+
+$("new").addEventListener("click", () => adopt(blankJob()));
+
+$("save").addEventListener("click", async () => {
+  const r = await post("/api/save", {job: S.job, path: $("jobname").value.trim()});
+  if (!r.ok) { toast(r.error, true); return; }
+  toast("Saved jobs/" + r.path);
+  await refreshJobs();
+  $("joblist").value = r.path;
+});
+
+$("load").addEventListener("click", async () => {
+  const name = $("joblist").value;
+  if (!name) { toast("No saved job selected.", true); return; }
+  const r = await post("/api/load", {path: name});
+  if (!r.ok) { toast(r.error, true); return; }
+  adopt(r.job);
+});
+
+$("fixture").addEventListener("click", async () => {
+  const r = await post("/api/fixture", {});
+  if (!r.ok) { toast(r.error, true); return; }
+  adopt(r.job);
+  toast("Loaded the October 2025 wardrobe — " + r.job.cabinets.length + " cabinets.");
+});
+
+$("export").addEventListener("click", async () => {
+  const r = await post("/api/export", {job: S.job});
+  if (!r.ok) {
+    toast(r.error + "\n" + (r.issues || []).map((i) =>
+      `${i.where}: ${i.message}`).join("\n"), true);
+    S.tab = "validation";
+    document.querySelector('nav [data-tab="validation"]').click();
+    return;
+  }
+  toast("Wrote " + r.files.length + " files to\n" + r.dir);
+});
+
+$("jobname").addEventListener("input", schedule);
+
+/* ---------- go ------------------------------------------------------------ */
+
+// Set up synchronously: a click that lands while start() is still awaiting must
+// not be overwritten by a late blank job.
+S.job = blankJob();
+$("jobname").value = S.job.name;
+
+(async function start() {
+  S.def = await post("/api/defaults", {});
+  await refreshJobs();
+  compute();
+})();
+</script>
+</body>
+</html>
