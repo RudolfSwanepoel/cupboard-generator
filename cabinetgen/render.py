@@ -10,8 +10,8 @@ from typing import List
 from .model import Cabinet, Job, hinge_side
 from .room import (LAYERS, cabinet_footprint, carcass_z, clashes, corner_points,
                    gap_outline, gaps, geometry, overlaps, placed, plinth_choice_for,
-                   plinth_lengths, pullout_envelope, run_key, runs, swing_envelopes,
-                   to_world, wall_frames)
+                   plinth_lengths, pullout_envelope, return_profiles, run_key, runs,
+                   swing_envelopes, to_world, wall_frames)
 from .standard import Standard, STANDARD
 
 INK = "#191c1a"
@@ -288,6 +288,34 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
                        f'text-anchor="middle" fill="{INK}" '
                        f'transform="rotate(-90 {gx + gw / 2:.1f} {gy + gh / 2:.1f})">'
                        f'{label}</text>')
+
+    # The runs on the walls either side, end on — what you see of wall A's
+    # cabinets standing face on to wall B. Drawn light and see-through, under
+    # this wall's own cabinets, so none of them hides another: the drawing is
+    # about this wall. Cabinets that land on exactly the same outline share one
+    # label rather than stacking their numbers on one spot.
+    shapes = {}
+    for r in return_profiles(job, wall_id, std):
+        shapes.setdefault((r["x0"], r["x1"], r["z0"], r["height"], r["wall"]),
+                          []).append(r["cabinet"])
+    for (x0, x1, z0, hgt, other), nums in shapes.items():
+        sx, sy, sw_, sh = X(x0), Y(z0 + hgt), (x1 - x0) * scale, hgt * scale
+        out.append(f'<g class="eside" data-wall="{escape(other)}" '
+                   f'data-cabs="{" ".join(map(str, nums))}">'
+                   f'<rect x="{sx:.1f}" y="{sy:.1f}" width="{sw_:.1f}" height="{sh:.1f}" '
+                   f'fill="{FAINT}" fill-opacity="0.35" stroke="{MUTED}" '
+                   f'stroke-width="0.9"/>')
+        if sw_ >= 14 and sh >= 14:
+            # at the outline's right edge: two outlines level at the top but of
+            # different depths (a wall unit beside a tall one) then label apart
+            out.append(f'<text x="{sx + sw_ - 3:.1f}" y="{sy + 10:.1f}" font-size="8" '
+                       f'text-anchor="end" fill="{MUTED}">{escape(other)}: '
+                       f'{", ".join(map(str, sorted(nums)))}</text>')
+        out.append('</g>')
+    if shapes:
+        out.append(f'<text x="{pad_l}" y="{H - 32}" font-size="8.5" fill="{MUTED}">'
+                   f'Shaded outlines at the corners are the runs on the walls either side, '
+                   f'seen end on.</text>')
 
     for c, p, lay, g in on_wall:
         z0 = carcass_z(c, p, std)

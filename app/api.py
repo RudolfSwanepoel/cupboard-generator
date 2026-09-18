@@ -16,11 +16,12 @@ from cabinetgen import nest as N
 from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
                                 opening_for, remainder, split_pair, stack)
 from cabinetgen.engine import generate_job
-from cabinetgen.export_plaza import estimate_cost, summarise, write_csvs
+from cabinetgen.export_plaza import (effective_price, estimate_cost, summarise,
+                                     write_csvs)
 from cabinetgen.model import (BOARD_ALIASES, CODES, EXTERIOR_TAPES, MATERIALS,
                               SUPPORT_EDGES,
                               hinge_side, material_board, material_price,
-                              material_thickness, tape_for)
+                              material_record, material_thickness, tape_for)
 from cabinetgen.render import elevation_svg, plan_svg, wall_elevation_svg
 from cabinetgen.room import (LAYERS, add_wall, clashes as room_clashes, closure_error,
                              gaps as room_gaps, geometry, layer_of,
@@ -167,6 +168,9 @@ def _geometry_info(job, cab, std):
                                "door_edge": cab.door_edge,
                                "drawer_box_edge": cab.drawer_box_edge},
             "supports": [{"edge": r.edge, "qty": r.qty} for r in cab.support_list],
+            # the edging each kind of support row gets, off the engine
+            "support_edging": {e: cab.support_tape(job.materials, e)
+                               for e in SUPPORT_EDGES},
             "support_total": cab.support_total,
             "supports_migrated": not cab.support_rows,
             "hinges": [hinge_side(cab, i, n, flip) for i in range(n)],
@@ -316,13 +320,52 @@ def board_save(payload):
     B.save(lib)
 
     out = {"ok": True, "id": board_id, "renamed": bool(old_id and old_id != board_id),
-           "from": old_id, "moved": [], "kept_by": []}
+           "from": old_id, "moved": [], "kept_by": [], "refreshed": []}
+    job = _job(payload)
     if out["renamed"]:
         out["kept_by"] = B.scan_jobs(JOBS_DIR).used_by.get(old_id, [])
-        job = _job(payload)
         out["moved"] = rename_board_in_job(job, old_id, board_id)
+    # The project on screen follows the library for what a board IS — its name,
+    # edging token, thickness, grain and picture — so an edit here shows in the
+    # Structure dropdowns, the cut list and the edging names straight away.
+    out["refreshed"] = refresh_from_library(job, lib, only={board_id})
+    if out["renamed"] or out["refreshed"]:
         out["job"] = job_to_dict(job)
     return out
+
+
+# What the library decides for a board in the project on screen. Price is not on
+# the list: a job keeps the price it was quoted at ("Price capture").
+LIVE_FIELDS = ("name", "board", "tape", "thickness", "grain", "picture")
+
+
+def refresh_from_library(job, lib=None, only=None) -> list:
+    """Bring the job's copy of each board up to date with the library.
+
+    The library is where a board's details are edited, so the project on screen
+    shows them: name, edging token, thickness, grain and picture. The price is
+    the one thing kept — what this job was quoted at, or for a job written before
+    boards carried a price, what the rate card quoted it at, written down now so
+    a new name cannot lose it (the rate card is looked up by name).
+
+    Returns the ids that changed. A board the library does not have is left as
+    the job holds it.
+    """
+    lib = B.by_id(B.load()) if lib is None else (lib if isinstance(lib, dict)
+                                                 else B.by_id(lib))
+    changed = []
+    for key in job.board_ids:
+        if (only and key not in only) or key not in lib:
+            continue
+        held = (job.materials or {}).get(key)
+        rec = material_record(job.materials, key)
+        fresh = dict(B.to_material(lib[key]), price=effective_price(job, key))
+        if isinstance(held, dict) and all(rec.get(f) == fresh.get(f) for f in LIVE_FIELDS):
+            continue
+        job.materials = dict(job.materials or {})
+        job.materials[key] = fresh
+        changed.append(key)
+    return changed
 
 
 def board_delete(payload):
@@ -722,7 +765,9 @@ def job_load(payload):
         return {"ok": False, "error": f"no job file {os.path.basename(path)}"}
     job = load(path)
     renamed = upgrade_former_ids(job)
-    return {"ok": True, "job": job_to_dict(job), "renamed": renamed}
+    refreshed = refresh_from_library(job)
+    return {"ok": True, "job": job_to_dict(job), "renamed": renamed,
+            "refreshed": refreshed}
 
 
 def job_fixture(payload):

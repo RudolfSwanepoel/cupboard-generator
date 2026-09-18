@@ -945,8 +945,8 @@ function renderDoors() {
       <span class="note">${widths[i] || "?"} wide</span>
       ${n === 1
         ? `<select data-leaf="0" class="hinge">
-             <option value="L"${side === "L" ? " selected" : ""}>opens from the left</option>
-             <option value="R"${side === "R" ? " selected" : ""}>opens from the right</option>
+             <option value="L"${side === "L" ? " selected" : ""}>hinged left</option>
+             <option value="R"${side === "R" ? " selected" : ""}>hinged right</option>
            </select>`
         : `<span class="note hinge">hinged ${side === "L" ? "left" : "right"}</span>`}
       <select data-dboard="${i}" title="what this leaf is cut from">
@@ -983,7 +983,7 @@ function renderDoors() {
     ${leaves.join("")}
     <p class="hint">${n === 2
       ? "A pair is fixed: left leaf hinged left, right leaf hinged right. "
-      : n === 1 ? "One door: choose which side it opens from. " : ""}External board
+      : n === 1 ? "One door: choose which side its hinges are on — the handle goes on the other side. " : ""}External board
       is <b>${esc(named(c.exterior_board))}</b>.${own.length ? " " + esc(own.join(" ")) : ""}</p>
     ${edgingHTML(c, "door")}
     <div class="swing" id="swingnote"></div>`;
@@ -1159,8 +1159,8 @@ function renderSupports() {
   const migrated = !(c.support_rows && c.support_rows.length);
 
   const edges_in_force = (g && g.tapes) || {};
-  const tapeOf = (e) => e === "front" ? edges_in_force.carcass_edge
-                      : e === "white" ? edges_in_force.drawer_box_edge : "";
+  // the engine's own answer for each kind of row — never worked out here
+  const tapeOf = (e) => ((g && g.support_edging) || {})[e] || "";
 
   const body = rows.map((r, i) => `<tr>
       <td class="n">${i + 1}</td>
@@ -1627,12 +1627,15 @@ $("boards").addEventListener("click", async (e) => {
     S.selRendered = -2;
     await compute();
   }
-  toast(r.renamed
+  toast((r.renamed
     ? `Renamed ${r.from} to ${r.id}.` +
       (r.kept_by.length
         ? ` ${r.kept_by.join(", ")} ${r.kept_by.length === 1 ? "keeps its" : "keep their"}` +
           ` own copy under ${r.from}.` : "")
-    : "Saved " + board.name + " to the library.");
+    : "Saved " + board.name + " to the library.") +
+    ((r.refreshed || []).length
+      ? ` The project open here now uses its new details` +
+        ` (its quoted price is kept).` : ""));
   S.libEdit = null;
   renderBoardsTab();
 });
@@ -1880,6 +1883,10 @@ function moveElevDrag(d, e) {
     // asks whether the two overlap
     if (sn.x0 !== null && sn.x0 !== undefined &&
         (sn.x0 >= x + w || sn.x1 <= x)) continue;
+    // and a level line with a neighbour applies everywhere except over or under
+    // it — there, level tops would put one cabinet inside the other
+    if (sn.not_x0 !== null && sn.not_x0 !== undefined &&
+        !(sn.not_x0 >= x + w || sn.not_x1 <= x)) continue;
     const at = sn.z === 0 ? legs : sn.z;
     if (Math.abs(at - z) <= tol) { z = sn.z; whyZ = sn.why; snapped = true; break; }
   }
@@ -2652,10 +2659,16 @@ $("load").addEventListener("click", async () => {
   adopt(r.job);
   // A board the file names by an id the library has since renamed, shown under
   // its current id. Said out loud: the file itself is not touched until saved.
-  if ((r.renamed || []).length) {
-    toast(r.renamed.map((m) => `${name} names ${m.from}, which the library now ` +
-      `calls ${m.to} — shown here as ${m.to}.`).join("\n") +
-      `\nThe file on disk is unchanged until you save it.`);
+  // And every board's details — name, edging, thickness, grain — are the
+  // library's, whatever they were when the job was saved; its prices are kept.
+  const said = (r.renamed || []).map((m) => `${name} names ${m.from}, which the ` +
+    `library now calls ${m.to} — shown here as ${m.to}.`);
+  if ((r.refreshed || []).length) {
+    said.push(`Board details updated from the library: ${r.refreshed.join(", ")} ` +
+              `(prices as quoted are kept).`);
+  }
+  if (said.length) {
+    toast(said.join("\n") + `\nThe file on disk is unchanged until you save it.`);
   }
 });
 

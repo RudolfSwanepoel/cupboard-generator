@@ -439,12 +439,13 @@ def main() -> int:
           [s["z"] for s in z_snap_points(jz, 2, "A", std) if s["why"] == "on top of 1"],
           [std.leg_height + base.height])
     jz.placements[0] = Placement(1, "A", 3000)
-    check("a cabinet that shares no span is nothing to sit on",
+    check("a cabinet that shares no span is nothing to sit on — but its top lines up",
           [s["why"] for s in z_snap_points(jz, 2, "A", std)],
-          ["on the floor", "tight to the ceiling"])
+          ["on the floor", "tops level with 1", "tight to the ceiling"])
     jz.room.ceiling = None
     check("with no ceiling measured there is nothing to cap it against",
-          [s["why"] for s in z_snap_points(jz, 2, "A", std)], ["on the floor"])
+          [s["why"] for s in z_snap_points(jz, 2, "A", std)],
+          ["on the floor", "tops level with 1"])
 
     # A drag crosses several of these on the way, so it asks for all of them with
     # the stretch of wall each applies over rather than a round trip per pixel.
@@ -452,8 +453,38 @@ def main() -> int:
     spanned = z_snap_points(jz, 2, "A", std, spans=True)
     check("every candidate, with the stretch it applies over",
           [(s["z"], s["why"], s["x0"], s["x1"]) for s in spanned],
-          [(0, "on the floor", None, None), (820, "on top of 1", 3000, 3900),
-           (2000, "tight to the ceiling", None, None)])
+          [(0, "on the floor", None, None), (120, "tops level with 1", None, None),
+           (820, "on top of 1", 3000, 3900), (2000, "tight to the ceiling", None, None)])
+    check("and a level line carries the stretch it does NOT apply over — over the "
+          "other cabinet, level tops would put one inside the other",
+          [(s["why"], s.get("not_x0"), s.get("not_x1")) for s in spanned
+           if "level" in s["why"]], [("tops level with 1", 3000, 3900)])
+
+    print("\ndragging in the elevation: lining up with a neighbour")
+    # Rudolf's case: a wall unit moved up beside a tall unit snaps to its side
+    # but should also be able to bring its top level with the tall unit's top.
+    tall = cab(1, 600)
+    tall.kind, tall.height, tall.depth = "tall", 2100, 580
+    wu = cab(2, 600)
+    wu.kind, wu.height, wu.depth = "upper", 700, 330
+    wu2 = cab(3, 600)
+    wu2.kind, wu2.height, wu2.depth = "upper", 500, 330
+    jt = job([tall, wu, wu2], [Placement(1, "A", 0), Placement(2, "A", 600, z=1400),
+                               Placement(3, "A", 1200, z=1650)])
+    jt.room.ceiling = 2700
+    zs = {s["why"]: s["z"] for s in z_snap_points(jt, 2, "A", std)}
+    check("beside a tall unit, its top can come level with the tall unit's top",
+          zs.get("tops level with 1"), std.leg_height + 2100 - 700)
+    check("so the two tops really are one line",
+          zs["tops level with 1"] + wu.height, std.leg_height + tall.height)
+    check("and beside another wall unit, the undersides and the tops both line up",
+          (zs.get("bottoms level with 3"), zs.get("tops level with 3")),
+          (1650, 1650 + 500 - 700))
+    check("a standing neighbour's underside is the floor, which is already a candidate",
+          "bottoms level with 1" in zs, False)
+    check("a level line under the leg height is not offered — it would hang the "
+          "carcass lower than its legs stand it",
+          all(z > std.leg_height for why, z in zs.items() if "level" in why), True)
     check("asked at a position it has not reached yet, the top is a candidate",
           [s["why"] for s in z_snap_points(jz, 2, "A", std, at_x=3000)],
           ["on the floor", "on top of 1", "tight to the ceiling"])

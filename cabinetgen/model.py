@@ -233,11 +233,16 @@ class Support:
     which is what the three-number model got wrong: `edged + white` could exceed
     `supports` and the plain count went negative in silence.
     """
-    edge: str = "front"    # 'front' (carcass tape) | 'white' (drawer-box tape) | 'none'
+    edge: str = "front"    # 'front' (carcass tape) | 'white' (PVC WHITE) | 'none'
     qty: int = 1
 
 
 SUPPORT_EDGES = ("none", "front", "white")
+
+# A white-edged support is edged white, whatever the boards are (18 September
+# 2026). It used to take the drawer-box tape, which follows the carcass board, so
+# on a grey carcass a support labelled "White-edged" went out as PVC Grey.
+WHITE_EDGE = "PVC WHITE"
 
 
 @dataclass
@@ -259,7 +264,7 @@ class Cabinet:
     # nothing else — once support_rows is set, these are not read.
     supports: int = 4
     edged_supports: int = 0      # front-edged, banded in the carcass tape
-    white_supports: int = 0      # white-edged, banded in the drawer-box tape
+    white_supports: int = 0      # white-edged, banded in PVC WHITE
 
     shelves: int = 0             # adjustable
     fixed_shelves: int = 0       # fitted, slightly deeper
@@ -495,6 +500,17 @@ class Cabinet:
         if self.drawer_box_edge is not None:
             return self.drawer_box_edge
         return tape_for(materials, self.drawer_carcass, "pvc")
+
+    def support_tape(self, materials: dict, edge: str) -> str:
+        """The edging on one row of supports: front-edged ones face the front and
+        take the carcass edging (PVC in the exterior colour); white-edged ones
+        are white; the rest are not edged. The cut list and the editor both ask
+        here, so the name beside a row is the name on the order."""
+        if edge == "front":
+            return self.carcass_tape(materials)
+        if edge == "white":
+            return WHITE_EDGE
+        return ""
 
     def drawer_box_tape_of(self, materials: dict, d: "Drawer") -> str:
         """PVC in one drawer's own box board colour — the same rule as

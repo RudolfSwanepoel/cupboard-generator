@@ -290,6 +290,18 @@ project to select it is quoted at and moves no existing job. The October job
 reopens at R28,363.50 permanently, and `check_library.py` pins exactly that by
 raising a price in a temporary library and re-costing it.
 
+**Everything else about a board comes from the library** (ruled 18 September
+2026). The library is where a board's details are edited, so the project on
+screen uses them: name, edging token, thickness, grain and picture
+(`api.LIVE_FIELDS`). `api.refresh_from_library` brings the job's copy up to date
+when a saved job is opened (`job_load`) and when a board is saved in the Boards
+tab (`board_save`, for the project open on screen) — so a changed description
+shows in Structure, the cut list and the quote at once. **Price is the one field
+kept**: the job's captured figure, or for a pre-library job the rate-card price,
+written down before the name changes so a new name cannot lose it (the rate card
+is keyed by name). The October fixture button loads the frozen quote as it was
+and is never refreshed. Files on disk change only when saved.
+
 ### Thickness — 16 mm is assumed, and that is not fixed
 
 Every carcass size in the app is 16 mm arithmetic. Thickness-driven geometry is
@@ -327,7 +339,7 @@ and carry no thickness at all, and fillers and scribes are gap arithmetic
 UI — never a rail.
 
 `Cabinet.support_rows` is a list of `Support(edge, qty)`, where `edge` is
-`'front'` (carcass tape), `'white'` (drawer-box tape) or `'none'`. **The total is
+`'front'` (carcass tape), `'white'` or `'none'`. **The total is
 the sum of the rows and nothing subtracts.** The old model was a total with two
 subsets taken off it, so `edged + white` could exceed `supports` and the plain
 count went negative — which `if plain > 0` then dropped in silence.
@@ -338,6 +350,14 @@ front-edged, then white-edged — so a migrated cabinet cuts the same list in th
 same order. A cabinet whose three numbers contradict each other keeps cutting
 exactly what it always cut and is **named in a warning**; nothing is migrated on
 a guess. `Test_Build.json` cabinet 4 is the one real case (0 total, 4 white).
+
+**White-edged means edged white: `PVC WHITE`, whatever the boards are** (ruled 18
+September 2026, `model.WHITE_EDGE`). It used to take the drawer-box tape, which
+follows the carcass board, so on a GREY carcass a row labelled "White-edged" went
+out as `PVC Grey`. `Cabinet.support_tape` is the one answer; the engine cuts from
+it and the editor's Edging column shows it. The October job is unaffected (its
+white supports were on MEL, already `PVC WHITE`); `check_library`'s what-if swap
+to a Brookhill carcass moved R34,716.75 → R34,723.50 because of it.
 
 ## The nester
 
@@ -437,6 +457,19 @@ drag let go before anything listened, and the cabinet stuck to the pointer. And
 the floor snap is compared where a standing carcass really is (its underside on
 the legs), not at `z = 0`; an underside below leg height is "on the floor". Before,
 a sideways drag with a 2 px wobble hung a base unit 86 mm up.
+
+**Lining up, not only stacking** (18 September 2026). Besides "on top of" and
+"under", which only apply over or under the other cabinet, `z_snap_points` offers
+"tops level with N" and "bottoms level with N" for every cabinet on the wall. Those
+carry the stretch they do **not** apply over (`not_x0`/`not_x1`): beside a tall
+unit a wall unit's top can come level with it, but directly over a base unit
+level tops would put one inside the other. Nothing below `leg_height` is offered.
+
+**Hinge naming.** `L` / `R` is the edge the leaf hangs from, facing the cabinet —
+the plan's swing pivot, the elevation's hinge dots and the point of its dashed
+triangle all sit on that side, and they were checked to agree. The editor says
+"hinged left / hinged right". It used to say "opens from the left" for `L`, which
+reads as the handle side — the one thing that was inverted.
 
 **Clicking a door in the elevation no longer turns it round.** Which edge a leaf
 hangs from is set in the Doors section, where the answer can be read instead of
@@ -687,6 +720,15 @@ reads the result back. The elevation only draws leaves for template cabinets
 bespoke cabinet's leaf is turned round from the editor rather than the drawing.
 
 ## Per-wall elevations
+
+**The runs either side show end on** (18 September 2026). Face on to wall B, wall
+A's run comes towards you at B's start corner, and what you see is the cabinets'
+sides. `room.return_profiles` projects each cabinet on the two neighbouring walls
+into this wall's frame off its real plan outline (`to_world` there, the inverse
+here — still all trig in `room.py`), and the drawing shows them light and
+see-through under this wall's own cabinets, one label per identical outline. The
+opposite wall is behind the viewer and is not drawn. They are drawing only — not
+draggable, and not part of any dimension chain.
 
 `render.wall_elevation_svg(job, wall_id)` draws one wall face on, as a drawing
 meant to be measured from: cabinets at their true x and height, the wall and its

@@ -326,9 +326,9 @@ def _boards_and_tapes(job: Job):
 
         wants = [("carcass_edge", c.carcass_edge, c.exterior_board, "pvc",
                   "the fronts of its sides, top, bottom, shelves and dividers")]
-        if any(r.edge == "white" for r in c.support_list) or c.drawer_list:
+        if c.drawer_list:
             wants.append(("drawer_box_edge", c.drawer_box_edge, c.carcass_board, "pvc",
-                          "its drawer boxes and white-edged supports"))
+                          "its drawer boxes"))
         if c.door_count or c.exposed_sides:
             wants.append(("door_edge", c.door_edge,
                           c.door_edge_board or c.exterior_board,

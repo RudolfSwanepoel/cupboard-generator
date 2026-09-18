@@ -261,7 +261,10 @@ def main() -> int:                                                  # noqa: C901
           cabinet_to_dict(roundtrip), cabinet_to_dict(box(support_rows=[Support("front", 2)])))
 
     print("\nstored jobs still cut what they cut")
-    for name, want in (("Test.json", 36), ("Test_Build.json", 27)):
+    # Test.json is a working file — it is opened, edited and saved in the app
+    # (re-saved under BROOKHILL with GREY cabinets, 18 Sept 2026), so nothing
+    # pins its contents. Test_Build.json is the untouched pre-library DECOR job.
+    for name, want in (("Test_Build.json", 27),):
         j = load(os.path.join(ROOT, "jobs", name))
         check(f"{name} generates the same number of panel lines",
               len(generate_job(j)), want)
@@ -290,7 +293,7 @@ def main() -> int:                                                  # noqa: C901
     check("and generating it moved nothing in the job: its bespoke panels still say DECOR",
           sorted({p.material for c in JOB.cabinets for p in c.bespoke} - {"MEL", "BACK"}),
           ["DECOR"])
-    t = load(os.path.join(ROOT, "jobs", "Test.json"))
+    t = load(os.path.join(ROOT, "jobs", "Test_Build.json"))
     t.cabinets.append(Cabinet(99, 600, 720, 580, kind="base", doors=1))
     check("a new cabinet in a job quoted under DECOR is cut from that job's DECOR",
           sorted({p.material for p in generate_job(t)
@@ -337,6 +340,17 @@ def main() -> int:                                                  # noqa: C901
     check("a drawer's boards round-trip through the job file",
           [(d.box_board, d.face_board) for d in back.drawers],
           [(None, None), ("BROOKHILL", "MEL"), (None, None)])
+    grey = {"MEL": dict(MATERIALS["MEL"]),
+            "GREY": {"name": "Grey", "tape": "Grey", "thickness": 16, "grain": "plain"}}
+    gcab = Cabinet(1, 600, 720, 560, kind="base", carcass_board="GREY",
+                   exterior_board="GREY",
+                   support_rows=[Support("white", 3), Support("front", 1)])
+    check("a white-edged support is edged white on a grey carcass, not PVC Grey",
+          [(p.qty, p.edge_material) for p in generate_cabinet(gcab, S, grey)
+           if p.code[:2] == "04"], [(3, "PVC WHITE"), (1, "PVC Grey")])
+    check("and the editor is told the same name the cut list carries",
+          {e: gcab.support_tape(grey, e) for e in ("none", "front", "white")},
+          {"none": "", "front": "PVC Grey", "white": "PVC WHITE"})
     from app.api import rename_board_in_job                           # noqa: E402
     rj = Job(name="r", cabinets=[cabinet_from_dict(cabinet_to_dict(odd))])
     rename_board_in_job(rj, "BROOKHILL", "BRK2")

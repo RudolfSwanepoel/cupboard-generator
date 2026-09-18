@@ -41,7 +41,6 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     carc_tape = cab.carcass_tape(mats)
     door_tape = cab.door_tape(mats)
     face_tape = cab.drawer_face_tape(mats)
-    box_tape = cab.drawer_box_tape(mats)
     # Grain follows the board, not the panel's job: a Brookhill carcass side runs
     # with the grain exactly as a Brookhill door does, and a white one does not.
     carc_grain = grain_of(mats, carc)
@@ -62,9 +61,8 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     # One line per row, in row order. `support_list` resolves them, including
     # reading the three legacy numbers on a job that predates the rows. Nothing
     # here subtracts anything from anything.
-    tape_for_edge = {"front": carc_tape, "white": box_tape, "none": ""}
     for row in cab.support_list:
-        tape = tape_for_edge.get(row.edge, "")
+        tape = cab.support_tape(mats, row.edge)
         P.append(Panel(n, "04", "Support", carc, Wi, SUPPORT_W, row.qty,
                        edge_l=1 if tape else 0, edge_material=tape,
                        grain=carc_grain))

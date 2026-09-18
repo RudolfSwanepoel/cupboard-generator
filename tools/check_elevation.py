@@ -327,6 +327,35 @@ def main() -> int:
     for label, drawing in (("elevation", wall_elevation_svg(j, "A")), ("plan", plan_svg(j))):
         check(f"escaped in the {label}", "<b>" not in drawing and "&lt;b&gt;" in drawing, True)
 
+    print("\nthe runs either side, seen end on (18 Sept 2026)")
+    from cabinetgen.room import rectangular, return_profiles              # noqa: E402
+    from cabinetgen.model import Cabinet as _Cab, Job as _Job, Placement as _Pl  # noqa: E402
+    ra = _Cab(1, 600, 720, 580, kind="base")
+    rb = _Cab(2, 600, 2100, 580, kind="tall")
+    rc = _Cab(3, 600, 720, 580, kind="base")
+    rj = _Job(name="r", cabinets=[ra, rb, rc], room=rectangular(4000, 3000, ceiling=2600),
+              placements=[_Pl(1, "A", 3400), _Pl(2, "A", 0), _Pl(3, "B", 700)])
+    prof = return_profiles(rj, "B")
+    check("face on to B, wall A's cabinets show end on at B's start corner",
+          sorted((r["cabinet"], r["x0"], r["x1"]) for r in prof),
+          [(1, 0, 580), (2, 0, 580)])
+    check("at their real heights, legs included",
+          sorted((r["cabinet"], r["z0"], r["height"]) for r in prof),
+          [(1, 100, 720), (2, 100, 2100)])
+    check("the one nearest the viewer — furthest out from B — is drawn last",
+          [r["cabinet"] for r in prof], [1, 2])
+    check("B's own cabinet is not a profile on B",
+          any(r["cabinet"] == 3 for r in prof), False)
+    check("and face on to A, B's cabinet shows at A's far end",
+          [(r["cabinet"], r["x0"], r["x1"]) for r in return_profiles(rj, "A")],
+          [(3, 3420, 4000)])
+    check("the opposite wall is behind the viewer, so C sees B's run and nothing of A",
+          sorted({r["wall"] for r in return_profiles(rj, "C")}), ["B"])
+    rsvg = wall_elevation_svg(rj, "B")
+    check("the drawing carries them as their own class, not as draggable cabinets",
+          (rsvg.count('class="eside"'), 'data-cab="1"' in rsvg.split('class="eside"')[0]),
+          (2, False))
+
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0
 

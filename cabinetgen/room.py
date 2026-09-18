@@ -496,6 +496,62 @@ def placed(job):
     return out
 
 
+def return_profiles(job, wall_id: str, std: Standard = STANDARD) -> List[dict]:
+    """The cabinets on the walls either side, as this wall's elevation sees them.
+
+    Face on to wall B, the run on wall A comes towards you at B's start corner,
+    and what you see of it is the cabinets' sides, end on. Each cabinet on the
+    two neighbouring walls is projected into this wall's frame off its real plan
+    outline (`geometry`), so an out-of-square corner or a corner unit's L lands
+    where it really is: `x0`/`x1` is the stretch of this wall it covers, clipped
+    to the wall, and `z0`/`height` its real height (`carcass_z`). `out` is how far
+    it stands out from this wall's face — the viewer is out in the room, so the
+    larger it is the nearer the viewer, and the drawing puts those on top.
+
+    The opposite wall is not included: it is behind anyone looking at this one.
+    Nothing here is a new dimension — it is the same outline the plan draws, seen
+    from the side.
+    """
+    rm = job.room
+    if rm is None:
+        return []
+    ids = [w.id for w in rm.walls]
+    if wall_id not in ids:
+        return []
+    i = ids.index(wall_id)
+    beside = set()
+    for j in (i - 1, i + 1):
+        if 0 <= j < len(ids) or rm.closed:
+            if len(ids) > 1:
+                beside.add(ids[j % len(ids)])
+    beside.discard(wall_id)
+    here = _wall(rm, wall_id)
+    (sx, sy), (dx, dy), (nx, ny) = wall_frames(rm)[here.id]
+    out = []
+    for cab, p, lay in placed(job):
+        if p.wall not in beside:
+            continue
+        g = geometry(cab, std)
+        pts = []
+        for fx, fy in g.footprint:
+            wx, wy, _ = to_world(rm, p.wall, p.x + fx, fy)
+            pts.append(((wx - sx) * dx + (wy - sy) * dy,
+                        (wx - sx) * nx + (wy - sy) * ny))
+        if not pts:
+            continue
+        x0 = max(min(x for x, _ in pts), 0)
+        x1 = min(max(x for x, _ in pts), here.length)
+        if x1 <= x0 or min(y for _, y in pts) < -1:
+            continue                     # not in front of this wall at all
+        out.append({"cabinet": cab.number, "wall": p.wall, "layer": lay,
+                    "x0": int(round(x0)), "x1": int(round(x1)),
+                    "z0": carcass_z(cab, p, std), "height": g.height,
+                    "out": int(round(min(y for _, y in pts)))})
+    # nearest this wall first, so the one nearest the viewer is drawn last, on top
+    out.sort(key=lambda r: r["out"])
+    return out
+
+
 # --- gaps -------------------------------------------------------------------
 
 @dataclass
@@ -680,22 +736,36 @@ def z_snap_points(job, number: int, wall_id: str, std: Standard = STANDARD,
     g = geometry(cab, std)
     x0 = at_x if at_x is not None else (here.x if here is not None else 0)
     x1 = x0 + g.width
-    out = [(0, "on the floor", None, None)]
+    # (z, why, applies over x0..x1, applies everywhere except over nx0..nx1)
+    out = [(0, "on the floor", None, None, None, None)]
     if rm.ceiling:
-        out.append((max(rm.ceiling - g.height, 0), "tight to the ceiling", None, None))
+        out.append((max(rm.ceiling - g.height, 0), "tight to the ceiling",
+                    None, None, None, None))
 
     for other, op, _lay in placed(job):
         if other.number == number or op.wall != wall_id:
             continue
         og = geometry(other, std)
         ox0, ox1 = op.x, op.x + og.width
-        if not spans and (ox0 >= x1 or ox1 <= x0):
-            continue                       # nothing of it is above or below this
+        over = not (ox0 >= x1 or ox1 <= x0)    # above or below it, at this position
         oz = carcass_z(other, op, std)
-        out.append((oz + og.height, f"on top of {other.number}", ox0, ox1))
-        under = oz - g.height
-        if under > 0:
-            out.append((under, f"under {other.number}", ox0, ox1))
+        if spans or over:
+            out.append((oz + og.height, f"on top of {other.number}", ox0, ox1, None, None))
+            under = oz - g.height
+            if under > 0:
+                out.append((under, f"under {other.number}", ox0, ox1, None, None))
+        # Lining up with a neighbour rather than stacking on it (18 Sept 2026): a
+        # wall unit beside a tall unit wants its top level with the tall unit's
+        # top, and two wall units want their undersides level. That holds anywhere
+        # along the wall EXCEPT over or under the other cabinet, where level tops
+        # would put one inside the other — so it carries the stretch it does not
+        # apply over. Only a height that is really hung counts: anything below the
+        # leg height would hang the carcass lower than its legs would stand it.
+        if spans or not over:
+            for z, why in ((oz + og.height - g.height, f"tops level with {other.number}"),
+                           (oz if op.z > 0 else 0, f"bottoms level with {other.number}")):
+                if z > std.leg_height:
+                    out.append((z, why, None, None, ox0, ox1))
 
     # A measured ceiling caps how high the underside may go. The floor is never
     # capped out of the list: standing on the floor is where a carcass starts,
@@ -703,15 +773,17 @@ def z_snap_points(job, number: int, wall_id: str, std: Standard = STANDARD,
     # something to answer by offering nowhere to put it.
     limit = rm.ceiling - g.height if rm.ceiling else None
     seen, keep = set(), []
-    for z, why, a, b in sorted(out, key=lambda r: (r[0], r[1])):
+    for z, why, a, b, na, nb in sorted(out, key=lambda r: (r[0], r[1])):
         z = int(z)
-        key = (z, a, b) if spans else z
+        key = (z, a, b, na, nb) if spans else z
         if z < 0 or key in seen or (limit is not None and z > limit and z != 0):
             continue
         seen.add(key)
         row = {"z": z, "why": why}
         if spans:
             row["x0"], row["x1"] = a, b
+            if na is not None:
+                row["not_x0"], row["not_x1"] = na, nb
         keep.append(row)
     return keep
 

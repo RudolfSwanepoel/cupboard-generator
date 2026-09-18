@@ -7,7 +7,15 @@
     "GREY"
   ],
   "materials": {
-    "MEL": "SUPER WHITE MELAMINE CHIP 9X6X16MM",
+    "MEL": {
+      "board": "SUPER WHITE MELAMINE 16MM",
+      "name": "SUPER WHITE MELAMINE 16MM",
+      "tape": "WHITE",
+      "thickness": 16,
+      "grain": "plain",
+      "price": 575,
+      "picture": ""
+    },
     "BROOKHILL": {
       "board": "BROOKHILL FUSION",
       "name": "BROOKHILL FUSION",
@@ -17,7 +25,15 @@
       "price": 999,
       "picture": ""
     },
-    "BACK": "IMPORTED WHITE DECOR 9X6X3MM",
+    "BACK": {
+      "board": "WHITE MASONITE BACKING 3MM",
+      "name": "WHITE MASONITE BACKING 3MM",
+      "tape": "WHITE",
+      "thickness": 3,
+      "grain": "plain",
+      "price": 310,
+      "picture": ""
+    },
     "GREY": {
       "board": "Grey",
       "name": "Grey",
@@ -37,11 +53,16 @@
       "kind": "tall",
       "back": "four",
       "template": "standard",
-      "support_rows": [],
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
       "supports": 4,
       "edged_supports": 0,
       "white_supports": 0,
-      "shelves": 4,
+      "shelves": 5,
       "fixed_shelves": 0,
       "shelf_width": null,
       "divider_height": null,
@@ -97,7 +118,7 @@
       "doors": 1,
       "door_height": null,
       "door_hinges": [
-        "R"
+        "L"
       ],
       "has_doors": null,
       "door_boards": [],
@@ -147,7 +168,7 @@
       "doors": 1,
       "door_height": null,
       "door_hinges": [
-        "L"
+        "R"
       ],
       "has_doors": null,
       "door_boards": [],
@@ -201,7 +222,9 @@
       "divider_count": 0,
       "doors": 1,
       "door_height": null,
-      "door_hinges": [],
+      "door_hinges": [
+        "R"
+      ],
       "has_doors": null,
       "door_boards": [],
       "drawers": [],
@@ -401,7 +424,7 @@
       "door_boards": [],
       "drawers": [
         {
-          "face_height": 257,
+          "face_height": 192,
           "box_height": 150,
           "base": "board",
           "mode": "share",
@@ -410,7 +433,7 @@
           "face_board": null
         },
         {
-          "face_height": 257,
+          "face_height": 192,
           "box_height": 150,
           "base": "board",
           "mode": "share",
@@ -419,7 +442,16 @@
           "face_board": null
         },
         {
-          "face_height": 259,
+          "face_height": 192,
+          "box_height": 150,
+          "base": "board",
+          "mode": "share",
+          "share": 1,
+          "box_board": null,
+          "face_board": null
+        },
+        {
+          "face_height": 195,
           "box_height": 150,
           "base": "board",
           "mode": "share",
@@ -516,7 +548,7 @@
       "cabinet": 5,
       "wall": "A",
       "x": 600,
-      "z": 1402,
+      "z": 1400,
       "flip": false,
       "layer": null
     },
@@ -532,6 +564,14 @@
       "cabinet": 7,
       "wall": "A",
       "x": 2450,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 8,
+      "wall": "B",
+      "x": 0,
       "z": 0,
       "flip": false,
       "layer": null

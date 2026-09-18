@@ -4,11 +4,11 @@
   "boards": [
     {
       "id": "MEL",
-      "name": "SUPER WHITE MELAMINE CHIP 9X6X16MM",
+      "name": "SUPER WHITE MELAMINE 16MM",
       "tape": "WHITE",
       "thickness": 16,
       "grain": "plain",
-      "price": 575.0,
+      "price": 575,
       "picture": ""
     },
     {
@@ -22,11 +22,11 @@
     },
     {
       "id": "BACK",
-      "name": "IMPORTED WHITE DECOR 9X6X3MM",
+      "name": "WHITE MASONITE BACKING 3MM",
       "tape": "WHITE",
       "thickness": 3,
       "grain": "plain",
-      "price": 310.0,
+      "price": 310,
       "picture": ""
     },
     {

@@ -269,7 +269,10 @@ def main() -> int:                                                  # noqa: C901
           job_from_dict({"name": "x", "cabinets": [
               {"number": 1, "width": 600, "height": 720, "depth": 500}
           ]}).cabinets[0].back_board, "BACK")
-    for name in ("Test.json", "Test_Build.json"):
+    # Test.json is a working file — it is opened, edited and saved in the app
+    # (re-saved under BROOKHILL with GREY cabinets, 18 Sept 2026), so nothing
+    # pins its contents. Test_Build.json is the untouched pre-library DECOR job.
+    for name in ("Test_Build.json",):
         j = load(os.path.join(ROOT, "jobs", name))
         check(f"{name} migrates every cabinet",
               sorted({c.back_board for c in j.cabinets}), ["BACK"])
@@ -313,7 +316,7 @@ def main() -> int:                                                  # noqa: C901
     usage = B.scan_jobs(os.path.join(ROOT, "jobs"))
     # a subset, not the whole folder: saving a job must not fail this check
     check("the real jobs are found",
-          {"Test.json", "Test_Build.json"} <= set(usage.used_by.get("DECOR", [])), True)
+          {"Test_Build.json"} <= set(usage.used_by.get("DECOR", [])), True)
     check("and nothing in the folder is unreadable today", usage.unreadable, [])
     with tempfile.TemporaryDirectory() as tmp:
         with open(os.path.join(tmp, "good.json"), "w", encoding="utf-8") as fh:
@@ -344,7 +347,10 @@ def main() -> int:                                                  # noqa: C901
     check("the board count before and after is the engine's",
           (pre["before"]["boards"]["MEL"], pre["after"]["boards"]["MEL"]), (18, 3))
     check("and so is the cost",
-          (pre["before"]["cost"], pre["after"]["cost"]), (28363.50, 34716.75))
+          # 34723.50, not 34716.75: white-edged supports stay PVC WHITE on a
+          # Brookhill carcass now instead of following it into PVC WOOD, and the
+          # two edging lines round up differently (18 Sept 2026)
+          (pre["before"]["cost"], pre["after"]["cost"]), (28363.50, 34723.50))
     check("a preview writes nothing", "job" in pre, False)
     check("and leaves the job it was asked about alone",
           sorted({c["carcass_board"] for c in d["cabinets"]}), ["MEL"])
@@ -384,8 +390,37 @@ def main() -> int:                                                  # noqa: C901
     check("boards round-trip", rt.board_ids, JOB.board_ids)
     check("prices round-trip", costed(rt), 28363.50)
     check("a job written before the library still names its boards",
-          load(os.path.join(ROOT, "jobs", "Test.json")).board_ids,
+          load(os.path.join(ROOT, "jobs", "Test_Build.json")).board_ids,
           ["BACK", "DECOR", "MEL"])
+
+    print("\nthe library is where a board's details come from (18 Sept 2026)")
+    from app.api import refresh_from_library                              # noqa: E402
+    libx = [B.Board(id="MEL", name="WHITE MEL RENAMED", tape="SNOW", thickness=16,
+                    grain="plain", price=640.0)]
+    stale = Job(name="st", boards=["MEL"],
+                materials={"MEL": {"board": "SUPER WHITE MELAMINE CHIP 9X6X16MM",
+                                   "name": "SUPER WHITE MELAMINE CHIP 9X6X16MM",
+                                   "tape": "WHITE", "thickness": 16, "grain": "plain",
+                                   "price": 575.0}},
+                cabinets=[box(carcass_board="MEL", exterior_board="MEL")])
+    check("a changed description reaches the open project",
+          (refresh_from_library(stale, libx), stale.materials["MEL"]["name"]),
+          (["MEL"], "WHITE MEL RENAMED"))
+    check("and so does the edging it generates",
+          tape_for(stale.materials, "MEL", "pvc"), "PVC SNOW")
+    check("but the job keeps the price it was quoted at",
+          stale.materials["MEL"]["price"], 575.0)
+    check("nothing to do when it already matches", refresh_from_library(stale, libx), [])
+    bare = Job(name="bare", materials={"MEL": "SUPER WHITE MELAMINE CHIP 9X6X16MM"},
+               cabinets=[box(carcass_board="MEL", exterior_board="MEL")])
+    refresh_from_library(bare, libx)
+    check("a pre-library job writes down the rate-card price before its name changes",
+          (bare.materials["MEL"]["name"], bare.materials["MEL"]["price"]),
+          ("WHITE MEL RENAMED", 575.0))
+    check("a board the library does not have is left as the job holds it",
+          refresh_from_library(Job(name="n", materials={"ZZ": {"name": "z"}}), libx), [])
+    check("and the October job, never refreshed, still costs what it was quoted",
+          costed(JOB), 28363.50)
 
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0
