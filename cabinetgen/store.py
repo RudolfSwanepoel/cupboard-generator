@@ -70,6 +70,11 @@ def room_from_dict(d: dict) -> Room:
 def job_to_dict(job: Job) -> dict:
     d = {
         "name": job.name,
+        # The boards this project selected, and the records it was quoted with.
+        # `board_ids`, not `boards`: a job written before the library implied its
+        # selection through `materials`, and saving makes that implication
+        # explicit instead of leaving it to be re-derived every time.
+        "boards": job.board_ids,
         "materials": job.materials,
         "cabinets": [cabinet_to_dict(c) for c in job.cabinets],
         "loose": [panel_to_dict(p) for p in job.loose],
@@ -91,7 +96,12 @@ def job_from_dict(d: dict) -> Job:
         name=d.get("name", "untitled"),
         cabinets=[cabinet_from_dict(c) for c in d.get("cabinets", [])],
         loose=[panel_from_dict(p) for p in d.get("loose", [])],
-        materials=d.get("materials") or Job("x").materials,
+        boards=list(d.get("boards") or []),
+        # An explicit {} means "this project has selected no boards yet", which is
+        # what a new one says. Only a missing or null key falls back to the house
+        # boards, which is how every job written before the library reads.
+        materials=(d["materials"] if isinstance(d.get("materials"), dict)
+                   else Job("x").materials),
         room=room_from_dict(d["room"]) if d.get("room") else None,
         placements=[Placement(**_only_known(Placement, p))
                     for p in d.get("placements", [])],

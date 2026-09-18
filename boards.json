@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "note": "The board library. Shared across every project and committed to the repo so both machines see the same boards. A job does not point at this file: selecting a board copies its record into the job, which is what keeps a quoted job quoted (see Job.materials and CLAUDE.md, 'Price capture').",
+  "boards": [
+    {
+      "id": "MEL",
+      "name": "SUPER WHITE MELAMINE CHIP 9X6X16MM",
+      "tape": "WHITE",
+      "thickness": 16,
+      "grain": "plain",
+      "price": 575.0,
+      "picture": ""
+    },
+    {
+      "id": "DECOR",
+      "name": "BROOKHILL FUSION CHIP",
+      "tape": "WOOD",
+      "thickness": 16,
+      "grain": "grain",
+      "price": 999.0,
+      "picture": ""
+    },
+    {
+      "id": "BACK",
+      "name": "IMPORTED WHITE DECOR 9X6X3MM",
+      "tape": "WHITE",
+      "thickness": 3,
+      "grain": "plain",
+      "price": 310.0,
+      "picture": ""
+    }
+  ]
+}

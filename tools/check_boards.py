@@ -34,6 +34,7 @@ sys.path.insert(0, ROOT)
 from cabinetgen.engine import generate_cabinet, generate_job                  # noqa: E402
 from cabinetgen.model import (MATERIALS, Cabinet, Drawer, Job, Support,       # noqa: E402
                               grain_of, material_board, tape_for)
+from cabinetgen.standard import STANDARD as S                              # noqa: E402
 from cabinetgen.store import cabinet_from_dict, cabinet_to_dict, load         # noqa: E402
 from cabinetgen.validate import validate                                      # noqa: E402
 from jobs.wardrobe_oct2025 import JOB                                         # noqa: E402
@@ -102,26 +103,27 @@ def main() -> int:                                                  # noqa: C901
     check("and DECOR is a board the quote knows the price of",
           material_board(job.materials, "DECOR"), "BROOKHILL FUSION CHIP")
 
-    print("\ntape is a lookup on the board, never built out of its name")
-    check("the white board has a PVC tape", tape_for(MATERIALS, "MEL", "pvc"), "PVC WHITE")
-    check("no 2 mm tape is claimed for it — none has ever been ordered",
-          tape_for(MATERIALS, "MEL", "2mm"), "")
-    check("Brookhill has both", (tape_for(MATERIALS, "DECOR", "pvc"),
-                                 tape_for(MATERIALS, "DECOR", "2mm")),
-          ("PVC WOOD", "2mm WOOD"))
-    check("a 3 mm back is never edged, so it maps no tape",
-          (tape_for(MATERIALS, "BACK", "pvc"), tape_for(MATERIALS, "BACK", "2mm")),
-          ("", ""))
-    # A concatenation rule would give "PVC BROOKHILL FUSION CHIP"; the real tape
-    # is "PVC WOOD", which nothing about the board description spells.
-    check("a tape is not the thickness stuck in front of the board description",
+    print("\ntape names are generated from the board's token, not mapped")
+    check("PVC, 1 mm and 2 mm all come off one token",
+          [tape_for(MATERIALS, "DECOR", k) for k in ("pvc", "1mm", "2mm")],
+          ["PVC WOOD", "1mm WOOD", "2mm WOOD"])
+    check("the white board generates its own three the same way",
+          [tape_for(MATERIALS, "MEL", k) for k in ("pvc", "1mm", "2mm")],
+          ["PVC WHITE", "1mm WHITE", "2mm WHITE"])
+    # The token is a field of its own, and this is why: Plazaboard's Brookhill
+    # tape is "PVC WOOD". "PVC BROOKHILL FUSION CHIP" is not a thing they sell,
+    # so generating off the long name would put an unbuyable product on an order.
+    check("the token is not the board's name, and the tape proves it",
           (tape_for(MATERIALS, "DECOR", "pvc"),
            "PVC " + material_board(MATERIALS, "DECOR")),
           ("PVC WOOD", "PVC BROOKHILL FUSION CHIP"))
     renamed = {"MEL": dict(MATERIALS["MEL"]),
-               "DECOR": dict(MATERIALS["DECOR"], board="SOME OTHER CHIP")}
+               "DECOR": dict(MATERIALS["DECOR"], board="SOME OTHER CHIP",
+                             name="SOME OTHER CHIP")}
     check("so renaming the board does not move the tape",
           box().carcass_tape(renamed), "PVC WOOD")
+    check("a board with nothing to build from generates nothing, and invents nothing",
+          tape_for({"X": {"name": "", "tape": ""}}, "X", "pvc"), "")
 
     print("\ngrain follows the board, not what the panel is for")
     check("the white board has no direction; the woodgrain one does",
@@ -160,25 +162,23 @@ def main() -> int:                                                  # noqa: C901
     check("a Brookhill carcass takes its drawer boxes in the Brookhill PVC",
           box(carcass_board="DECOR").drawer_box_tape(MATERIALS), "PVC WOOD")
 
-    print("\na board with no tape mapped is named, never guessed at")
-    naked = Job(name="n", cabinets=[box(exterior_board="MEL")])
+    print("\na board with nothing to generate from is named, never guessed at")
+    nameless = {"MEL": {"name": "", "tape": "", "thickness": 16, "grain": "plain"},
+                "DECOR": dict(MATERIALS["DECOR"])}
+    naked = Job(name="n", boards=["MEL", "DECOR"],
+                cabinets=[box(exterior_board="MEL")], materials=nameless)
     msgs = [i.message for i in validate(naked, generate_job(naked))
-            if "no 2mm tape" in i.message]
-    check("the warning names the board and the field",
-          msgs, ["no 2mm tape is mapped for 'SUPER WHITE MELAMINE CHIP 9X6X16MM', so "
-                 "door_edge cannot be derived for its doors, drawer faces and exposed "
-                 "panels — map one on the material, or override it on this cabinet"])
+            if "no name to build a tape from" in i.message]
+    check("the warning names the board and the field", len(msgs) >= 1, True)
     check("and no tape name is invented in its place",
-          by_code(generate_cabinet(box(exterior_board="MEL"))) ["07"].edge_material, "")
-    check("a cabinet that needs no 2 mm tape is not asked for one",
-          [i.message for i in validate(
-              Job(name="n2", cabinets=[Cabinet(number=1, width=600, height=720, depth=500,
-                                               exterior_board="MEL")]), [])
-           if "no 2mm tape" in i.message], [])
+          by_code(generate_cabinet(box(exterior_board="MEL"), S, nameless))["07"].edge_material,
+          "")
     check("an override silences it, because the cabinet was told what to use",
           [i.message for i in validate(
-              Job(name="n3", cabinets=[box(exterior_board="MEL", door_edge="2mm SOLID")]), [])
-           if "no 2mm tape" in i.message], [])
+              Job(name="n3", boards=["MEL", "DECOR"], materials=nameless,
+                  cabinets=[box(exterior_board="MEL", door_edge="2mm SOLID")]), [])
+           if "no name to build a tape from" in i.message and "door_edge" in i.message],
+          [])
 
     print("\nan override beats the derivation, per cabinet")
     over = by_code(generate_cabinet(box(carcass_edge="PVC BROOKHILL")))

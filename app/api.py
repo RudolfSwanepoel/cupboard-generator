@@ -11,13 +11,15 @@ import threading
 from dataclasses import asdict, fields as dc_fields
 from http.server import BaseHTTPRequestHandler
 
+from cabinetgen import boards as B
 from cabinetgen import nest as N
 from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
                                 opening_for, remainder, split_pair, stack)
 from cabinetgen.engine import generate_job
 from cabinetgen.export_plaza import estimate_cost, summarise, write_csvs
-from cabinetgen.model import (CODES, MATERIALS, SUPPORT_EDGES, hinge_side,
-                              material_board, tape_for)
+from cabinetgen.model import (CODES, EXTERIOR_TAPES, MATERIALS, SUPPORT_EDGES,
+                              hinge_side, material_board, material_price,
+                              material_thickness, tape_for)
 from cabinetgen.render import elevation_svg, plan_svg, wall_elevation_svg
 from cabinetgen.room import (LAYERS, add_wall, clashes as room_clashes, closure_error,
                              gaps as room_gaps, geometry, layer_of,
@@ -27,7 +29,8 @@ from cabinetgen.room import (LAYERS, add_wall, clashes as room_clashes, closure_
 from cabinetgen.standard import STANDARD
 from cabinetgen.store import (job_from_dict, job_to_dict, load, next_number,
                               room_from_dict, room_to_dict, save)
-from cabinetgen.validate import ALLOWED_EDGE, blocking, validate
+from cabinetgen.validate import (ALLOWED_EDGE, BOARD_GUIDELINE, blocking,
+                                 validate)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JOBS_DIR = os.path.join(ROOT, "jobs")
@@ -95,6 +98,10 @@ def defaults(payload):
         "materials": sorted(MATERIALS),
         "material_records": {k: dict(v) for k, v in MATERIALS.items()},
         "support_edges": list(SUPPORT_EDGES),
+        "exterior_tapes": list(EXTERIOR_TAPES),
+        "thicknesses": list(B.THICKNESSES),
+        "grains": list(B.GRAINS),
+        "board_guideline": BOARD_GUIDELINE,
         "opening_kinds": ["door", "window", "arch"],
         "obstruction_kinds": ["plug", "isolator", "waste", "water", "pipe", "meter"],
         "layers": list(LAYERS),
@@ -122,6 +129,9 @@ def _geometry_info(job, cab, std):
             # The tapes in force and where each came from. Derived values are the
             # engine's answer read back, never worked out in the browser.
             "tapes": cab.tapes(job.materials),
+            "exterior_tape": cab.exterior_tape,
+            "carcass_thickness": material_thickness(job.materials, cab.carcass_board),
+            "exterior_thickness": material_thickness(job.materials, cab.exterior_board),
             "tape_overrides": {"carcass_edge": cab.carcass_edge,
                                "door_edge": cab.door_edge,
                                "drawer_box_edge": cab.drawer_box_edge},
@@ -134,6 +144,173 @@ def _geometry_info(job, cab, std):
             "opening": opening_for(cab.height,
                                    (cab.door_height or (cab.height - std.door_height_gap))
                                    if cab.doors else 0, std)}
+
+
+def _board_payload(job, key):
+    """One board as the job holds it: what it is, what it cost, what tape it makes."""
+    return {"id": key,
+            "board": material_board(job.materials, key),
+            "name": material_board(job.materials, key),
+            "price": material_price(job.materials, key),
+            "thickness": material_thickness(job.materials, key),
+            "grain": B.Board(id=key, grain=str(
+                (job.materials or {}).get(key, {}).get("grain", "plain"))).grain
+            if isinstance((job.materials or {}).get(key), dict) else "plain",
+            "pvc": tape_for(job.materials, key, "pvc"),
+            "1mm": tape_for(job.materials, key, "1mm"),
+            "2mm": tape_for(job.materials, key, "2mm"),
+            "selected": key in job.board_ids}
+
+
+def board_list(payload):
+    """The library, plus which saved jobs use each board.
+
+    A job that will not parse is reported by name, never skipped: a board shown
+    as unused is how one gets edited out from under a real job.
+    """
+    lib = B.load()
+    usage = B.scan_jobs(JOBS_DIR)
+    return {"ok": True,
+            "boards": [dict(asdict(b), token=b.token,
+                            tapes={k: b.tape_name(k) for k in B.TAPE_KINDS},
+                            used_by=usage.used_by.get(b.id, []))
+                       for b in lib],
+            "unreadable": usage.unreadable,
+            "path": os.path.basename(B.LIBRARY)}
+
+
+def board_save(payload):
+    """Add or edit one board in the library.
+
+    The library only. A saved job keeps its own copy of every board it selected,
+    so nothing written here moves a job that has already been quoted.
+    """
+    lib = B.load()
+    d = dict(payload.get("board") or {})
+    name = str(d.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "error": "a board needs a name"}
+    board_id = str(d.get("id") or "").strip() or B.next_id(lib, name)
+    d["id"], d["name"] = board_id, name
+    board = B.board_from_dict(d)
+    existing = B.by_id(lib)
+    if board_id in existing:
+        lib = [board if b.id == board_id else b for b in lib]
+    else:
+        lib.append(board)
+    B.save(lib)
+    return {"ok": True, "id": board_id}
+
+
+def board_delete(payload):
+    """Remove a board from the library, but never one a saved job is using."""
+    board_id = str(payload.get("id") or "")
+    usage = B.scan_jobs(JOBS_DIR)
+    used = usage.used_by.get(board_id, [])
+    if used:
+        return {"ok": False,
+                "error": f"{board_id} is used by {', '.join(used)} — those jobs keep "
+                         f"their own copy, but removing it from the library would "
+                         f"leave nothing to select it from again"}
+    B.save([b for b in B.load() if b.id != board_id])
+    return {"ok": True}
+
+
+def board_select(payload):
+    """Select a library board into this project, or take one out.
+
+    Selecting copies the library record into the job. That copy is the price
+    capture: what the job was quoted at stays with the job.
+    """
+    job = _job(payload)
+    board_id = str(payload.get("id") or "")
+    if payload.get("on"):
+        board = B.find(B.load(), board_id)
+        if board is None:
+            return {"ok": False, "error": f"no board {board_id!r} in the library"}
+        job.materials = dict(job.materials or {})
+        job.materials[board_id] = B.to_material(board)
+        job.boards = [b for b in job.board_ids if b != board_id] + [board_id]
+    else:
+        using = sorted({c.number for c in job.cabinets
+                        if board_id in (c.carcass_board, c.exterior_board)})
+        if using:
+            return {"ok": False,
+                    "error": f"cabinet{'s' if len(using) > 1 else ''} "
+                             f"{', '.join(map(str, using))} "
+                             f"{'are' if len(using) > 1 else 'is'} cut from {board_id} "
+                             f"— change those first"}
+        job.boards = [b for b in job.board_ids if b != board_id]
+        job.materials = {k: v for k, v in (job.materials or {}).items() if k != board_id}
+    return {"ok": True, "job": job_to_dict(job)}
+
+
+def board_swap(payload):
+    """What changes if this project swaps one board for another — and, on apply,
+    the swap itself.
+
+    Nothing is written on a preview. The reply names every cabinet, every panel
+    designation whose board changes, and what it does to the board count and the
+    cost, so the answer is the engine's before anything moves.
+    """
+    job = _job(payload)
+    old_id, new_id = str(payload.get("from") or ""), str(payload.get("to") or "")
+    if old_id not in (job.materials or {}):
+        return {"ok": False, "error": f"this project has no board {old_id!r}"}
+
+    before_panels = generate_job(job)
+    before = _totals(job, before_panels)
+
+    board = B.find(B.load(), new_id)
+    if new_id not in (job.materials or {}):
+        if board is None:
+            return {"ok": False, "error": f"no board {new_id!r} in the library"}
+        job.materials = dict(job.materials)
+        job.materials[new_id] = B.to_material(board)
+        job.boards = [b for b in job.board_ids if b != new_id] + [new_id]
+
+    touched = []
+    for cab in job.cabinets:
+        fields_hit = [f for f in ("carcass_board", "exterior_board")
+                      if getattr(cab, f) == old_id]
+        if fields_hit:
+            touched.append({"cabinet": cab.number, "fields": fields_hit})
+        for f in fields_hit:
+            setattr(cab, f, new_id)
+
+    after_panels = generate_job(job)
+    after = _totals(job, after_panels)
+
+    # Keyed by shape as well as designation: born_distinct lets two support lines
+    # share a label when they are the same size, and keying on the label alone
+    # would show one of them changing to a blank tape it never had.
+    def key(p):
+        return (p.label, p.role, p.length, p.width, p.edge_l, p.edge_w, p.qty)
+
+    was = {key(p): (p.material, p.edge_material) for p in before_panels}
+    panels = [{"label": p.label, "role": p.role,
+               "from": was[key(p)][0], "to": p.material,
+               "tape_from": was[key(p)][1], "tape_to": p.edge_material}
+              for p in after_panels
+              if key(p) in was and was[key(p)] != (p.material, p.edge_material)]
+
+    out = {"ok": True, "from": old_id, "to": new_id,
+           "cabinets": touched, "panels": panels,
+           "before": before, "after": after}
+    if payload.get("apply"):
+        out["job"] = job_to_dict(job)
+    return out
+
+
+def _totals(job, panels):
+    """Board count per material and the cost, off the engine, for a before/after."""
+    with NEST_LOCK:
+        nested = N.nest_job(N.nestable(panels, job.std), job.std)
+        summary = summarise(job, panels, nested)
+    return {"boards": {m: v["est_boards"] for m, v in summary["materials"].items()},
+            "panels": {m: v["panels"] for m, v in summary["materials"].items()},
+            "edging": summary["edging"],
+            "cost": estimate_cost(job, summary)["total_incl_vat"]}
 
 
 def _room_info(job):
@@ -191,11 +368,10 @@ def compute(payload):
     out = {
         "ok": True, "error": "",
         "name": job.name,
-        # what the board dropdowns offer, and the tape each board carries
-        "materials": {k: {"board": material_board(job.materials, k),
-                          "pvc": tape_for(job.materials, k, "pvc"),
-                          "2mm": tape_for(job.materials, k, "2mm")}
-                      for k in sorted(job.materials or {})},
+        # The boards this project selected, in selection order, each with the
+        # record it was quoted with. The dropdowns offer these and nothing else.
+        "boards": job.board_ids,
+        "materials": {k: _board_payload(job, k) for k in (job.materials or {})},
         "room": _room_info(job),
         "elevation": elevation_svg(job),
         "panels": [], "issues": [], "blocking": False,
@@ -488,6 +664,11 @@ ROUTES = {
     "/api/drawer-preset": drawer_preset,
     "/api/drawer-divider": drawer_divider,
     "/api/what-if": what_if,
+    "/api/boards": board_list,
+    "/api/board-save": board_save,
+    "/api/board-delete": board_delete,
+    "/api/board-select": board_select,
+    "/api/board-swap": board_swap,
     "/api/export": export,
     "/api/jobs": job_list,
     "/api/save": job_save,

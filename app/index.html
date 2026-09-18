@@ -116,6 +116,11 @@
         font-variant-numeric:tabular-nums}
   .dtot .over{color:var(--crit);font-weight:700}
   .presets{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+  .swatch{width:26px;height:26px;border-radius:3px;display:block;object-fit:cover;
+          border:1px solid var(--rule)}
+  .swatch.none{background:repeating-linear-gradient(45deg,var(--carc),var(--carc) 4px,
+               var(--panel) 4px,var(--panel) 8px)}
+  header .grow,.matline .grow{flex:1}
   .tape{margin-top:8px}
   .tape>label{font-size:11px;color:var(--muted);display:block}
   .tape .leaf{margin-top:2px}
@@ -195,6 +200,7 @@
 
 <nav>
   <button data-tab="cabinets" class="on">Cabinets</button>
+  <button data-tab="boards">Boards</button>
   <button data-tab="room">Room</button>
   <button data-tab="cutlist">Cut list</button>
   <button data-tab="nesting">Nesting</button>
@@ -214,6 +220,10 @@
       </div>
       <div class="card" id="editor"></div>
     </div>
+  </section>
+
+  <section id="tab-boards" hidden>
+    <div class="card"><h2>Board library</h2><div id="boards"></div></div>
   </section>
 
   <section id="tab-room" hidden>
@@ -298,8 +308,11 @@ function toast(msg, bad) {
 
 /* ---------- the job ----------------------------------------------------- */
 
+// A new project starts with no boards at all. Nothing can be cut until one is
+// selected from the library, which is the point — a cabinet has to be cut from
+// something, and guessing which board that is has never ended well.
 function blankJob() {
-  return {name: "untitled", materials: null, cabinets: [], loose: []};
+  return {name: "untitled", boards: [], materials: {}, cabinets: [], loose: []};
 }
 
 function blankCabinet(number) {
@@ -314,7 +327,7 @@ function blankCabinet(number) {
     drawers: [], has_drawers: null,
     exposed_sides: 0,
     carcass_edge: "PVC WOOD", door_edge: "2mm WOOD",
-    carcass_board: "MEL", exterior_board: "DECOR",
+    carcass_board: "", exterior_board: "", exterior_tape: "2mm",
     carcass_edge: null, door_edge: null, drawer_box_edge: null,
     bespoke: [], note: "", footprint: [],
     corner_style: "", arm_a: null, arm_b: null, face_a: null, face_b: null,
@@ -340,6 +353,7 @@ async function compute() {
   S.res = res;
   if (!res.ok) toast(res.error, true);
   renderStrip();
+  if (S.tab === "boards" && S.lib) drawBoards();
   renderElevation();
   renderList();
   renderTab();
@@ -480,8 +494,22 @@ $("cabtable").addEventListener("click", async (e) => {
 });
 
 $("add").addEventListener("click", async () => {
+  // Nothing can be chosen until a board is. Say exactly what is missing and
+  // where to fix it, rather than making a cabinet out of nothing.
+  const picked = (S.res && S.res.boards) || [];
+  if (!picked.length) {
+    toast("No board selected yet. A cabinet has to be cut from something — open " +
+          "the Boards tab and tick at least one board into this project first.", true);
+    document.querySelector('nav [data-tab="boards"]').click();
+    return;
+  }
   const r = await post("/api/next-number", {job: S.job});
-  S.job.cabinets.push(blankCabinet(r.number));
+  const fresh = blankCabinet(r.number);
+  // the project's boards, in selection order: the carcass takes the first, what
+  // shows takes the last, which is the usual white-box-with-a-decor-front
+  fresh.carcass_board = picked[0];
+  fresh.exterior_board = picked[picked.length - 1];
+  S.job.cabinets.push(fresh);
   S.sel = S.job.cabinets.length - 1;
   schedule(); renderList();
 });
@@ -663,7 +691,9 @@ $("editor").addEventListener("input", (e) => {
     else c[k] = raw === "" ? 0 : parseInt(raw, 10);
     if (k === "number") c.bespoke.forEach((p) => { p.cabinet = c.number; });
     // a board decides three tapes and two materials, so the section is rebuilt
-    if (k === "carcass_board" || k === "exterior_board") S.selRendered = -2;
+    if (k === "carcass_board" || k === "exterior_board" || k === "exterior_tape") {
+      S.selRendered = -2;
+    }
     schedule();
     return;
   }
@@ -1004,15 +1034,27 @@ function renderBoards() {
   const c = S.job.cabinets[S.sel];
   const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
   const mats = (S.res && S.res.materials) || {};
-  const keys = Object.keys(mats);
+  // only the boards this project selected — the library is chosen from on the
+  // Boards tab, never inline here
+  const keys = (S.res && S.res.boards) || Object.keys(mats);
+  if (!keys.length) {
+    box.innerHTML = `<p class="off">This project has no boards yet. Tick one into
+      it on the <b>Boards</b> tab before choosing what this cabinet is cut from.</p>`;
+    return;
+  }
   const derived = (g && g.tapes) || {};
   const over = (g && g.tape_overrides) || {};
 
   const boardSel = (key, label, hint) => `<div class="f wide">
       <label>${esc(label)}</label>
-      <select data-k="${key}" data-t="text">${keys.map((k) =>
+      <select data-k="${key}" data-t="text">${
+        keys.indexOf(c[key]) < 0
+          ? `<option value="${esc(c[key])}" selected>${esc(c[key] || "—")} (not selected)</option>`
+          : ""}${keys.map((k) =>
         `<option value="${esc(k)}"${k === c[key] ? " selected" : ""}>${esc(k)} — ${
-          esc(mats[k].board)}</option>`).join("")}</select>
+          esc((mats[k] || {}).board || k)}${
+          (mats[k] || {}).thickness && mats[k].thickness !== 16
+            ? " · " + mats[k].thickness + "mm" : ""}</option>`).join("")}</select>
       <span class="note">${esc(hint)}</span></div>`;
 
   const tapeRow = ([key, label, why]) => {
@@ -1033,12 +1075,25 @@ function renderBoards() {
       <span class="note">${why}</span></div>`;
   };
 
+  // Exterior tape thickness is a per-cabinet choice and changes no size: we
+  // supply finished sizes and Plazaboard deducts the tape. The carcass tape is
+  // always the thin PVC and is deliberately not selectable.
+  const thickSel = `<div class="f wide"><label>Exterior tape thickness</label>
+      <select data-k="exterior_tape" data-t="text">${
+        (S.def.exterior_tapes || ["1mm", "2mm"]).map((t) =>
+          `<option value="${esc(t)}"${t === (c.exterior_tape || "2mm") ? " selected" : ""}>${
+            esc(t)}</option>`).join("")}</select>
+      <span class="note">doors, drawer faces and exposed ends. No effect on any cut
+      size — Plazaboard deduct the tape from the finished size we give them.</span>
+    </div>`;
+
   box.innerHTML =
     `<div class="grid">
        ${boardSel("carcass_board", "Carcass board",
                   "sides, top, bottom, supports, shelves and dividers")}
        ${boardSel("exterior_board", "Exterior board",
                   "doors, drawer faces and exposed end panels")}
+       ${thickSel}
      </div>
      ${TAPE_FIELDS.map(tapeRow).join("")}`;
 }
@@ -1060,6 +1115,280 @@ function refreshTapes() {
       shown.className = value ? "" : "over";
     }
   });
+}
+
+/* ---------- the board library ----------------------------------------------
+   boards.json lives in the repo, so both machines see the same boards. It is a
+   library, not a job: a project selects from it, and selecting copies the
+   record into the job. That copy is the price capture — editing a board here
+   changes what the next job is quoted at and never what an existing one was.
+
+   Tape names are generated from one token per board, for all three thicknesses.
+   The token is its own field rather than the board's name because Plazaboard's
+   Brookhill tape is "PVC WOOD"; "PVC BROOKHILL FUSION CHIP" is not a thing they
+   sell, and ordering it would be a board name reaching a real order as a tape. */
+
+S.lib = null;          // the library as /api/boards last returned it
+S.libEdit = null;      // the board being edited, or null
+
+const GRAIN_LABEL = {grain: "Grain", plain: "Plain"};
+
+async function renderBoardsTab() {
+  const r = await post("/api/boards", {});
+  if (!r.ok) { toast(r.error, true); return; }
+  S.lib = r;
+  drawBoards();
+}
+
+function drawBoards() {
+  const r = S.lib;
+  if (!r) { $("boards").innerHTML = ""; return; }
+  const chosen = new Set((S.res && S.res.boards) || []);
+  const std = S.def.standard || {};
+
+  const rows = r.boards.map((b) => {
+    const inJob = chosen.has(b.id);
+    const used = b.used_by.length
+      ? b.used_by.map(esc).join(", ")
+      : `<span class="note">no saved job</span>`;
+    const thick = b.thickness !== 16
+      ? `<span class="pill warn">${b.thickness} mm</span>` : `${b.thickness} mm`;
+    return `<tr>
+      <td><input type="checkbox" data-pick="${esc(b.id)}" ${inJob ? "checked" : ""}
+           style="width:auto" title="use this board in this project"></td>
+      <td>${b.picture
+            ? `<img src="${esc(b.picture)}" alt="" class="swatch">`
+            : `<span class="swatch none"></span>`}</td>
+      <td><b>${esc(b.name)}</b><div class="note">id ${esc(b.id)}</div></td>
+      <td class="n">${thick}</td>
+      <td>${esc(GRAIN_LABEL[b.grain] || b.grain)}</td>
+      <td class="n">R&nbsp;${(b.price || 0).toLocaleString("en-ZA",
+          {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+      <td class="note">${esc(b.tapes.pvc || "—")}<br>${esc(b.tapes["1mm"] || "—")}
+          <br>${esc(b.tapes["2mm"] || "—")}</td>
+      <td class="note">${used}</td>
+      <td>
+        <button data-bedit="${esc(b.id)}">Edit</button>
+        ${inJob ? `<button data-bswap="${esc(b.id)}" title="swap this board across the project">Swap</button>` : ""}
+        <button data-bdel="${esc(b.id)}" title="remove from the library">Del</button>
+      </td></tr>`;
+  }).join("");
+
+  const bad = r.unreadable.length
+    ? `<div class="matline" style="border-top:1px solid var(--line)">
+         <span class="pill crit">${r.unreadable.length} job${
+           r.unreadable.length === 1 ? "" : "s"} could not be read</span>
+         <span class="note">${r.unreadable.map((u) =>
+           esc(u.job) + " — " + esc(u.error)).join(" · ")}</span>
+       </div>` : "";
+
+  const n = chosen.size;
+  const guide = S.def.board_guideline || 5;
+  const pill = n === 0
+    ? `<span class="pill crit">no board selected — nothing can be cut yet</span>`
+    : n > guide
+      ? `<span class="pill warn">${n} boards — over the ${guide} a job usually wants</span>`
+      : `<span class="pill ok">${n} board${n === 1 ? "" : "s"} in this project</span>`;
+
+  $("boards").innerHTML = `
+    <div class="matline" style="border-bottom:1px solid var(--line)">
+      ${pill}
+      <span class="note">Ticking a board copies it into this project at today's
+      price. Editing a board here never changes a job that was already quoted.</span>
+      <span class="grow"></span>
+      <button id="bnew" class="primary">Add board</button>
+    </div>
+    <div class="scroll"><table><thead><tr>
+      <th title="use in this project">Use</th><th></th><th>Board</th>
+      <th class="n">Thick</th><th>Grain</th><th class="n">Last price</th>
+      <th>Tapes (PVC / 1mm / 2mm)</th><th>Used by saved jobs</th><th></th>
+    </tr></thead><tbody>${rows ||
+      `<tr><td colspan="9" class="empty">The library is empty. Add a board.</td></tr>`
+    }</tbody></table></div>
+    ${bad}
+    <p class="note" style="padding:8px 12px 12px;max-width:86ch">
+      The library is <b>${esc(S.lib.path)}</b> in the repo, so it syncs with the code.
+      Tape names are generated from each board's token — one token, three
+      thicknesses. A board's <b>Last price</b> is what the next project to select
+      it will be quoted at; a project already quoted keeps the price it captured.
+      ${std.board_t || 16} mm is assumed everywhere a carcass size is worked out,
+      so a board of another thickness is flagged on every cabinet that uses it.</p>
+    <div id="boardedit"></div>`;
+  drawBoardEditor();
+}
+
+function drawBoardEditor() {
+  const box = $("boardedit");
+  if (!box) return;
+  const b = S.libEdit;
+  if (!b) { box.innerHTML = ""; return; }
+  const thicknesses = (S.def.thicknesses || [16, 25]).slice();
+  if (b.thickness && thicknesses.indexOf(b.thickness) < 0) thicknesses.push(b.thickness);
+  box.innerHTML = `<div class="card" style="margin:12px">
+    <h2>${b.id ? "Edit board — " + esc(b.id) : "New board"}</h2>
+    <div class="body">
+      <div class="grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="f wide"><label>Name</label>
+          <input id="bf-name" value="${esc(b.name || "")}"
+                 placeholder="e.g. Brookhill Fusion Chip"></div>
+        <div class="f"><label>Thickness</label>
+          <select id="bf-thickness">${thicknesses.map((t) =>
+            `<option value="${t}"${t === b.thickness ? " selected" : ""}>${t} mm</option>`
+          ).join("")}</select></div>
+        <div class="f"><label>Grain</label>
+          <select id="bf-grain">${(S.def.grains || ["plain", "grain"]).map((g) =>
+            `<option value="${esc(g)}"${g === b.grain ? " selected" : ""}>${
+              esc(GRAIN_LABEL[g] || g)}</option>`).join("")}</select></div>
+        <div class="f"><label>Last price (per board)</label>
+          <input type="number" step="0.01" id="bf-price" value="${b.price || 0}"></div>
+        <div class="f"><label>Tape name</label>
+          <input id="bf-tape" value="${esc(b.tape || "")}"
+                 placeholder="blank = use the name">
+          <span class="note" id="bf-tapes"></span></div>
+        <div class="f wide"><label>Picture (optional)</label>
+          <input id="bf-picture" value="${esc(b.picture || "")}"
+                 placeholder="a file path or a data: URI — optional"></div>
+      </div>
+      <div class="presets">
+        <button id="bf-save" class="primary">Save to the library</button>
+        <button id="bf-cancel">Cancel</button>
+      </div>
+      <p class="note" style="margin-top:8px;max-width:78ch">
+        The tape name is the token the three tapes are generated from:
+        <b>PVC &lt;token&gt;</b>, <b>1mm &lt;token&gt;</b>, <b>2mm &lt;token&gt;</b>.
+        It is separate from the board's name on purpose — Plazaboard's Brookhill
+        tape is "PVC WOOD", and "PVC BROOKHILL FUSION CHIP" is not a product.
+        Saving here updates the library only; jobs already quoted keep their own
+        copy of this board, price and all.</p>
+    </div></div>`;
+  const tapes = () => {
+    const tok = ($("bf-tape").value || $("bf-name").value || "").trim();
+    $("bf-tapes").textContent = tok
+      ? `PVC ${tok} · 1mm ${tok} · 2mm ${tok}` : "no name — no tape can be generated";
+  };
+  ["bf-tape", "bf-name"].forEach((id) => $(id).addEventListener("input", tapes));
+  tapes();
+}
+
+$("boards").addEventListener("click", async (e) => {
+  const edit = e.target.closest("[data-bedit]");
+  if (edit) {
+    S.libEdit = Object.assign({}, S.lib.boards.find((b) => b.id === edit.dataset.bedit));
+    drawBoardEditor();
+    $("boardedit").scrollIntoView({block: "nearest"});
+    return;
+  }
+  if (e.target.id === "bnew") {
+    S.libEdit = {id: "", name: "", tape: "", thickness: 16, grain: "plain",
+                 price: 0, picture: ""};
+    drawBoardEditor();
+    return;
+  }
+  const del = e.target.closest("[data-bdel]");
+  if (del) {
+    const b = S.lib.boards.find((x) => x.id === del.dataset.bdel);
+    if (!window.confirm(`Remove ${b.name} from the library?\n\n` +
+        `Jobs that already use it keep their own copy, so nothing they were ` +
+        `quoted changes — but you could not select it again.`)) return;
+    const r = await post("/api/board-delete", {id: del.dataset.bdel});
+    if (!r.ok) { toast(r.error, true); return; }
+    S.libEdit = null;
+    renderBoardsTab();
+    return;
+  }
+  const swap = e.target.closest("[data-bswap]");
+  if (swap) { swapBoard(swap.dataset.bswap); }
+});
+
+// Saving a board: the library only, never a job.
+$("boards").addEventListener("click", async (e) => {
+  if (e.target.id === "bf-cancel") { S.libEdit = null; drawBoardEditor(); return; }
+  if (e.target.id !== "bf-save") return;
+  const board = {
+    id: S.libEdit.id,
+    name: $("bf-name").value.trim(),
+    tape: $("bf-tape").value.trim(),
+    thickness: parseInt($("bf-thickness").value, 10),
+    grain: $("bf-grain").value,
+    price: parseFloat($("bf-price").value) || 0,
+    picture: $("bf-picture").value.trim(),
+  };
+  const r = await post("/api/board-save", {board: board});
+  if (!r.ok) { toast(r.error, true); return; }
+  toast("Saved " + board.name + " to the library.");
+  S.libEdit = null;
+  renderBoardsTab();
+});
+
+// Ticking a board into the project copies its record — price included.
+$("boards").addEventListener("change", async (e) => {
+  const id = e.target.dataset.pick;
+  if (id === undefined) return;
+  const r = await post("/api/board-select",
+                       {job: S.job, id: id, on: e.target.checked});
+  if (!r.ok) {
+    toast(r.error, true);
+    e.target.checked = !e.target.checked;
+    return;
+  }
+  S.job = r.job;
+  await compute();
+  drawBoards();
+});
+
+/* Swapping a project board propagates everywhere it is used, so nothing is
+   written until the change has been shown: which cabinets, which panels, and
+   what it does to the board count and the cost. Same pattern as the drawer
+   tickbox — the engine answers first, and cancelling changes nothing. */
+async function swapBoard(fromId) {
+  const others = (S.lib.boards || []).filter((b) => b.id !== fromId);
+  if (!others.length) { toast("The library has no other board to swap to.", true); return; }
+  const to = window.prompt(
+    `Swap ${fromId} for which board?\n\n` +
+    others.map((b) => `  ${b.id}  —  ${b.name}`).join("\n") +
+    `\n\nType the id:`, others[0].id);
+  if (!to) return;
+
+  const pre = await post("/api/board-swap", {job: S.job, from: fromId, to: to.trim()});
+  if (!pre.ok) { toast(pre.error, true); return; }
+  if (!pre.cabinets.length) {
+    toast(`No cabinet is cut from ${fromId}, so nothing would change.`);
+    return;
+  }
+
+  const money = (v) => "R " + (v || 0).toLocaleString("en-ZA",
+    {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const boards = (t) => Object.keys(t.boards).sort()
+    .map((m) => `${m} ${t.boards[m]}`).join(", ");
+  const cabs = pre.cabinets.map((c) =>
+    `    cabinet ${c.cabinet} — ${c.fields.map((f) =>
+      f === "carcass_board" ? "carcass" : "exterior").join(" and ")}`).join("\n");
+  const shown = pre.panels.slice(0, 12).map((p) =>
+    `    ${p.label}  ${p.role}  ${p.from} -> ${p.to}` +
+    (p.tape_from !== p.tape_to ? `,  tape ${p.tape_from} -> ${p.tape_to}` : "")).join("\n");
+  const more = pre.panels.length > 12
+    ? `\n    ... and ${pre.panels.length - 12} more panels` : "";
+
+  const ok = window.confirm(
+    `Swap ${pre.from} for ${pre.to} across this project?\n\n` +
+    `${pre.cabinets.length} cabinet${pre.cabinets.length === 1 ? "" : "s"}:\n${cabs}\n\n` +
+    `${pre.panels.length} panel${pre.panels.length === 1 ? "" : "s"} change board or tape:\n` +
+    `${shown}${more}\n\n` +
+    `Boards: ${boards(pre.before)}\n` +
+    `    ->  ${boards(pre.after)}\n\n` +
+    `Cost:   ${money(pre.before.cost)}\n` +
+    `    ->  ${money(pre.after.cost)}\n\n` +
+    `No designation changes — a panel keeps its name and changes what it is cut ` +
+    `from. Cancel and nothing is written.\n\nApply?`);
+  if (!ok) return;
+
+  const done = await post("/api/board-swap",
+                          {job: S.job, from: fromId, to: to.trim(), apply: true});
+  if (!done.ok) { toast(done.error, true); return; }
+  S.job = done.job;
+  S.selRendered = -2;
+  await compute();
+  drawBoards();
 }
 
 /* ---------- the elevation as a control ------------------------------------
@@ -1794,7 +2123,8 @@ function renderValidation() {
 /* ---------- tabs ---------------------------------------------------------- */
 
 function renderTab() {
-  if (S.tab === "room") {
+  if (S.tab === "boards") renderBoardsTab();
+  else if (S.tab === "room") {
     renderRoom(); renderPlaces(); renderGaps(); renderPlinth(); renderPlan();
   }
   else if (S.tab === "cutlist") renderCutlist();
@@ -1807,7 +2137,7 @@ document.querySelector("nav").addEventListener("click", (e) => {
   if (!b) return;
   S.tab = b.dataset.tab;
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("on", x === b));
-  ["cabinets", "room", "cutlist", "nesting", "validation"].forEach((t) => {
+  ["cabinets", "boards", "room", "cutlist", "nesting", "validation"].forEach((t) => {
     $("tab-" + t).hidden = t !== S.tab;
   });
   renderTab();

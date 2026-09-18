@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from typing import List
 
 from .engine import front_stack_check, generate_cabinet
-from .model import Cabinet, Job, Panel, material_board, tape_for
+from .export_plaza import effective_price
+from .model import (Cabinet, Job, Panel, material_board, material_thickness,
+                    tape_for)
 from .room import (above_ceiling, blocked_openings, cab_corner_outline,
                    clashes as room_clashes, closure_error, corner_offset,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
@@ -18,6 +20,11 @@ from .standard import Standard, STANDARD
 
 CRITICAL = "critical"
 WARNING = "warning"
+
+# Above this many boards on one project, say so. A guideline about cost and
+# complexity — every extra board is another part sheet and another offcut pile —
+# and deliberately not a limit.
+BOARD_GUIDELINE = 5
 
 ALLOWED_EDGE = {
     "", "PVC WOOD", "PVC WHITE", "PVC SOLID", "PVC BROOKHILL",
@@ -50,7 +57,10 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     out += _grain_on_decor(panels)
     out += _zero_quantities(panels)
     out += _drawer_boxes(job.cabinets)
+    out += _project_boards(job)
     out += _boards_and_tapes(job)
+    out += _carcass_thickness(job, std)
+    out += _board_prices(job, panels)
     out += _supports(job.cabinets)
     out += _room(job, std)
     out += _gaps(job, std)
@@ -196,14 +206,62 @@ def _drawer_boxes(cabinets):
     return out
 
 
-def _boards_and_tapes(job: Job):
-    """Every board a cabinet names must exist, and must have the tape it needs.
+def _project_boards(job: Job):
+    """A project picks its boards before anything is cut from them.
 
-    The tapes are a lookup on the board, never a name built out of one, so a board
-    with no tape mapped is reported by name rather than guessed at (D6 / W10:
-    'SOLID' reached a real order as a tape, and it is a board). Only the tapes a
-    cabinet actually uses are asked for — a cabinet with no drawers and no
-    white-edged support never needs a drawer-box tape.
+    Nothing can be chosen until at least one board is selected, so a job with
+    cabinets and no boards is a critical that names what is missing. More than
+    five is a guideline about cost and complexity, not a limit — every extra
+    board is another part sheet and another offcut pile — so it warns and
+    nothing more.
+    """
+    out = []
+    ids = job.board_ids
+    if job.cabinets and not ids:
+        out.append(Issue(CRITICAL, job.name,
+                         "no boards selected — pick at least one board from the "
+                         "library before adding cabinets; a cabinet has to be cut "
+                         "from something"))
+    if len(ids) > BOARD_GUIDELINE:
+        out.append(Issue(WARNING, job.name,
+                         f"{len(ids)} boards selected ({', '.join(ids)}) — over the "
+                         f"{BOARD_GUIDELINE} the job usually wants. Each one is a "
+                         f"part sheet of its own and its own offcut pile. A guideline "
+                         f"about cost and complexity, not a limit"))
+    return out
+
+
+def _board_prices(job: Job, panels):
+    """Every board on the cut list has to be one this project priced.
+
+    A backing board is not chosen the way a carcass is — the engine reaches for
+    it — so a project can end up cutting a board it never selected, and a board
+    nobody selected has no captured price. That quotes it at R0 and the total
+    still looks like a number, which is the worst way to be wrong. Named here
+    rather than discovered on an invoice.
+    """
+    out = []
+    for mat in sorted({p.material for p in panels if p.material}):
+        if mat not in (job.materials or {}):
+            out.append(Issue(CRITICAL, mat,
+                             f"panels are cut from {mat!r}, which this project has not "
+                             f"selected — it has no price, so it is quoted at R0. Tick "
+                             f"it into the project on the Boards tab"))
+        elif not effective_price(job, mat):
+            out.append(Issue(WARNING, mat,
+                             f"{material_board(job.materials, mat)!r} has no price on "
+                             f"it, so its boards are quoted at R0 — set a Last price on "
+                             f"it in the library and re-select it"))
+    return out
+
+
+def _boards_and_tapes(job: Job):
+    """Every board a cabinet names must exist, and must be able to name its tape.
+
+    A tape name is generated from the board's token, so what can go wrong is no
+    longer a missing mapping but a board with nothing to generate from. That is
+    reported by name rather than a plausible-looking tape being invented for it
+    (D6 / W10: 'SOLID' reached a real order as a tape, and it is a board).
     """
     mats = job.materials
     out = []
@@ -214,8 +272,12 @@ def _boards_and_tapes(job: Job):
                             (c.exterior_board, "exterior board")):
             if board not in (mats or {}):
                 out.append(Issue(CRITICAL, str(c.number),
-                                 f"{what} {board!r} is not one of the job's materials "
+                                 f"{what} {board!r} is not one of the job's boards "
                                  f"({', '.join(sorted(mats or {})) or 'none'})"))
+            elif board not in job.board_ids:
+                out.append(Issue(WARNING, str(c.number),
+                                 f"{what} {board!r} is not among the boards this "
+                                 f"project selected ({', '.join(job.board_ids)})"))
 
         wants = [("carcass_edge", c.carcass_edge, c.exterior_board, "pvc",
                   "the fronts of its sides, top, bottom, shelves and dividers")]
@@ -223,17 +285,22 @@ def _boards_and_tapes(job: Job):
             wants.append(("drawer_box_edge", c.drawer_box_edge, c.carcass_board, "pvc",
                           "its drawer boxes and white-edged supports"))
         if c.doors or c.drawer_list or c.exposed_sides:
-            wants.append(("door_edge", c.door_edge, c.exterior_board, "2mm",
+            wants.append(("door_edge", c.door_edge, c.exterior_board,
+                          c.exterior_tape,
                           "its doors, drawer faces and exposed panels"))
         for field, override, board, thickness, bands in wants:
             if override is not None:
                 continue                   # this cabinet was told what to use
             if board in (mats or {}) and not tape_for(mats, board, thickness):
                 out.append(Issue(WARNING, str(c.number),
-                                 f"no {thickness} tape is mapped for "
-                                 f"{material_board(mats, board)!r}, so {field} cannot be "
-                                 f"derived for {bands} — map one on the material, or "
-                                 f"override it on this cabinet"))
+                                 f"{material_board(mats, board)!r} has no name to build "
+                                 f"a tape from, so {field} cannot be generated for "
+                                 f"{bands} — give the board a tape name in the library, "
+                                 f"or override the tape on this cabinet"))
+        if c.exterior_tape not in ("1mm", "2mm"):
+            out.append(Issue(WARNING, str(c.number),
+                             f"exterior tape {c.exterior_tape!r} is neither 1mm nor "
+                             f"2mm — 2mm is being used"))
 
         # A drawer box is cut from the white board but banded in the carcass
         # board's colour. Whether it should follow the carcass board has not been
@@ -244,6 +311,34 @@ def _boards_and_tapes(job: Job):
                              f"sides and fronts are still cut from MEL, banded in the "
                              f"{c.carcass_board} tape — confirm which board the box "
                              f"should be"))
+    return out
+
+
+def _carcass_thickness(job: Job, std):
+    """The engine assumes a `Standard.board_t` carcass from end to end.
+
+    Internal width is W - 2t, an exposed end is depth + t, the back is grooved
+    2 x groove_engage into a 2t deduction, a plinth butt loses t, and a corner
+    unit's wall sides are one and two boards short of its arms. None of that
+    reads the board's own thickness, and thickness-driven geometry is deferred —
+    so a board of any other thickness is named here rather than quietly cut to
+    the wrong size.
+    """
+    out = []
+    for c in job.cabinets:
+        if c.template == "none":
+            continue                       # its panels are specified by hand
+        for board, what in ((c.carcass_board, "carcass board"),
+                            (c.exterior_board, "exterior board")):
+            t = material_thickness(job.materials, board)
+            if t and t != std.board_t:
+                out.append(Issue(WARNING, str(c.number),
+                                 f"{what} {material_board(job.materials, board)!r} is "
+                                 f"{t} mm, but every size here is cut for a "
+                                 f"{std.board_t} mm board — internal width, the back "
+                                 f"groove, an exposed end and a plinth butt are all "
+                                 f"{std.board_t} mm arithmetic. Thickness-driven "
+                                 f"geometry is not built; check this cabinet by hand"))
     return out
 
 

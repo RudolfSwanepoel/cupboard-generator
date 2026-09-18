@@ -24,6 +24,7 @@ python tools/check_drag.py
 python tools/check_elevation.py
 python tools/check_fronts.py
 python tools/check_boards.py
+python tools/check_library.py
 ```
 
 Regenerates the October 2025 wardrobe from cabinet definitions and diffs it
@@ -43,6 +44,8 @@ that script, each tied to a logged finding — those differences are correct.
 
 ```
 cabinetgen/standard.py     every construction constant. Start here.
+cabinetgen/boards.py       the board library: load, save, tape names, job usage
+boards.json                the library itself, shared through the repo
 cabinetgen/model.py        Panel, Drawer, Cabinet, Job
 cabinetgen/engine.py       cabinet -> panels
 cabinetgen/drawers.py      drawer stacks: equal, graduated, pinned or exact
@@ -106,63 +109,125 @@ docs/ROOM-LAYOUT-SPEC.md  the room / plan / 3D build spec and its phasing
 
 ## Boards, tapes and grain
 
-**A cabinet names two boards, and everything else follows from them.**
+**`boards.json` in the repo is the board library.** It is shared through git, so
+both machines see the same boards. `cabinetgen/boards.py` loads and saves it, and
+the Boards tab is where boards are added, edited and ticked into a project. Each
+record is a name, a tape token, a thickness, Grain or Plain, a last price and an
+optional picture.
 
-- `carcass_board` is what the box is cut from: sides (01), top (02), bottom (03),
-  supports (04), shelves (05), dividers (09), and the plinth board that covers
-  its legs. Defaults to `MEL`.
-- `exterior_board` is what shows: doors (07), drawer faces (20), exposed end
-  panels (08). It is the old `decor` field, renamed. Defaults to `DECOR`.
+**A project selects from the library, and selecting copies the record into the
+job.** `Job.boards` is the selection; `Job.materials[id]` is the copy. That copy
+is the price capture — see below — and it is why editing a board never reaches a
+job that has already been quoted. `Job.board_ids` falls back to the keys of
+`materials`, so every job written before the library still names its boards.
 
-Both are keys into `Job.materials`, so each nests and prices as its own
-material. Before this the engine typed `"MEL"` onto every carcass panel, and a
-decor or microwave cupboard with a Brookhill carcass could not be expressed at
-all.
+**Nothing can be cut until a board is selected.** A job with cabinets and no
+boards is a critical naming what is missing, and the UI refuses to add a cabinet
+and sends you to the Boards tab. Above `validate.BOARD_GUIDELINE` (5) it warns
+and does no more: every extra board is another part sheet and another offcut
+pile, which is a guideline about cost and complexity, not a limit.
+
+**A board on the cut list that the project never selected is a critical.** The
+backing board is reached for by the engine rather than chosen, so a project can
+cut a board it never priced — and an unpriced board quotes at R0 while the total
+still looks like a number. That is the worst way to be wrong, so it blocks.
+
+### The two boards on a cabinet
+
+- `carcass_board` — sides (01), top (02), bottom (03), supports (04), shelves
+  (05), dividers (09), and the plinth board that covers its legs.
+- `exterior_board` — doors (07), drawer faces (20), exposed end panels (08).
 
 Drawer box sides and fronts (18, 19) and the melamine drawer base (17) are still
-cut from `MEL` — **not** from the carcass board. That was not ruled, so it was
-not changed; a cabinet whose carcass board is not MEL raises a warning saying so
-and asking which board the box should be. Do not guess it.
+cut from `MEL` — **not** from the carcass board. That was never ruled, so it was
+not changed; a cabinet whose carcass board is not MEL warns and asks.
 
-`Job.materials` is a record per board, not a bare description:
+### Tapes are generated, not mapped
 
-```python
-"DECOR": {"board": "BROOKHILL FUSION CHIP", "pvc": "PVC WOOD",
-          "2mm": "2mm WOOD", "grain": 1}
+Three tape names come off **one token per board**:
+
+```
+PVC <token>    the thin carcass tape
+1mm <token>    exterior option
+2mm <token>    exterior option
 ```
 
-**The tapes are a lookup on that record, never a name built out of the board
-description.** "PVC WOOD" is nowhere in "BROOKHILL FUSION CHIP"; a concatenation
-rule would produce "PVC BROOKHILL FUSION CHIP", which is not a thing Plazaboard
-sell. `model.tape_for` reads the record and returns `""` when nothing is mapped,
-and the validator then names the board rather than the app inventing a tape.
-That is finding D6/W10 exactly — "SOLID" reached a real order as a tape, and it
-is a board. The white board deliberately has **no** 2 mm tape mapped, because no
-job has ever ordered one.
+**The token is its own field, not the board's name, and that is load-bearing.**
+Plazaboard's Brookhill tape is "PVC WOOD". "PVC BROOKHILL FUSION CHIP" is not a
+thing they sell, so generating off the long name would put an unbuyable product
+on a real order — D6/W10 in the other direction, where a board name reached an
+order as a tape. A board with a blank token generates off its name, which is
+right for a board whose name is already the short one; a board with neither
+generates nothing and the validator names it rather than inventing a tape.
 
-The three tapes stay three fields, because a door edge is 2 mm and a carcass
-edge is thin PVC — same colour, different thickness and price:
+Colour derivation is unchanged: **front edges take the EXTERIOR board, every
+other banded edge takes the CARCASS board.**
 
 | Field | Derived as |
 |---|---|
-| `carcass_edge` | PVC in the **exterior** board's colour. Fronts of the sides, top, bottom, shelves, dividers and front-edged supports — shelf and divider fronts match the front, not the box (ruled 14 Sept 2026). |
-| `door_edge` | 2 mm in the **exterior** board's colour. Doors, drawer faces, exposed ends. |
-| `drawer_box_edge` | PVC in the **carcass** board's colour. Drawer sides and fronts, and white-edged supports. |
+| `carcass_edge` | PVC in the **exterior** colour. Fronts of the sides, top, bottom, shelves, dividers and front-edged supports — shelf and divider fronts match the front, not the box (ruled 14 Sept 2026). |
+| `door_edge` | `Cabinet.exterior_tape` (1mm or 2mm) in the **exterior** colour. Doors, drawer faces, exposed ends. |
+| `drawer_box_edge` | PVC in the **carcass** colour. Drawer sides and fronts, and white-edged supports. |
 
-Each is `None` for "derive it" and a string for a per-cabinet override. Every
-tape on the October job was reconciled against its stored value before the
-fields were switched over — 19 cabinets, three tapes each, zero mismatches — so
-the fixture states none of them any more and the regression is what proves the
-derivation. A job file that states a tape keeps it as an override; nothing is
-overwritten.
+Each is `None` for "generate it" and a string for a per-cabinet override.
 
-**Grain is a property of the board too**, not of what the panel is for. It was
-hardcoded `grain=1` on doors, faces and exposed panels, which was only ever
-right because the exterior board was always the woodgrain one. A Brookhill
-carcass would have produced a carcass panel at grain 0 on every line — the exact
-shape of W8/D9, where 60 woodgrain panels went out at grain 0 and Plazaboard's
-counter caught it, not us. `model.grain_of` reads it off the record, so a
-Brookhill carcass side runs with the grain and a white door does not.
+**`Cabinet.exterior_tape` is 1mm or 2mm, per cabinet, and has no dimensional
+effect whatsoever.** We supply finished sizes and Plazaboard deduct the tape, so
+the two cut identically and differ only in what is ordered and what it costs.
+There is no deduction logic anywhere and none is wanted. The carcass tape is
+always the thin PVC and is deliberately not selectable.
+
+The resolved tape names show in the editor beside each edge and as a legend on
+the elevation (`render.tape_legend`), naming the cabinets when they disagree — a
+door taped in the carcass colour looks right on paper and wrong in the room.
+
+### Grain
+
+**Grain is the board's Grain / Plain**, read through `model.grain_of`, and a
+grain board locks every panel cut from it. It was hardcoded `grain=1` on doors,
+faces and exposed panels, which was only ever right because the exterior board
+was always the woodgrain one — W8/D9 is 60 woodgrain panels going out at grain 0
+with only Plazaboard's counter catching it.
+
+### Price capture
+
+**A saved job keeps the prices it was quoted at.** `material_price` reads the
+captured figure and `export_plaza.effective_price` is the one place that decides
+what a board costs this job, falling back to the rate card only for a job saved
+before boards carried a price. Editing a board's Last price changes what the next
+project to select it is quoted at and moves no existing job. The October job
+reopens at R28,363.50 permanently, and `check_library.py` pins exactly that by
+raising a price in a temporary library and re-costing it.
+
+### Thickness — 16 mm is assumed, and that is not fixed
+
+Every carcass size in the app is 16 mm arithmetic. Thickness-driven geometry is
+**deferred and deliberately not built**; what exists instead is an assertion —
+`validate._carcass_thickness` names any cabinet whose board is not
+`Standard.board_t`, and says which figures are the 16 mm ones. The full list of
+places that assume it:
+
+| File | Function | Line | What it controls |
+|---|---|---|---|
+| standard.py | *(constant)* | 12 | `board_t = 16`, the source of all of it |
+| standard.py | *(constant)* | 21 | `back_cavity = 16`, clear space behind the back |
+| standard.py | *(constant)* | 37 | `drawer_base_offset = 16`, base groove height |
+| standard.py | *(constant)* | 46 | `exposed_extra = 16`, exposed end finishing flush with the door |
+| standard.py | `internal_width` | 103-104 | `W - 2t` — every shelf, support, top, bottom and divider width |
+| standard.py | `back_face_from_front` | 108 | shelf depth and the back's position |
+| standard.py | `back_size` | 120, 122, 124 | the backing panel, `W-20` / `H-20` / `H-10` |
+| standard.py | `drawer_front_length` | 155 | drawer front and back length, via `internal_width` |
+| standard.py | `drawer_base` | 161, 164 | drawer base, grooved and housed |
+| engine.py | `generate_cabinet` | 32 | `Wi`, which sizes tops, bottoms, supports, shelves, dividers |
+| engine.py | `generate_cabinet` | 78 | default divider height, `H - 2t` |
+| engine.py | `generate_cabinet` | 135 | exposed end panel depth, `depth + 16` |
+| room.py | `geometry` | 296 | panel width read back off a top or rail, `span + 2t` |
+| room.py | `plinth_deduction` | 967 | the board a butted plinth loses at an internal corner |
+| validate.py | `_outlines` | 597 | corner unit wall sides, one and two boards short of the arms |
+
+Not on the list and worth saying so: pot hole positions are `std.hinge_positions`
+and carry no thickness at all, and fillers and scribes are gap arithmetic
+(`scribe_allowance`, `taper_threshold`) with no board thickness in them either.
 
 ## Supports
 

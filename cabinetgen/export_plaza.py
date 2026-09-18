@@ -9,7 +9,7 @@ import os
 from collections import defaultdict
 from typing import List
 
-from .model import Job, Panel, material_board
+from .model import Job, Panel, material_board, material_price
 from .standard import Standard, STANDARD
 
 HEADER = ["Component", "Material", "Length", "Width", "qty", "Invoice Number", "JOB NO ",
@@ -17,6 +17,9 @@ HEADER = ["Component", "Material", "Length", "Width", "qty", "Invoice Number", "
           "total edging", "total edging"]
 
 # Rate card, quotation VRG_SOQ497999, 21 Oct 2025. Incl VAT.
+#
+# Board prices here are a FALLBACK only, for a job saved before boards carried
+# their own captured price. A job that has one is priced off its own record.
 YIELD = {"MEL": 0.89, "DECOR": 0.78, "BACK": 0.80}
 
 RATES = {
@@ -35,6 +38,18 @@ RATES = {
     },
     "pothole": 3.00,
 }
+
+
+def effective_price(job: Job, mat: str) -> float:
+    """What this job pays per board of `mat`.
+
+    The price captured when the board was selected, or the rate card for a job
+    saved before boards carried one. Zero means neither knows — which the
+    validator reports, because a board line at R0 is a quote that is wrong in the
+    direction nobody notices.
+    """
+    return (material_price(job.materials, mat)
+            or RATES["board"].get(material_board(job.materials, mat), 0.0))
 
 
 def rows_for(panels: List[Panel], std: Standard = STANDARD):
@@ -108,7 +123,10 @@ def estimate_cost(job: Job, summary: dict) -> dict:
     for mat, s in summary["materials"].items():
         desc = material_board(job.materials, mat)
         boards = s["est_boards"]
-        price = RATES["board"].get(desc, 0.0)
+        # What this job was quoted at, not what the board costs today. The price
+        # was captured into the job when the board was selected, so editing the
+        # library afterwards reprices the next job and never this one.
+        price = effective_price(job, mat)
         cut = RATES["cut"].get(mat, 0.0)
         lines.append((desc, boards, price, boards * price))
         lines.append((f"Cutting — {desc}", boards, cut, boards * cut))

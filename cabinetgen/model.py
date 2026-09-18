@@ -27,69 +27,118 @@ CODES = {
 }
 
 
-# A board and the tapes that match it. The tape names are a lookup, never built
-# by sticking a thickness in front of a board name: "PVC WOOD" and "2mm WOOD"
-# are what Plazaboard call the Brookhill tapes, and nothing about the board
-# description spells either of them. A board with no tape of a given thickness
-# simply has no entry, and the validator says which board is missing one rather
-# than a plausible-looking name being invented for it (D6 / W10: 'SOLID' got
-# onto a real order as a tape, and it is a board).
+# The board records a job was quoted with. A job keeps its own copy of every
+# board it selected from the library (cabinetgen/boards.py), so editing the
+# library never moves a quoted job — see "Price capture" in CLAUDE.md.
+#
+# Tape names are GENERATED from the board's tape token, one token for all three
+# thicknesses: "PVC <token>", "1mm <token>", "2mm <token>". The token is its own
+# field rather than the board's name because Plazaboard's Brookhill tape is
+# "PVC WOOD" — "PVC BROOKHILL FUSION CHIP" is not a thing they sell, and putting
+# it on an order is finding D6/W10 in the other direction.
+TAPE_PREFIX = {"pvc": "PVC", "1mm": "1mm", "2mm": "2mm"}
+EXTERIOR_TAPES = ("1mm", "2mm")
+
 MATERIALS = {
     "MEL": {
         "board": "SUPER WHITE MELAMINE CHIP 9X6X16MM",
-        "pvc": "PVC WHITE",
-        "grain": 0,
-        # no 2 mm tape is established for the white board: no job has ordered one
+        "name": "SUPER WHITE MELAMINE CHIP 9X6X16MM",
+        "tape": "WHITE", "thickness": 16, "grain": "plain", "price": 575.0,
     },
     "DECOR": {
         "board": "BROOKHILL FUSION CHIP",
-        "pvc": "PVC WOOD",
-        "2mm": "2mm WOOD",
-        "grain": 1,
+        "name": "BROOKHILL FUSION CHIP",
+        "tape": "WOOD", "thickness": 16, "grain": "grain", "price": 999.0,
     },
     "BACK": {
         "board": "IMPORTED WHITE DECOR 9X6X3MM",
-        "grain": 0,
+        "name": "IMPORTED WHITE DECOR 9X6X3MM",
         # a 3 mm back is grooved in on all sides; it is never edged
+        "tape": "WHITE", "thickness": 3, "grain": "plain", "price": 310.0,
     },
 }
 
-# What a job written before materials carried their tapes still means. A legacy
-# entry is a bare board description, so its tapes are taken from the record above
-# only when the description is the very one that record describes. A board nobody
-# has a record for keeps its description and gets no tapes — which the validator
-# reports rather than the app guessing.
+
 def material_record(materials: dict, key: str) -> dict:
+    """One board's record, whatever shape the job file wrote it in.
+
+    Three shapes have existed and all three still read. A bare string is the
+    board description. A record with `pvc` / `2mm` keys is the mapped-tape shape
+    that came before generation — its token is recovered by taking the mapped
+    name apart, so a job written then still generates the tapes it was quoted
+    with. Anything else is read as it stands.
+    """
     value = (materials or {}).get(key)
-    if isinstance(value, dict):
-        return value
     if isinstance(value, str):
         known = MATERIALS.get(key)
         if known and known["board"] == value:
             return known
-        return {"board": value}
-    return {}
+        return {"board": value, "name": value}
+    if not isinstance(value, dict):
+        return {}
+    if value.get("tape") or not any(k in value for k in ("pvc", "1mm", "2mm")):
+        return value
+    # the mapped-tape shape: "PVC WOOD" -> token "WOOD"
+    out = dict(value)
+    for kind, prefix in TAPE_PREFIX.items():
+        mapped = value.get(kind, "")
+        if mapped.startswith(prefix + " "):
+            out["tape"] = mapped[len(prefix) + 1:]
+            break
+    if isinstance(out.get("grain"), int):
+        out["grain"] = "grain" if out["grain"] else "plain"
+    return out
 
 
 def material_board(materials: dict, key: str) -> str:
-    """The Plazaboard description the quote is priced against."""
-    return material_record(materials, key).get("board", key)
+    """The description the quote orders by."""
+    rec = material_record(materials, key)
+    return rec.get("name") or rec.get("board") or key
+
+
+def material_token(materials: dict, key: str) -> str:
+    """What this board's tape names are generated from."""
+    rec = material_record(materials, key)
+    return str(rec.get("tape") or rec.get("name") or rec.get("board") or "").strip()
 
 
 def tape_for(materials: dict, key: str, thickness: str) -> str:
-    """The tape in that board's colour, or '' when none is mapped for it."""
-    return material_record(materials, key).get(thickness, "")
+    """`PVC WOOD`, `2mm WOOD` ... generated, never mapped. '' when the board has
+    nothing to generate from, which the validator names rather than guessing."""
+    token = material_token(materials, key)
+    return f"{TAPE_PREFIX[thickness]} {token}" if token else ""
+
+
+def material_price(materials: dict, key: str) -> float:
+    """What this job was quoted per board. 0 when the job never captured one."""
+    try:
+        return float(material_record(materials, key).get("price") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def material_thickness(materials: dict, key: str) -> int:
+    """The board's thickness. The engine assumes Standard.board_t throughout, so
+    this exists to be checked against it, not to drive geometry (deferred)."""
+    try:
+        return int(material_record(materials, key).get("thickness") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def grain_of(materials: dict, key: str) -> int:
-    """Whether the board has a direction, which is what locks a panel's rotation.
+    """Whether the board has a direction, which locks a panel's rotation.
 
-    It belongs to the board, not to the job it is cut for: a Brookhill carcass
-    side runs with the grain exactly as a Brookhill door does. Getting this from
-    the panel's role instead is how 60 woodgrain panels went out at grain 0 and
-    only Plazaboard's counter caught it (W8 / D9).
+    It belongs to the board, not to the job the panel is cut for: a Brookhill
+    carcass side runs with the grain exactly as a Brookhill door does. Reading it
+    off the panel's role instead is how 60 woodgrain panels went out at grain 0
+    and only Plazaboard's counter caught it (W8 / D9). The library says Grain or
+    Plain; an int is the shape the record had before the library existed.
     """
-    return int(material_record(materials, key).get("grain", 0))
+    value = material_record(materials, key).get("grain", 0)
+    if isinstance(value, str):
+        return 1 if value.strip().lower() == "grain" else 0
+    return int(value or 0)
 
 
 @dataclass
@@ -209,6 +258,12 @@ class Cabinet:
     carcass_board: str = "MEL"
     exterior_board: str = "DECOR"
 
+    # Which exterior tape this cabinet takes, 1 mm or 2 mm. It changes the tape
+    # ordered and what it costs, and nothing else: we supply finished sizes and
+    # Plazaboard deducts the tape, so there is deliberately no dimensional effect
+    # anywhere. The carcass tape is always the thin PVC and is not selectable.
+    exterior_tape: str = "2mm"           # '1mm' | '2mm'
+
     # ---- edge tapes: derived from the boards, overridable per cabinet -------
     # None means "derive it" (see carcass_tape / door_tape / drawer_box_tape).
     # A string is an override for this cabinet only. The three are kept separate
@@ -299,10 +354,12 @@ class Cabinet:
         return tape_for(materials, self.exterior_board, "pvc")
 
     def door_tape(self, materials: dict) -> str:
-        """2 mm in the EXTERIOR board's colour: doors, drawer faces, exposed ends."""
+        """Exterior tape in the EXTERIOR board's colour, at this cabinet's chosen
+        thickness: doors, drawer faces, exposed ends."""
         if self.door_edge is not None:
             return self.door_edge
-        return tape_for(materials, self.exterior_board, "2mm")
+        kind = self.exterior_tape if self.exterior_tape in EXTERIOR_TAPES else "2mm"
+        return tape_for(materials, self.exterior_board, kind)
 
     def drawer_box_tape(self, materials: dict) -> str:
         """PVC in the CARCASS board's colour: drawer sides and fronts, and the
@@ -446,7 +503,18 @@ class Job:
     gaps: List[GapChoice] = field(default_factory=list)
     plinths: List[PlinthChoice] = field(default_factory=list)
 
-    # material name -> its record: the Plazaboard board description for the export
-    # and the quote, plus the tapes that match it. See MATERIALS.
+    # The boards this project selected out of the library, by id. Empty means
+    # "whatever `materials` already carries", which is how every job written
+    # before the library reads.
+    boards: List[str] = field(default_factory=list)
+
+    # board id -> the record this job was quoted with. A snapshot taken when the
+    # board was selected, never a pointer at the library: editing a board's price
+    # there changes what the next job costs and never what this one did.
     materials: dict = field(default_factory=lambda: {k: dict(v)
                                                      for k, v in MATERIALS.items()})
+
+    @property
+    def board_ids(self) -> List[str]:
+        """The boards a cabinet may be cut from, in a stable order."""
+        return list(self.boards) if self.boards else sorted(self.materials or {})

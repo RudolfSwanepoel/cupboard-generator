@@ -24,6 +24,42 @@ MUTED = "#767e78"
 CRIT = "#a4303f"
 
 
+def tape_legend(job: Job) -> list:
+    """Which tape bands what, as resolved for this job.
+
+    The tape name is generated from the board, so it is worth putting on the
+    drawing rather than leaving it to the cut list: a door taped in the carcass
+    colour looks right on paper and wrong in the room. One line per distinct
+    tape, naming the cabinets that use it when they do not all agree.
+    """
+    roles = (("doors & faces", "door_edge"), ("carcass fronts", "carcass_edge"),
+             ("drawer boxes", "drawer_box_edge"))
+    out = []
+    for label, field in roles:
+        seen = {}
+        for c in job.cabinets:
+            if c.template == "none":
+                continue
+            tape = c.tapes(job.materials)[field]
+            if tape:
+                seen.setdefault(tape, []).append(c.number)
+        for tape, cabs in seen.items():
+            note = "" if len(seen) == 1 else f" (cab {', '.join(map(str, cabs))})"
+            out.append(f"{label} {tape}{note}")
+    return out
+
+
+def _tape_note(job: Job, x, y, width) -> list:
+    legend = tape_legend(job)
+    if not legend:
+        return []
+    text = "Edge tape: " + "  ·  ".join(legend)
+    if len(text) * 4.6 > width:            # one line only; the cut list has the rest
+        text = text[:int(width / 4.6) - 1] + "…"
+    return [f'<text class="tapes" x="{x:.1f}" y="{y:.1f}" font-size="8.5" '
+            f'fill="{MUTED}">{escape(text)}</text>']
+
+
 def elevation_svg(job: Job, max_width: int = 1100) -> str:
     cabs = [c for c in job.cabinets]
     if not cabs:
@@ -38,13 +74,13 @@ def elevation_svg(job: Job, max_width: int = 1100) -> str:
     pad = 46
     scale = min((max_width - pad * 2) / total_w, 520 / max_h)
     W = int(total_w * scale) + pad * 2
-    H = int(max_h * scale) + pad * 2
+    H = int(max_h * scale) + pad * 2 + 14        # room under the floor for the tapes
 
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
            f'viewBox="0 0 {W} {H}" font-family="system-ui,sans-serif">',
            f'<rect width="{W}" height="{H}" fill="none"/>']
     x = pad
-    floor = H - pad
+    floor = H - pad - 14
     for c in cabs:
         w = c.width * scale
         h = c.height * scale
@@ -60,6 +96,7 @@ def elevation_svg(job: Job, max_width: int = 1100) -> str:
 
     out.append(f'<line x1="{pad - 8}" y1="{floor:.1f}" x2="{W - pad + 8}" y2="{floor:.1f}" '
                f'stroke="{INK}" stroke-width="1.6"/>')
+    out += _tape_note(job, pad, H - 8, W - pad * 2)
     out.append("</svg>")
     return "\n".join(out)
 
@@ -260,10 +297,11 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
                        f'font-size="8" text-anchor="middle" fill="{MUTED}">legs</text>')
 
     if any(c.doors for c, _p, _lay, _g in on_wall):
-        out.append(f'<text x="{pad_l}" y="{H - 8}" font-size="8.5" fill="{MUTED}">'
+        out.append(f'<text x="{pad_l}" y="{H - 20}" font-size="8.5" fill="{MUTED}">'
                    f'Hinges drawn {std.hinge_inset_drawn} mm in from each door end, any '
                    f'between spread evenly — indicative only, not a drilling reference.'
                    f'</text>')
+    out += _tape_note(job, pad_l, H - 8, W - pad_l - pad_r)
 
     for ob in wall.obstructions:
         kind = escape(ob.kind)
