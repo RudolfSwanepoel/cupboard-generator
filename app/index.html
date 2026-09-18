@@ -327,7 +327,7 @@ function blankCabinet(number) {
     drawers: [], has_drawers: null,
     exposed_sides: 0,
     carcass_edge: "PVC WOOD", door_edge: "2mm WOOD",
-    carcass_board: "", exterior_board: "", exterior_tape: "2mm",
+    carcass_board: "", exterior_board: "", back_board: "", exterior_tape: "2mm",
     carcass_edge: null, door_edge: null, drawer_box_edge: null,
     bespoke: [], note: "", footprint: [],
     corner_style: "", arm_a: null, arm_b: null, face_a: null, face_b: null,
@@ -509,6 +509,12 @@ $("add").addEventListener("click", async () => {
   // shows takes the last, which is the usual white-box-with-a-decor-front
   fresh.carcass_board = picked[0];
   fresh.exterior_board = picked[picked.length - 1];
+  // A back is the thin sheet, so the thinnest selected board is the sensible
+  // place to start. It is a starting point and not a rule — the dropdown is
+  // right there, and the validator names the cabinet if it is wrong.
+  const mats = (S.res && S.res.materials) || {};
+  fresh.back_board = picked.slice().sort((a, b) =>
+    ((mats[a] || {}).thickness || 999) - ((mats[b] || {}).thickness || 999))[0];
   S.job.cabinets.push(fresh);
   S.sel = S.job.cabinets.length - 1;
   schedule(); renderList();
@@ -691,7 +697,8 @@ $("editor").addEventListener("input", (e) => {
     else c[k] = raw === "" ? 0 : parseInt(raw, 10);
     if (k === "number") c.bespoke.forEach((p) => { p.cabinet = c.number; });
     // a board decides three tapes and two materials, so the section is rebuilt
-    if (k === "carcass_board" || k === "exterior_board" || k === "exterior_tape") {
+    if (k === "carcass_board" || k === "exterior_board" || k === "back_board" ||
+        k === "exterior_tape" || k === "back") {
       S.selRendered = -2;
     }
     schedule();
@@ -1087,12 +1094,23 @@ function renderBoards() {
       size — Plazaboard deduct the tape from the finished size we give them.</span>
     </div>`;
 
+  // The back board is only cut when there is a back, or a drawer on a grooved
+  // 3 mm base. Nothing on this cabinet uses it otherwise, so it is not asked for.
+  const usesBack = c.back !== "none" ||
+    (tickOn(c, "has_drawers") && (c.drawers || []).some((d) => d.base === "board"));
+
   box.innerHTML =
     `<div class="grid">
        ${boardSel("carcass_board", "Carcass board",
                   "sides, top, bottom, supports, shelves and dividers")}
        ${boardSel("exterior_board", "Exterior board",
                   "doors, drawer faces and exposed end panels")}
+       ${usesBack
+          ? boardSel("back_board", "Back board",
+                     "the backing panel, and a drawer base grooved out of the same sheet")
+          : `<div class="f wide"><label>Back board</label>
+               <p class="off">Nothing on this cabinet is cut from it — no back, and no
+               drawer on a grooved base.</p></div>`}
        ${thickSel}
      </div>
      ${TAPE_FIELDS.map(tapeRow).join("")}`;

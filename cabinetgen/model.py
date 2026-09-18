@@ -257,6 +257,13 @@ class Cabinet:
     # faces and exposed end panels. Each nests and prices as its own material.
     carcass_board: str = "MEL"
     exterior_board: str = "DECOR"
+    # The thin sheet the back (06) is cut from, and the grooved drawer base (17)
+    # with it — they are the same board. It used to be reached for by the engine
+    # rather than chosen, which is how a project could cut a board it had never
+    # selected and quote it at R0. "BACK" is the default because that is the
+    # board the engine always reached for, so every job written before this
+    # names the board it was already using.
+    back_board: str = "BACK"
 
     # Which exterior tape this cabinet takes, 1 mm or 2 mm. It changes the tape
     # ordered and what it costs, and nothing else: we supply finished sizes and
@@ -367,6 +374,12 @@ class Cabinet:
         if self.drawer_box_edge is not None:
             return self.drawer_box_edge
         return tape_for(materials, self.carcass_board, "pvc")
+
+    @property
+    def needs_back_board(self) -> bool:
+        """Whether anything on this cabinet is actually cut from the back board:
+        a back, or a drawer on a grooved 3 mm base."""
+        return self.back != "none" or any(d.base == "board" for d in self.drawer_list)
 
     def tapes(self, materials: dict) -> dict:
         return {"carcass_edge": self.carcass_tape(materials),

@@ -191,6 +191,81 @@ def main() -> int:                                                  # noqa: C901
     check("nor does the 3 mm backing board, which is never a carcass",
           [i for i in validate(JOB, []) if "3 mm, but every size" in i.message], [])
 
+    print("\nthe back board is chosen, not reached for")
+    three = generate_cabinet(Cabinet(number=1, width=600, height=720, depth=500,
+                                     carcass_board="MEL", exterior_board="DECOR",
+                                     back_board="BACK", back="four",
+                                     drawers=[Drawer(200, 150, "board")]),
+                             S, JOB.materials)
+    check("the backing panel takes it",
+          [x.material for x in three if x.code[:2] == "06"], ["BACK"])
+    check("and so does a drawer base grooved out of the same sheet",
+          [x.material for x in three if x.code[:2] == "17"], ["BACK"])
+    swapped = generate_cabinet(Cabinet(number=1, width=600, height=720, depth=500,
+                                       carcass_board="MEL", exterior_board="DECOR",
+                                       back_board="DECOR", back="four", doors=1,
+                                       drawers=[Drawer(200, 150, "board")]),
+                               S, JOB.materials)
+    check("changing it moves both, and nothing else",
+          [(x.code[:2], x.material) for x in swapped
+           if x.code[:2] in ("01", "06", "07", "17", "18")],
+          [("01", "MEL"), ("06", "DECOR"), ("18", "MEL"), ("17", "DECOR"),
+           ("07", "DECOR")])
+    check("a housed 16 mm base is the drawer box's board, not the back's",
+          [x.material for x in generate_cabinet(
+              Cabinet(number=1, width=600, height=790, depth=570, back="none",
+                      back_board="DECOR", drawers=[Drawer(200, 150, "melamine")]),
+              S, JOB.materials) if x.code[:2] == "17"], ["MEL"])
+
+    print("\nand a project that has not selected one is told which cabinet")
+    only_mel = Job(name="b", boards=["MEL"],
+                   materials={"MEL": dict(JOB.materials["MEL"])},
+                   cabinets=[Cabinet(number=1, width=600, height=720, depth=500,
+                                     carcass_board="MEL", exterior_board="MEL",
+                                     back_board="BACK", back="four")])
+    msgs = [(i.level, i.where, i.message) for i in validate(only_mel, [])
+            if "back board" in i.message]
+    check("named on the cabinet, with what the project does have",
+          msgs, [("critical", "1",
+                  "back board 'BACK' is not one of the job's boards (MEL)")])
+    check("and the export is blocked",
+          blocking(validate(only_mel, generate_job(only_mel))), True)
+    no_back = copy.deepcopy(only_mel)
+    no_back.cabinets[0].back = "none"
+    check("a cabinet with no back is not asked for a back board",
+          [i for i in validate(no_back, generate_job(no_back))
+           if "back board" in i.message], [])
+    grooved = copy.deepcopy(no_back)
+    grooved.cabinets[0].drawers = [Drawer(200, 150, "board")]
+    grooved.cabinets[0].depth = 570
+    check("but one with a grooved drawer base is",
+          [i.level for i in validate(grooved, [])if "back board" in i.message],
+          ["critical"])
+    check("the cabinet knows which it is",
+          (Cabinet(number=1, width=600, height=720, depth=500,
+                   back="none").needs_back_board,
+           Cabinet(number=1, width=600, height=720, depth=500,
+                   back="four").needs_back_board), (False, True))
+
+    print("\nevery job written before it names the board it was already using")
+    check("the default is the board the engine always reached for",
+          Cabinet(number=1, width=600, height=720, depth=500).back_board, "BACK")
+    check("so a job file with no back_board migrates to it",
+          job_from_dict({"name": "x", "cabinets": [
+              {"number": 1, "width": 600, "height": 720, "depth": 500}
+          ]}).cabinets[0].back_board, "BACK")
+    for name in ("Test.json", "Test_Build.json"):
+        j = load(os.path.join(ROOT, "jobs", name))
+        check(f"{name} migrates every cabinet",
+              sorted({c.back_board for c in j.cabinets}), ["BACK"])
+        backs = [(x.label, x.material) for x in generate_job(j) if x.code[:2] == "06"]
+        check(f"  and every back it cuts is still off that board",
+              (len(backs) > 0, sorted({m for _, m in backs})), (True, ["BACK"]))
+    check("the October job too",
+          sorted({c.back_board for c in JOB.cabinets}), ["BACK"])
+    check("and it round-trips through a job file",
+          job_from_dict(job_to_dict(JOB)).cabinets[0].back_board, "BACK")
+
     print("\na board on the cut list that the project never priced is named")
     partial = Job(name="p", boards=["MEL"],
                   materials={"MEL": dict(JOB.materials["MEL"])},

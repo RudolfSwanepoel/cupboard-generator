@@ -31,7 +31,7 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     n = cab.number
     Wi = std.internal_width(cab.width)
     # the two boards, and the three tapes those boards imply (or the overrides)
-    carc, ext = cab.carcass_board, cab.exterior_board
+    carc, ext, back = cab.carcass_board, cab.exterior_board, cab.back_board
     carc_tape = cab.carcass_tape(mats)
     door_tape = cab.door_tape(mats)
     box_tape = cab.drawer_box_tape(mats)
@@ -84,8 +84,8 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     if cab.back != "none":
         bw, bh = std.back_size(cab.width, cab.height, cab.back)
         # house convention: the longer dimension is always Length
-        P.append(Panel(n, "06", "Backing", "BACK", max(bw, bh), min(bw, bh), 1,
-                       grain=grain_of(mats, "BACK")))
+        P.append(Panel(n, "06", "Backing", back, max(bw, bh), min(bw, bh), 1,
+                       grain=grain_of(mats, back)))
 
     # ---- drawers -----------------------------------------------------------
     # cab.drawer_list, never cab.drawers: with "Has drawers" unticked the stack
@@ -110,7 +110,9 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
                            edge_l=1, edge_material=box_tape,
                            grain=grain_of(mats, "MEL")))
             bl, bwid = std.drawer_base(front_len, runner, base_mat)
-            base_board = "BACK" if base_mat == "board" else "MEL"
+            # a grooved base is the same thin sheet as the back; a housed one is
+            # 16 mm melamine, which is the drawer box's board and not the carcass's
+            base_board = back if base_mat == "board" else "MEL"
             P.append(Panel(n, "17", "Drawer Base", base_board, bl, bwid, count,
                            grain=grain_of(mats, base_board)))
 

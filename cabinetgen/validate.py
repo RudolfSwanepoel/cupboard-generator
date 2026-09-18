@@ -246,7 +246,8 @@ def _board_prices(job: Job, panels):
             out.append(Issue(CRITICAL, mat,
                              f"panels are cut from {mat!r}, which this project has not "
                              f"selected — it has no price, so it is quoted at R0. Tick "
-                             f"it into the project on the Boards tab"))
+                             f"it into the project on the Boards tab, or change the "
+                             f"cabinets that name it"))
         elif not effective_price(job, mat):
             out.append(Issue(WARNING, mat,
                              f"{material_board(job.materials, mat)!r} has no price on "
@@ -268,9 +269,20 @@ def _boards_and_tapes(job: Job):
     for c in job.cabinets:
         if c.template == "none":
             continue                       # its panels name their own materials
-        for board, what in ((c.carcass_board, "carcass board"),
-                            (c.exterior_board, "exterior board")):
-            if board not in (mats or {}):
+        # The back board is only asked for when something is actually cut from it
+        # — a back, or a drawer on a grooved 3 mm base. A cabinet with no back and
+        # no board bases never touches it, so it is not nagged about one.
+        chosen = [(c.carcass_board, "carcass board"),
+                  (c.exterior_board, "exterior board")]
+        if c.needs_back_board:
+            chosen.append((c.back_board, "back board"))
+        for board, what in chosen:
+            if not board:
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"no {what} chosen — pick one from the boards this "
+                                 f"project selected "
+                                 f"({', '.join(job.board_ids) or 'none yet'})"))
+            elif board not in (mats or {}):
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"{what} {board!r} is not one of the job's boards "
                                  f"({', '.join(sorted(mats or {})) or 'none'})"))

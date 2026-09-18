@@ -127,20 +127,34 @@ and sends you to the Boards tab. Above `validate.BOARD_GUIDELINE` (5) it warns
 and does no more: every extra board is another part sheet and another offcut
 pile, which is a guideline about cost and complexity, not a limit.
 
-**A board on the cut list that the project never selected is a critical.** The
-backing board is reached for by the engine rather than chosen, so a project can
-cut a board it never priced — and an unpriced board quotes at R0 while the total
-still looks like a number. That is the worst way to be wrong, so it blocks.
+**A board on the cut list that the project never selected is a critical.** An
+unpriced board quotes at R0 while the total still looks like a number, which is
+the worst way to be wrong, so it blocks.
 
-### The two boards on a cabinet
+### The three boards on a cabinet
 
 - `carcass_board` — sides (01), top (02), bottom (03), supports (04), shelves
   (05), dividers (09), and the plinth board that covers its legs.
 - `exterior_board` — doors (07), drawer faces (20), exposed end panels (08).
+- `back_board` — the backing panel (06), and the drawer base (17) when it is the
+  grooved 3 mm one, because that is the same thin sheet.
 
-Drawer box sides and fronts (18, 19) and the melamine drawer base (17) are still
-cut from `MEL` — **not** from the carcass board. That was never ruled, so it was
-not changed; a cabinet whose carcass board is not MEL warns and asks.
+**The back board is chosen, not reached for.** The engine used to type `"BACK"`
+onto the backing panel, so a project could cut a board it had never selected and
+quote it at R0 with a plausible-looking total. It is a third dropdown off the
+project's boards now. The default is `"BACK"` — the board the engine always
+reached for — so every job written before this names the board it was already
+using and nothing moves.
+
+It is only asked for when something is actually cut from it
+(`Cabinet.needs_back_board`: a back, or a drawer on a grooved base). A cabinet
+with neither is not nagged for one, and the editor says why rather than showing
+an empty dropdown. The stored value is kept when the section hides, the same
+discipline as the tickboxes.
+
+Drawer box sides and fronts (18, 19) and the **housed 16 mm** drawer base (17)
+are still cut from `MEL` — not from the carcass board. That was never ruled, so
+it was not changed; a cabinet whose carcass board is not MEL warns and asks.
 
 ### Tapes are generated, not mapped
 
