@@ -567,14 +567,6 @@
       "z": 0,
       "flip": false,
       "layer": null
-    },
-    {
-      "cabinet": 8,
-      "wall": "B",
-      "x": 0,
-      "z": 0,
-      "flip": false,
-      "layer": null
     }
   ]
 }

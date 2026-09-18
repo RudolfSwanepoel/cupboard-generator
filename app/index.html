@@ -520,7 +520,18 @@ $("cabtable").addEventListener("click", async (e) => {
   const del = e.target.closest("[data-del]");
   if (del) {
     const i = +del.dataset.del;
-    S.job.cabinets.splice(i, 1);
+    const gone = S.job.cabinets.splice(i, 1)[0];
+    // Everything in the job that names the cabinet by number goes with it. A
+    // placement left behind is a critical ("placement for a cabinet that does
+    // not exist") that the Room tab cannot clear, since its table lists only
+    // cabinets that exist. A gap or plinth choice that named it is just as dead.
+    if (gone) {
+      const n = gone.number;
+      S.job.placements = (S.job.placements || []).filter((p) => p.cabinet !== n);
+      S.job.gaps = (S.job.gaps || []).filter((g) => g.after !== n && g.before !== n);
+      S.job.plinths = (S.job.plinths || []).filter((p) => p.first !== n);
+      placesSig = null; gapsSig = null; plinthSig = null;
+    }
     if (S.sel === i) S.sel = null;
     else if (S.sel > i) S.sel -= 1;
     schedule(); renderList();
@@ -771,6 +782,10 @@ $("editor").addEventListener("input", (e) => {
 
   const k = e.target.dataset.k;
   if (k) {
+    // The number is applied when the field is finished with, not per keystroke:
+    // everything that names the cabinet by number has to move with it, and typing
+    // 12 passes through 1, which is another cabinet's. See the change handler.
+    if (k === "number") return;
     const t = e.target.dataset.t;
     const raw = e.target.value;
     if (t === "text" || t.startsWith("sel:")) c[k] = raw;
@@ -782,7 +797,6 @@ $("editor").addEventListener("input", (e) => {
           .filter((pt) => pt.length === 2 && pt.every((n) => !isNaN(n)));
     else if (t === "opt") c[k] = raw === "" ? null : parseInt(raw, 10);
     else c[k] = raw === "" ? 0 : parseInt(raw, 10);
-    if (k === "number") c.bespoke.forEach((p) => { p.cabinet = c.number; });
     // a board decides three tapes and two materials, so the section is rebuilt
     // a board decides materials and edging, and the door count decides how many
     // leaf rows there are, so the section is rebuilt rather than patched
@@ -834,6 +848,42 @@ $("editor").addEventListener("input", (e) => {
    off the cut list, and that is never silent — the engine is asked which
    designations would go, and they are named before anything happens. A
    designation is only ever removed, never renamed and never reused.         */
+
+/* Renumbering a cabinet. Everything in the job that names it by number moves
+   with it — its wall placement, the gap choices either side of it, the plinth
+   run it starts, and its own hand-specified panels — otherwise its placement is
+   left naming a cabinet that no longer exists, which is a critical the Room tab
+   cannot clear. Two cabinets cannot share a number, so a taken one is refused
+   rather than merging their placements. */
+$("editor").addEventListener("change", (e) => {
+  if (e.target.dataset.k !== "number") return;
+  const c = S.job.cabinets[S.sel];
+  if (!c) return;
+  const from = c.number;
+  const to = parseInt(e.target.value, 10);
+  if (!(to > 0)) {
+    toast("A cabinet number is a whole number, 1 or more.", true);
+    e.target.value = from;
+    return;
+  }
+  if (to === from) { e.target.value = from; return; }
+  if (S.job.cabinets.some((x) => x !== c && x.number === to)) {
+    toast(`Cabinet ${to} already exists — two cabinets cannot share a number.`, true);
+    e.target.value = from;
+    return;
+  }
+  c.number = to;
+  c.bespoke.forEach((p) => { p.cabinet = to; });
+  (S.job.placements || []).forEach((p) => { if (p.cabinet === from) p.cabinet = to; });
+  (S.job.gaps || []).forEach((g) => {
+    if (g.after === from) g.after = to;
+    if (g.before === from) g.before = to;
+  });
+  (S.job.plinths || []).forEach((p) => { if (p.first === from) p.first = to; });
+  placesSig = null; gapsSig = null; plinthSig = null;
+  S.selRendered = -2;
+  schedule(); renderList();
+});
 
 $("editor").addEventListener("change", async (e) => {
   const key = e.target.dataset.tick;
