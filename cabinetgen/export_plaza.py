@@ -25,7 +25,9 @@ HEADER = ["Component", "Material", "Length", "Width", "qty", "Invoice Number", "
 # what the board IS: a grained board cannot be rotated, so it nests worse, and
 # the thin backing sheet is cut on the masonite saw. A board added to the library
 # after this was written gets the right figure rather than a house average.
-YIELD = {"MEL": 0.89, "DECOR": 0.78, "BACK": 0.80}
+# BROOKHILL is the October job's DECOR under its current id; DECOR stays as an
+# alias because a job quoted before the rename still names it (model.BOARD_ALIASES).
+YIELD = {"MEL": 0.89, "BROOKHILL": 0.78, "DECOR": 0.78, "BACK": 0.80}
 YIELD_BY_KIND = {"grain": 0.78, "thin": 0.80, "plain": 0.89}
 
 
@@ -58,7 +60,7 @@ RATES = {
         "IMPORTED WHITE DECOR 9X6X3MM": 310.00,
     },
     "cut": {          # per board
-        "MEL": 67.00, "DECOR": 67.00, "BACK": 34.00,
+        "MEL": 67.00, "BROOKHILL": 67.00, "DECOR": 67.00, "BACK": 34.00,   # DECOR: alias
     },
     "edging": {       # per metre: (tape, application)
         "2mm": (12.00, 7.50),

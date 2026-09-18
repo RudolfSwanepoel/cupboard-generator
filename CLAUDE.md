@@ -139,8 +139,31 @@ id it was quoted with and does not move; the reply names those jobs. The project
 open on screen does come along (`api.rename_board_in_job`), and is named in a
 confirm before anything is written. No panel designation changes: a panel keeps
 its name and changes what it is cut from. `DECOR` was renamed `BROOKHILL` this
-way; `jobs/Test*.json` still say `DECOR` and still open and price exactly as
+way; `jobs/Test*.json` still say `DECOR` on disk and still price exactly as
 before, which is the price capture doing its job.
+
+**A former id keeps resolving: `model.BOARD_ALIASES`** (`{"DECOR": "BROOKHILL"}`).
+`Cabinet.exterior_board` and the house `MATERIALS` say `BROOKHILL`, but the
+frozen October fixture names `DECOR` literally on its bespoke and loose panels
+while its template cabinets take the default. Without the alias those would be
+two boards on two sheet piles and the 9-board benchmark breaks. `resolve_board`
+maps an id the job does not carry onto the other name it does, either way round,
+and the engine resolves every panel's board through it (bespoke and loose panels
+as copies — the job is never touched). The benchmark therefore prints
+`59 BROOKHILL`; the numbers are the October job's exactly. Do not "tidy" DECOR
+out of the alias map, `YIELD` or `RATES["cut"]`.
+
+Opening a saved job in the UI (`api.upgrade_former_ids`) shows a former id under
+the current one **only when the job never captured a price for it** — a
+pre-library bare-string record, like both Test files. A captured record keeps its
+old id. The file on disk is untouched until saved, and a toast says so. The
+Boards tab lists `Test.json (as DECOR)` against BROOKHILL, and refuses to delete a
+board a saved job uses under a former id.
+
+**The library's BROOKHILL edging token is `BROOKHILL`, deliberately** (ruled 18
+September 2026). New cabinets generate `2mm BROOKHILL` / `PVC BROOKHILL`. The
+October job's `PVC WOOD` / `2mm WOOD` are what that one order was edged with,
+kept because that job is frozen — not a catalogue name to steer new jobs towards.
 
 **Yield and cut rate are read off what a board IS, not off its id.** Both used to
 be dicts keyed `MEL` / `DECOR` / `BACK`, so a renamed or newly added board fell to
@@ -165,6 +188,13 @@ job written before them cuts exactly what it was quoted:
 - `drawer_carcass_board` — drawer sides (18), fronts (19) and a **housed 16 mm**
   base (17). Follows `carcass_board`.
 - `drawer_face_board` — drawer faces (20). Follows `exterior_board`.
+- `Drawer.box_board` / `Drawer.face_board` — **per drawer** (18 September 2026),
+  so one drawer in a stack can take a different finish. `None` follows the two
+  cabinet-level fields above, which follow Structure. This is what the editor
+  sets now — one column each in the drawer table; the cabinet-level pair is no
+  longer offered in the UI and is only read as a fallback from older job files.
+  The engine groups drawers by board as well as size, so an odd drawer comes out
+  as its own line (`418a` / `418b`), and its box PVC follows its own box board.
 - `door_boards[i]` — one per leaf, `""` for the exterior board. Two leaves cut
   from different boards come out as two cut-list lines, told apart by
   `born_distinct` because the material is part of the signature it reads
@@ -200,13 +230,16 @@ PVC <token>    the thin carcass tape
 2mm <token>    exterior option
 ```
 
-**The token is its own field, not the board's name, and that is load-bearing.**
-Plazaboard's Brookhill tape is "PVC WOOD". "PVC BROOKHILL FUSION CHIP" is not a
-thing they sell, so generating off the long name would put an unbuyable product
-on a real order — D6/W10 in the other direction, where a board name reached an
-order as a tape. A board with a blank token generates off its name, which is
-right for a board whose name is already the short one; a board with neither
-generates nothing and the validator names it rather than inventing a tape.
+**The token is its own field, not the board's name.** Edging names are decided
+per order — there is no fixed Plazaboard edging name to look up for a board (ruled
+18 September 2026; the October job's "WOOD" was that order's choice for a
+woodgrain board, not a catalogue rule). The token is what this workshop wants on
+the order, and keeping it separate stops a long board description such as
+"BROOKHILL FUSION CHIP" landing on an order as an edging name — D6/W10 in the
+other direction, where a board name reached an order as a tape. A board with a
+blank token generates off its name, which is right for a board whose name is
+already the short one; a board with neither generates nothing and the validator
+names it rather than inventing a tape.
 
 Colour derivation is unchanged: **front edges take the EXTERIOR board, every
 other banded edge takes the CARCASS board.**
@@ -353,8 +386,11 @@ lines would go before it does.
 - **Doors** is one or two leaves and no more. A pair is fixed, left and right; a
   single door is the choice. Each leaf names the board it is cut from, and the
   section carries one edging control.
-- **Drawers** carries the face table, a box board, a face board and one edging
-  control. The box's own PVC edging follows the box board and is not chosen.
+- **Drawers** carries the face table — with a box-material and a face-material
+  column per drawer, defaulting to Structure's Carcass and Exterior boards — and
+  one edging control for the whole section. Each box's own PVC edging follows
+  that drawer's box board and is not chosen. The settings column is 560 wide to
+  fit the table's nine columns.
 - **Supports** is the support rows and nothing else. The **Decor** section is
   gone — added panels (exposed ends, code 08) come back with that work.
 
@@ -392,6 +428,15 @@ mapping in `class="etrack"` — where 0 mm and the floor are, and the scale — 
 one `class="ecabg"` group per cabinet so the whole thing moves rather than an
 empty outline. The vertical figure is `Placement.z`: 0 is the floor, where the
 carcass stands on its legs, and above it is a hung unit's underside.
+
+Two things about that drag that were wrong and are pinned only by hand (the UI
+has no test harness): the press does all its synchronous work — listeners,
+`preventDefault` — *before* awaiting `/api/drag`, and replays the last pointer
+position and the release once the model arrives. Awaiting first meant a quick
+drag let go before anything listened, and the cabinet stuck to the pointer. And
+the floor snap is compared where a standing carcass really is (its underside on
+the legs), not at `z = 0`; an underside below leg height is "on the floor". Before,
+a sideways drag with a 2 px wobble hung a base unit 86 mm up.
 
 **Clicking a door in the elevation no longer turns it round.** Which edge a leaf
 hangs from is set in the Doors section, where the answer can be read instead of

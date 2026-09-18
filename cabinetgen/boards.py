@@ -14,9 +14,9 @@ three thicknesses:
     2mm <token>     exterior option
 
 The token is a field of its own rather than the board's name, and that is
-deliberate. Plazaboard's Brookhill tape is "PVC WOOD"; "PVC BROOKHILL FUSION
-CHIP" is not a thing they sell, so generating off the long name would put a
-product on a real order that cannot be bought. One token, three thicknesses,
+deliberate. Edging names are decided per order, not looked up from a fixed
+catalogue name, and generating off the long description would put "PVC BROOKHILL
+FUSION CHIP" on an order as an edging name. One token, three thicknesses,
 still generated and never mapped per thickness. A board that leaves the token
 blank generates off its name, which is right for a board whose name is already
 the short one.
@@ -161,6 +161,10 @@ def scan_jobs(jobs_dir: str) -> Usage:
                 for f in ("carcass_board", "exterior_board", "decor"):
                     if cab.get(f):
                         keys.add(cab[f])
+                for d in cab.get("drawers") or []:
+                    for f in ("box_board", "face_board"):
+                        if isinstance(d, dict) and d.get(f):
+                            keys.add(d[f])
         except Exception as exc:                                  # noqa: BLE001
             out.unreadable.append({"job": name, "error": f"{type(exc).__name__}: {exc}"})
             continue

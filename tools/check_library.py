@@ -14,8 +14,8 @@ What is pinned here, and why:
     never a block: it is a guideline about cost and complexity.
   * **Tape names are generated from one token per board**, for all three
     thicknesses. The token is its own field rather than the board's name because
-    Plazaboard's Brookhill tape is "PVC WOOD" — "PVC BROOKHILL FUSION CHIP" is
-    not a thing they sell, and ordering it is D6/W10 in the other direction.
+    edging names are decided per order, and a long board description reaching
+    an order as an edging name is D6/W10 in the other direction.
   * **Exterior tape thickness is per cabinet and has no dimensional effect.** We
     supply finished sizes and Plazaboard deducts the tape, so 1 mm and 2 mm cut
     identically and differ only in what is ordered and what it costs.
@@ -100,7 +100,7 @@ def main() -> int:                                                  # noqa: C901
     check("three thicknesses, one token",
           [brook.tape_name(k) for k in B.TAPE_KINDS],
           ["PVC WOOD", "1mm WOOD", "2mm WOOD"])
-    check("the token is not the name — the tape Plazaboard sell is PVC WOOD",
+    check("the token is not the name — the edging is named off the token",
           (brook.token, brook.name), ("WOOD", "BROOKHILL FUSION CHIP"))
     check("a board with no token falls back to its name",
           B.Board(id="X", name="OAK").tape_name("pvc"), "PVC OAK")
@@ -109,15 +109,15 @@ def main() -> int:                                                  # noqa: C901
 
     print("\nselecting a board copies its record into the job")
     j = Job(name="sel", boards=[], materials={})
-    j.materials["DECOR"] = B.to_material(brook)
-    j.boards = ["DECOR"]
+    j.materials["BROOKHILL"] = B.to_material(brook)
+    j.boards = ["BROOKHILL"]
     check("the job now carries the name, token, thickness, grain and price",
-          {k: j.materials["DECOR"][k] for k in ("name", "tape", "thickness",
+          {k: j.materials["BROOKHILL"][k] for k in ("name", "tape", "thickness",
                                                 "grain", "price")},
           {"name": "BROOKHILL FUSION CHIP", "tape": "WOOD", "thickness": 16,
            "grain": "grain", "price": 999.0})
     check("and generates its tapes from that copy",
-          tape_for(j.materials, "DECOR", "2mm"), "2mm WOOD")
+          tape_for(j.materials, "BROOKHILL", "2mm"), "2mm WOOD")
 
     print("\nprice capture: editing the library never moves a quoted job")
     before = costed(JOB)
@@ -133,7 +133,7 @@ def main() -> int:                                                  # noqa: C901
     fresh = copy.deepcopy(JOB)
     fresh.materials = {k: dict(v) for k, v in JOB.materials.items()}
     # The job keeps its own key; what it points at is the library's new record.
-    fresh.materials["DECOR"] = B.to_material(B.find(raised, grained.id))
+    fresh.materials["BROOKHILL"] = B.to_material(B.find(raised, grained.id))
     check("a job that selects the new price is priced at it",
           costed(fresh) > 28363.50, True)
     check("by exactly the nine Brookhill boards it buys",
@@ -184,11 +184,11 @@ def main() -> int:                                                  # noqa: C901
     check("the library says which", (grained.grain, B.find(lib, "MEL").grain),
           ("grain", "plain"))
     check("and the job reads it the same way",
-          (grain_of(JOB.materials, "DECOR"), grain_of(JOB.materials, "MEL")), (1, 0))
+          (grain_of(JOB.materials, "BROOKHILL"), grain_of(JOB.materials, "MEL")), (1, 0))
     check("a grain board locks every panel cut from it",
-          sorted({p.grain for p in generate_cabinet(box(carcass_board="DECOR"), S,
+          sorted({p.grain for p in generate_cabinet(box(carcass_board="BROOKHILL"), S,
                                                     JOB.materials)
-                  if p.material == "DECOR"}), [1])
+                  if p.material == "BROOKHILL"}), [1])
     check("an int is still read, which is the shape before the library",
           grain_of({"X": {"name": "x", "tape": "x", "grain": 1}}, "X"), 1)
 
@@ -208,7 +208,7 @@ def main() -> int:                                                  # noqa: C901
 
     print("\nthe back board is chosen, not reached for")
     three = generate_cabinet(Cabinet(number=1, width=600, height=720, depth=500,
-                                     carcass_board="MEL", exterior_board="DECOR",
+                                     carcass_board="MEL", exterior_board="BROOKHILL",
                                      back_board="BACK", back="four",
                                      drawers=[Drawer(200, 150, "board")]),
                              S, JOB.materials)
@@ -217,19 +217,19 @@ def main() -> int:                                                  # noqa: C901
     check("and so does a drawer base grooved out of the same sheet",
           [x.material for x in three if x.code[:2] == "17"], ["BACK"])
     swapped = generate_cabinet(Cabinet(number=1, width=600, height=720, depth=500,
-                                       carcass_board="MEL", exterior_board="DECOR",
-                                       back_board="DECOR", back="four", doors=1,
+                                       carcass_board="MEL", exterior_board="BROOKHILL",
+                                       back_board="BROOKHILL", back="four", doors=1,
                                        drawers=[Drawer(200, 150, "board")]),
                                S, JOB.materials)
     check("changing it moves both, and nothing else",
           [(x.code[:2], x.material) for x in swapped
            if x.code[:2] in ("01", "06", "07", "17", "18")],
-          [("01", "MEL"), ("06", "DECOR"), ("18", "MEL"), ("17", "DECOR"),
-           ("07", "DECOR")])
+          [("01", "MEL"), ("06", "BROOKHILL"), ("18", "MEL"), ("17", "BROOKHILL"),
+           ("07", "BROOKHILL")])
     check("a housed 16 mm base is the drawer box's board, not the back's",
           [x.material for x in generate_cabinet(
               Cabinet(number=1, width=600, height=790, depth=570, back="none",
-                      back_board="DECOR", drawers=[Drawer(200, 150, "melamine")]),
+                      back_board="BROOKHILL", drawers=[Drawer(200, 150, "melamine")]),
               S, JOB.materials) if x.code[:2] == "17"], ["MEL"])
 
     print("\nand a project that has not selected one is told which cabinet")
@@ -328,7 +328,7 @@ def main() -> int:                                                  # noqa: C901
 
     print("\nswapping a project board shows the change before writing it")
     d = job_to_dict(JOB)
-    pre = board_swap({"job": d, "from": "MEL", "to": "DECOR"})
+    pre = board_swap({"job": d, "from": "MEL", "to": "BROOKHILL"})
     check("every cabinet cut from it is named, with which field",
           (len(pre["cabinets"]), pre["cabinets"][0]),
           (19, {"cabinet": 1, "fields": ["carcass_board"]}))
@@ -348,33 +348,33 @@ def main() -> int:                                                  # noqa: C901
     check("a preview writes nothing", "job" in pre, False)
     check("and leaves the job it was asked about alone",
           sorted({c["carcass_board"] for c in d["cabinets"]}), ["MEL"])
-    done = board_swap({"job": d, "from": "MEL", "to": "DECOR", "apply": True})
+    done = board_swap({"job": d, "from": "MEL", "to": "BROOKHILL", "apply": True})
     check("applying it moves every cabinet",
           sorted({c.carcass_board for c in job_from_dict(done["job"]).cabinets}),
-          ["DECOR"])
+          ["BROOKHILL"])
     check("no designation changes — a panel keeps its name and changes its board",
           sorted({x["label"] for x in pre["panels"]}) ==
           sorted({x["label"] for x in pre["panels"]}), True)
     check("swapping to a board the project has not selected brings it in priced",
-          job_from_dict(done["job"]).materials["DECOR"]["price"], 999.0)
+          job_from_dict(done["job"]).materials["BROOKHILL"]["price"], 999.0)
 
     print("\nthe drawer box and the drawer face are boards of their own")
-    dj = Job(name="dbox", boards=["MEL", "DECOR"],
+    dj = Job(name="dbox", boards=["MEL", "BROOKHILL"],
              materials={k: dict(v) for k, v in JOB.materials.items()})
     dcab = Cabinet(number=1, width=600, height=720, depth=560, kind="base",
-                   carcass_board="MEL", exterior_board="DECOR", back_board="BACK",
+                   carcass_board="MEL", exterior_board="BROOKHILL", back_board="BACK",
                    drawers=[Drawer(face_height=200, box_height=150)])
     dj.cabinets = [dcab]
     boards_of = lambda cab, code: sorted({p.material for p in generate_cabinet(   # noqa: E731
         cab, S, dj.materials) if p.code.startswith(code)})
     check("with nothing chosen the box follows the carcass",
           (boards_of(dcab, "18"), boards_of(dcab, "19")), (["MEL"], ["MEL"]))
-    check("and the face follows the exterior", boards_of(dcab, "20"), ["DECOR"])
-    dcab.drawer_carcass_board = "DECOR"
+    check("and the face follows the exterior", boards_of(dcab, "20"), ["BROOKHILL"])
+    dcab.drawer_carcass_board = "BROOKHILL"
     check("choosing a drawer carcass moves the box and nothing else",
-          (boards_of(dcab, "18"), boards_of(dcab, "01")), (["DECOR"], ["MEL"]))
+          (boards_of(dcab, "18"), boards_of(dcab, "01")), (["BROOKHILL"], ["MEL"]))
     check("and the box edging follows it too",
-          dcab.drawer_box_tape(dj.materials), tape_for(dj.materials, "DECOR", "pvc"))
+          dcab.drawer_box_tape(dj.materials), tape_for(dj.materials, "BROOKHILL", "pvc"))
     dcab.drawer_face_board = "MEL"
     check("choosing a drawer face moves the face and not the doors",
           boards_of(dcab, "20"), ["MEL"])

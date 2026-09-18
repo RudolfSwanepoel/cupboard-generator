@@ -33,9 +33,9 @@ CODES = {
 #
 # Tape names are GENERATED from the board's tape token, one token for all three
 # thicknesses: "PVC <token>", "1mm <token>", "2mm <token>". The token is its own
-# field rather than the board's name because Plazaboard's Brookhill tape is
-# "PVC WOOD" — "PVC BROOKHILL FUSION CHIP" is not a thing they sell, and putting
-# it on an order is finding D6/W10 in the other direction.
+# field rather than the board's name because edging names are decided per
+# order, and a long board description reaching an order as an edging name is
+# finding D6/W10 in the other direction.
 TAPE_PREFIX = {"pvc": "PVC", "1mm": "1mm", "2mm": "2mm"}
 EXTERIOR_TAPES = ("1mm", "2mm")
 
@@ -45,7 +45,7 @@ MATERIALS = {
         "name": "SUPER WHITE MELAMINE CHIP 9X6X16MM",
         "tape": "WHITE", "thickness": 16, "grain": "plain", "price": 575.0,
     },
-    "DECOR": {
+    "BROOKHILL": {
         "board": "BROOKHILL FUSION CHIP",
         "name": "BROOKHILL FUSION CHIP",
         "tape": "WOOD", "thickness": 16, "grain": "grain", "price": 999.0,
@@ -59,6 +59,36 @@ MATERIALS = {
 }
 
 
+# Ids a board used to go by, old -> current. A board renamed in the library keeps
+# its old id in every job saved before the rename (that is the price capture), so
+# the old id has to keep resolving. `DECOR` became `BROOKHILL` on 18 September
+# 2026; the October 2025 wardrobe still names `DECOR` on its bespoke and loose
+# panels, and is frozen, so this is what keeps it one board rather than two.
+BOARD_ALIASES = {"DECOR": "BROOKHILL"}
+
+
+def resolve_board(materials: dict, key: str) -> str:
+    """The id this job actually carries for `key`.
+
+    The id itself when the job has it. Otherwise the other name of the same board
+    if the job carries that one — a former id resolving to the current one, or
+    the current one resolving to the former id an older job was quoted under. So
+    a new cabinet (exterior BROOKHILL) in a job quoted under DECOR is cut from
+    that job's DECOR, and the frozen October job's literal DECOR panels are cut
+    from the house BROOKHILL: one board, one sheet pile, either way round.
+    """
+    mats = materials or {}
+    if not key or key in mats:
+        return key
+    current = BOARD_ALIASES.get(key)
+    if current and current in mats:
+        return current
+    for old, new in BOARD_ALIASES.items():
+        if new == key and old in mats:
+            return old
+    return key
+
+
 def material_record(materials: dict, key: str) -> dict:
     """One board's record, whatever shape the job file wrote it in.
 
@@ -68,9 +98,10 @@ def material_record(materials: dict, key: str) -> dict:
     name apart, so a job written then still generates the tapes it was quoted
     with. Anything else is read as it stands.
     """
+    key = resolve_board(materials, key)
     value = (materials or {}).get(key)
     if isinstance(value, str):
-        known = MATERIALS.get(key)
+        known = MATERIALS.get(BOARD_ALIASES.get(key, key))
         if known and known["board"] == value:
             return known
         return {"board": value, "name": value}
@@ -146,7 +177,7 @@ class Panel:
     cabinet: int
     code: str
     role: str
-    material: str          # 'MEL' | 'DECOR' | 'BACK'
+    material: str          # a board id: 'MEL' | 'BROOKHILL' | 'BACK' | ...
     length: int
     width: int
     qty: int = 1
@@ -184,6 +215,12 @@ class Drawer:
     base: str = "board"          # 'board' (3 mm, grooved) | 'melamine' (16 mm, housed)
     mode: str = "fixed"          # 'fixed' (height as typed) | 'share' (a slice of the rest)
     share: float = 1.0           # the slice's weight, when mode is 'share'
+    # Which board this one drawer's box and face are cut from, so one drawer in a
+    # stack can take a different finish from the rest (18 September 2026). None
+    # follows the cabinet — the box its carcass board, the face its exterior
+    # board — which is how every job written before these reads.
+    box_board: Optional[str] = None
+    face_board: Optional[str] = None
 
 
 @dataclass
@@ -268,7 +305,7 @@ class Cabinet:
     # a different carcass board. The exterior board is what shows: doors, drawer
     # faces and exposed end panels. Each nests and prices as its own material.
     carcass_board: str = "MEL"
-    exterior_board: str = "DECOR"
+    exterior_board: str = "BROOKHILL"
     # The thin sheet the back (06) is cut from, and the grooved drawer base (17)
     # with it — they are the same board. It used to be reached for by the engine
     # rather than chosen, which is how a project could cut a board it had never
@@ -367,6 +404,14 @@ class Cabinet:
         """The board a drawer face is cut from."""
         return self.drawer_face_board or self.exterior_board
 
+    def box_board_of(self, d: "Drawer") -> str:
+        """The board one drawer's box is cut from: its own, or the cabinet's."""
+        return d.box_board or self.drawer_carcass
+
+    def face_board_of(self, d: "Drawer") -> str:
+        """The board one drawer's face is cut from: its own, or the cabinet's."""
+        return d.face_board or self.drawer_face
+
     @property
     def drawer_list(self) -> List[Drawer]:
         """The drawers that are actually built. Unticking keeps `drawers` in the
@@ -450,6 +495,13 @@ class Cabinet:
         if self.drawer_box_edge is not None:
             return self.drawer_box_edge
         return tape_for(materials, self.drawer_carcass, "pvc")
+
+    def drawer_box_tape_of(self, materials: dict, d: "Drawer") -> str:
+        """PVC in one drawer's own box board colour — the same rule as
+        drawer_box_tape, for a drawer whose box may differ from the cabinet's."""
+        if self.drawer_box_edge is not None:
+            return self.drawer_box_edge
+        return tape_for(materials, self.box_board_of(d), "pvc")
 
     @property
     def needs_back_board(self) -> bool:

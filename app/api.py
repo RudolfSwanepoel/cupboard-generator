@@ -17,7 +17,8 @@ from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
                                 opening_for, remainder, split_pair, stack)
 from cabinetgen.engine import generate_job
 from cabinetgen.export_plaza import estimate_cost, summarise, write_csvs
-from cabinetgen.model import (CODES, EXTERIOR_TAPES, MATERIALS, SUPPORT_EDGES,
+from cabinetgen.model import (BOARD_ALIASES, CODES, EXTERIOR_TAPES, MATERIALS,
+                              SUPPORT_EDGES,
                               hinge_side, material_board, material_price,
                               material_thickness, tape_for)
 from cabinetgen.render import elevation_svg, plan_svg, wall_elevation_svg
@@ -192,6 +193,19 @@ def _board_payload(job, key):
             "selected": key in job.board_ids}
 
 
+def used_by(usage, board_id: str) -> list:
+    """The saved jobs that use a board — under its own id, or under a former id
+    it was renamed from (model.BOARD_ALIASES), named as such. A job quoted as
+    DECOR is using BROOKHILL; listing it as unused would let the board be
+    deleted out from under it."""
+    names = list(usage.used_by.get(board_id, []))
+    for old, new in BOARD_ALIASES.items():
+        if new == board_id:
+            names += [f"{n} (as {old})" for n in usage.used_by.get(old, [])
+                      if n not in names]
+    return names
+
+
 def board_list(payload):
     """The library, plus which saved jobs use each board.
 
@@ -203,7 +217,7 @@ def board_list(payload):
     return {"ok": True,
             "boards": [dict(asdict(b), token=b.token,
                             tapes={k: b.tape_name(k) for k in B.TAPE_KINDS},
-                            used_by=usage.used_by.get(b.id, []))
+                            used_by=used_by(usage, b.id))
                        for b in lib],
             "unreadable": usage.unreadable,
             "path": os.path.basename(B.LIBRARY)}
@@ -248,6 +262,11 @@ def rename_board_in_job(job, old_id: str, new_id: str) -> list:
         if any(b == old_id for b in cab.door_boards):
             cab.door_boards = [new_id if b == old_id else b for b in cab.door_boards]
             hit.append("door_boards")
+        for d in cab.drawers:
+            for f in ("box_board", "face_board"):
+                if getattr(d, f, None) == old_id:
+                    setattr(d, f, new_id)
+                    hit.append("drawer " + f.replace("_", " ") + "s")
         for p in cab.bespoke:
             if p.material == old_id:
                 p.material = new_id
@@ -310,7 +329,7 @@ def board_delete(payload):
     """Remove a board from the library, but never one a saved job is using."""
     board_id = str(payload.get("id") or "")
     usage = B.scan_jobs(JOBS_DIR)
-    used = usage.used_by.get(board_id, [])
+    used = used_by(usage, board_id)
     if used:
         return {"ok": False,
                 "error": f"{board_id} is used by {', '.join(used)} — those jobs keep "
@@ -337,7 +356,9 @@ def board_select(payload):
         job.boards = [b for b in job.board_ids if b != board_id] + [board_id]
     else:
         using = sorted({c.number for c in job.cabinets
-                        if board_id in (c.carcass_board, c.exterior_board)})
+                        if board_id in (c.carcass_board, c.exterior_board)
+                        or any(board_id in (d.box_board, d.face_board)
+                               for d in c.drawers)})
         if using:
             return {"ok": False,
                     "error": f"cabinet{'s' if len(using) > 1 else ''} "
@@ -667,11 +688,41 @@ def job_save(payload):
     return {"ok": True, "path": os.path.basename(path)}
 
 
+def upgrade_former_ids(job) -> list:
+    """Open a job under the library's current board ids, where that is safe.
+
+    A board the job names by an id the library has since renamed (DECOR, now
+    BROOKHILL) is shown under the new id — but only when the job never captured
+    a price for it. A job written before the library carries a bare description
+    and no price, so nothing it was quoted with is being overwritten: it was
+    always priced off the rate card, and the library record is that same board.
+    A job that DID capture a price keeps its own copy under the id it was quoted
+    with, exactly as a rename leaves every saved job.
+
+    This moves the project on screen only. The file on disk is not touched until
+    somebody saves it, and the reply says what moved so it is never a surprise.
+    """
+    lib = B.by_id(B.load())
+    moved = []
+    for old, new in BOARD_ALIASES.items():
+        mats = job.materials or {}
+        if old not in mats or new in mats or new not in lib:
+            continue
+        if isinstance(mats[old], dict) and mats[old].get("price"):
+            continue                    # a captured price: the quote stays as quoted
+        cabs = rename_board_in_job(job, old, new)
+        job.materials[new] = B.to_material(lib[new])
+        moved.append({"from": old, "to": new, "cabinets": [c["cabinet"] for c in cabs]})
+    return moved
+
+
 def job_load(payload):
     path = _job_path(payload.get("path"))
     if not os.path.exists(path):
         return {"ok": False, "error": f"no job file {os.path.basename(path)}"}
-    return {"ok": True, "job": job_to_dict(load(path))}
+    job = load(path)
+    renamed = upgrade_former_ids(job)
+    return {"ok": True, "job": job_to_dict(job), "renamed": renamed}
 
 
 def job_fixture(payload):

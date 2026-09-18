@@ -77,7 +77,7 @@ def corner_cab(number, arm_a=850, arm_b=850, face_a=500, face_b=500,
                Panel(number, "01c", "Side", "MEL", height, wall_a, 1),
                Panel(number, "01d", "Side", "MEL", height, wall_b, 1)]
     if doors:
-        bespoke.append(Panel(number, "07", "Door", "DECOR", height - 3, door_len,
+        bespoke.append(Panel(number, "07", "Door", "BROOKHILL", height - 3, door_len,
                              doors, grain=1))
     return Cabinet(number=number, width=arm_a, height=height, depth=face_a,
                    kind="tall", back="none", template="none",
@@ -358,7 +358,7 @@ def main() -> int:
 
     def one_door_ell(width, flip=False):
         c = corner_cab(24, arm_a=1000, arm_b=1000, face_a=600, face_b=500, style="ell", doors=0)
-        c.bespoke.append(Panel(24, "07", "Door", "DECOR", 2397, width, 1, grain=1))
+        c.bespoke.append(Panel(24, "07", "Door", "BROOKHILL", 2397, width, 1, grain=1))
         pl = Placement(24, "A", 0, flip=flip)
         jj = job([c], [pl], room=rectangular(4000, 3000, ceiling=2700))
         clear = not polygons_overlap(swing_envelopes(jj, c, pl)[0], cabinet_footprint(jj.room, pl, c))
@@ -384,7 +384,7 @@ def main() -> int:
 
     def ell_with_door(width):
         c = corner_cab(25, arm_a=1000, arm_b=1000, face_a=600, face_b=500, style="ell", doors=0)
-        c.bespoke.append(Panel(25, "07", "Door", "DECOR", 2397, width, 1, grain=1))
+        c.bespoke.append(Panel(25, "07", "Door", "BROOKHILL", 2397, width, 1, grain=1))
         return c
     check("the 600 door on the 500 / 400 ell is flagged, naming the longest face",
           too_wide(ell_with_door(600)),
@@ -392,7 +392,7 @@ def main() -> int:
            "500 mm) — check the door against arm_a/arm_b and face_a/face_b"])
     check("a 450 door that fits the 500 face is not", too_wide(ell_with_door(450)), [])
     wide_mitre = corner_cab(26, doors=0)
-    wide_mitre.bespoke.append(Panel(26, "07", "Door", "DECOR", 2397, 510, 1, grain=1))
+    wide_mitre.bespoke.append(Panel(26, "07", "Door", "BROOKHILL", 2397, 510, 1, grain=1))
     check("a 510 door on a 495 mitre is flagged", len(too_wide(wide_mitre)), 1)
     check("cabinet 7's 472 door in its 495 face is not", too_wide(oct7), [])
 

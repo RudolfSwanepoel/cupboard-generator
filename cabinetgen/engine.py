@@ -3,9 +3,10 @@
 Every dimension here comes from Standard. There are no bare numbers in this file
 except panel codes and the 100 mm support width, which is a fixed detail.
 """
+from dataclasses import replace
 from typing import List
 
-from .model import MATERIALS, Cabinet, Job, Panel, grain_of
+from .model import MATERIALS, Cabinet, Job, Panel, grain_of, resolve_board
 from .room import (gaps, plinth_butt_wall, plinth_choice_for, plinth_deduction,
                    plinth_lengths, runs)
 from .standard import Standard, STANDARD
@@ -23,15 +24,20 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     cabinet's geometry — room.geometry, the validator's structure checks — leaves
     it out and gets the house records.
     """
-    if cab.template == "none":
-        return list(cab.bespoke)          # the job's own panels, exactly as defined
-
     mats = MATERIALS if materials is None else materials
+    # the job's own panels, exactly as defined — only a board id the job knows
+    # by its other name is read as that name (see model.resolve_board)
+    bespoke = resolved(cab.bespoke, mats)
+    if cab.template == "none":
+        return bespoke
+
+    def R(board):
+        return resolve_board(mats, board)
     P: List[Panel] = []
     n = cab.number
     Wi = std.internal_width(cab.width)
     # the two boards, and the three tapes those boards imply (or the overrides)
-    carc, ext, back = cab.carcass_board, cab.exterior_board, cab.back_board
+    carc, ext, back = R(cab.carcass_board), R(cab.exterior_board), R(cab.back_board)
     carc_tape = cab.carcass_tape(mats)
     door_tape = cab.door_tape(mats)
     face_tape = cab.drawer_face_tape(mats)
@@ -102,18 +108,26 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
         # The box is a board of its own and so is the face. Both default to the
         # cabinet's — box from the carcass, face from the exterior — so a job
         # written before they could be chosen cuts exactly what it was quoted.
-        box_board = cab.drawer_carcass
-        face_board = cab.drawer_face
-        box_grain = grain_of(mats, box_board)
+        # Each drawer may name its own box and face board (a stack with one drawer
+        # in a different finish); with none named it is the cabinet's, as above.
+        def box_of(d):
+            return R(cab.box_board_of(d))
 
-        # group identical drawers so the cut list stays short
-        for key in _dedupe([(d.box_height, d.base) for d in stack]):
-            box_h, base_mat = key
-            count = sum(1 for d in stack if (d.box_height, d.base) == key)
+        def face_of(d):
+            return R(cab.face_board_of(d))
+
+        # group identical drawers so the cut list stays short — the board is part
+        # of what makes two drawers identical
+        for key in _dedupe([(d.box_height, d.base, box_of(d)) for d in stack]):
+            box_h, base_mat, box_board = key
+            group = [d for d in stack if (d.box_height, d.base, box_of(d)) == key]
+            count = len(group)
+            row_tape = cab.drawer_box_tape_of(mats, group[0])
+            box_grain = grain_of(mats, box_board)
             P.append(Panel(n, "18", "Drawer Side", box_board, runner, box_h, 2 * count,
-                           edge_l=1, edge_material=box_tape, grain=box_grain))
+                           edge_l=1, edge_material=row_tape, grain=box_grain))
             P.append(Panel(n, "19", "Drawer Front", box_board, front_len, box_h, 2 * count,
-                           edge_l=1, edge_material=box_tape, grain=box_grain))
+                           edge_l=1, edge_material=row_tape, grain=box_grain))
             bl, bwid = std.drawer_base(front_len, runner, base_mat)
             # a grooved base is the same thin sheet as the back; a housed one is
             # 16 mm, cut from the drawer box's own board
@@ -121,10 +135,11 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
             P.append(Panel(n, "17", "Drawer Base", base_board, bl, bwid, count,
                            grain=grain_of(mats, base_board)))
 
-        for key in _dedupe([d.face_height for d in stack]):
-            count = sum(1 for d in stack if d.face_height == key)
+        for key in _dedupe([(d.face_height, face_of(d)) for d in stack]):
+            face_h, face_board = key
+            count = sum(1 for d in stack if (d.face_height, face_of(d)) == key)
             P.append(Panel(n, "20", "Drawer Face", face_board,
-                           key, cab.width - std.door_single_gap, count,
+                           face_h, cab.width - std.door_single_gap, count,
                            edge_l=2, edge_w=2, edge_material=face_tape,
                            grain=grain_of(mats, face_board)))
 
@@ -140,8 +155,9 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
         # `leaves`, exactly as it always was. Where two differ, born_distinct
         # gives each its own designation because the material is part of the
         # signature it reads.
-        for board in _dedupe([cab.door_board(i) for i in range(leaves)]):
-            count = sum(1 for i in range(leaves) if cab.door_board(i) == board)
+        leaf_boards = [R(cab.door_board(i)) for i in range(leaves)]
+        for board in _dedupe(leaf_boards):
+            count = leaf_boards.count(board)
             P.append(Panel(n, "07", "Door", board, h, w, count,
                            edge_l=2, edge_w=2, edge_material=door_tape,
                            pot_holes=std.hinges(h), grain=grain_of(mats, board)))
@@ -152,7 +168,22 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
                        cab.height, cab.depth + std.exposed_extra, cab.exposed_sides,
                        edge_l=1, edge_material=door_tape, grain=ext_grain))
 
-    return born_distinct(P, cab.bespoke)
+    return born_distinct(P, bespoke)
+
+
+def resolved(panels: List[Panel], materials: dict) -> List[Panel]:
+    """The job's own panels with each board id as this job carries it.
+
+    A panel whose id already resolves to itself is returned as the very same
+    object; only one naming a board by its other id (DECOR for BROOKHILL, or the
+    other way) comes back as a copy with that one field changed. The job is never
+    touched and no designation moves.
+    """
+    out = []
+    for p in panels:
+        mat = resolve_board(materials, p.material)
+        out.append(p if mat == p.material else replace(p, material=mat))
+    return out
 
 
 def born_distinct(generated: List[Panel], bespoke: List[Panel]) -> List[Panel]:
@@ -262,9 +293,10 @@ def generate_job(job: Job) -> List[Panel]:
     out: List[Panel] = []
     for cab in job.cabinets:
         out.extend(generate_cabinet(cab, job.std, job.materials))
-    out.extend(job.loose)
+    out.extend(resolved(job.loose, job.materials))
     # room parts are born here too, so they are named here too: 011a, 011b
-    out.extend(born_distinct(room_panels(job) + plinth_panels(job), []))
+    out.extend(born_distinct(resolved(room_panels(job) + plinth_panels(job),
+                                      job.materials), []))
     return out
 
 

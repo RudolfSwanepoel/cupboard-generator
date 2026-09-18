@@ -75,7 +75,7 @@
   #layers button.on,#elevpick button.on{background:var(--ink);color:#fff;
                                         border-color:var(--ink)}
   #cablist{flex:1;min-width:0}
-  #editor{width:500px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
+  #editor{width:560px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
           overflow:auto}
   #cablist tr.sel td{background:var(--door)}
   #cablist tbody tr{cursor:pointer}
@@ -115,6 +115,7 @@
   .leaf{display:flex;gap:6px;align-items:center;margin-top:4px}
   .leaf b{font-weight:600;min-width:74px}
   .leaf select{width:auto}
+  .leaf .hinge{flex:none;min-width:136px}  /* so each leaf's board lines up */
   .swing{font-size:11.5px;margin-top:6px}
   .swing.bad{color:var(--warn)}
   .swing.ok{color:var(--ok)}
@@ -134,18 +135,21 @@
   .tape .leaf b{min-width:96px;font-variant-numeric:tabular-nums}
   .tape .leaf b.over{color:var(--crit)}
   .tape .note{display:block;margin-top:2px;line-height:1.3}
-  /* seven columns in a side panel: let the numbers have the room, not the labels */
+  /* nine columns in a side panel (the settings column is 560 wide for them):
+     let the numbers and board ids have the room, not the labels */
   #drawerbox table{table-layout:fixed}
   #drawerbox th,#drawerbox td{padding:2px 3px;font-size:11.5px}
   #drawerbox input,#drawerbox select{padding:2px 3px}
-  #drawerbox col.c-n{width:20px}
-  #drawerbox col.c-mode{width:74px}
-  #drawerbox col.c-val{width:64px}
-  #drawerbox col.c-mm{width:52px}
-  #drawerbox col.c-box{width:56px}
-  #drawerbox col.c-base{width:auto}
-  #drawerbox col.c-rm{width:26px}
+  #drawerbox col.c-n{width:18px}
+  #drawerbox col.c-mode{width:56px}
+  #drawerbox col.c-val{width:50px}
+  #drawerbox col.c-mm{width:36px}
+  #drawerbox col.c-box{width:50px}
+  #drawerbox col.c-base{width:66px}
+  #drawerbox col.c-mat{width:auto}
+  #drawerbox col.c-rm{width:30px}
   #elevation{position:relative}
+  #elevation svg{user-select:none;-webkit-user-select:none}
   #elevation svg .ecabg{cursor:grab}
   #elevation svg .ecabg:hover .ecab{stroke-width:2.2}
   #elevation svg .ecabg.dragging{cursor:grabbing;opacity:.6}
@@ -427,6 +431,7 @@ async function renderElevation() {
         .map(([k, label]) => `<button data-elev="${esc(k)}" class="${
           (S.elev || "") === k ? "on" : ""}">${esc(label)}</button>`).join("")
     : "";
+  alignEditor();
   if (S.elev === null) {
     $("elevation").innerHTML = ((S.res && S.res.elevation) || "")
       + `<div id="elevdrag"></div>`;
@@ -438,6 +443,20 @@ async function renderElevation() {
   if (!r.ok) { toast(r.error, true); return; }
   $("elevation").innerHTML = r.svg + `<div id="elevdrag"></div>`;
 }
+
+// The settings panel starts level with the line under the Run / Wall buttons —
+// the top of the drawing, not the top of the card that holds its heading. The
+// heading's height depends on the font and on whether the buttons are there,
+// so it is measured rather than typed in.
+function alignEditor() {
+  const card = document.querySelector("#cabmain > .card");
+  const head = card && card.querySelector(":scope > h2");
+  if (!head || $("tab-cabinets").hidden) return;
+  const drop = Math.round(head.getBoundingClientRect().bottom -
+                          card.getBoundingClientRect().top) - 1;
+  $("editor").style.marginTop = Math.max(drop, 0) + "px";
+}
+window.addEventListener("resize", alignEditor);
 
 $("elevpick").addEventListener("click", (e) => {
   const b = e.target.closest("[data-elev]");
@@ -611,10 +630,13 @@ function tickOn(c, key) {
 
 // A control that is in the app but not working yet. Shown, greyed, and told why
 // — an option that silently does nothing is worse than one that says so.
+// A blank or zero value is left empty so the placeholder shows; a real one (an
+// older job that set it, and still cuts it) is shown, because hiding what is
+// being cut would be worse than a greyed field.
 function unavailableField(label, value, why) {
+  const shown = value === null || value === undefined || value === 0 ? "" : value;
   return `<div class="f unavail"><label>${esc(label)}</label>
-    <input value="${esc(value === null || value === undefined ? "" : value)}"
-           placeholder="function unavailable" disabled>
+    <input value="${esc(shown)}" placeholder="function unavailable" disabled>
     <span class="why">${esc(why)}</span></div>`;
 }
 
@@ -798,6 +820,8 @@ $("editor").addEventListener("input", (e) => {
   const dk = e.target.dataset.dk;
   if (dk === "mode") { d.mode = e.target.value; renderDrawers(); return; }
   if (dk === "base") d.base = e.target.value;
+  // "" is not a board: it hands this drawer back to the cabinet's
+  else if (dk === "box_board" || dk === "face_board") d[dk] = e.target.value || null;
   else if (dk === "share") d.share = parseFloat(e.target.value) || 0;
   else d[dk] = parseInt(e.target.value, 10) || 0;
   solveStack();
@@ -838,6 +862,9 @@ $("editor").addEventListener("change", async (e) => {
   }
 
   c[key] = on;
+  // A cabinet saved with no doors has a count of 0, and ticking the box must
+  // not show "1" while building nothing: it gets the one door it is showing.
+  if (key === "has_doors" && on && !((c.doors || 0) > 0)) c.doors = 1;
   S.selRendered = -2;
   renderEditor();
   schedule();
@@ -847,8 +874,10 @@ $("editor").addEventListener("click", (e) => {
   if (e.target.closest("[data-clearedge]")) {
     const c = S.job.cabinets[S.sel];
     c.door_edge = null;
+    // Rebuilt once the engine has answered, not before: the note being cleared
+    // is the engine's report of the override, so rebuilding now would show it
+    // again off the reply that still carried it.
     S.selRendered = -2;
-    renderEditor();
     schedule();
     return;
   }
@@ -877,7 +906,8 @@ $("editor").addEventListener("click", (e) => {
     const c = S.job.cabinets[S.sel];
     const std = S.def.standard || {};
     c.drawers.push({face_height: 0, box_height: std.box_height_default,
-                    base: (S.def.bases || ["board"])[0], mode: "share", share: 1});
+                    base: (S.def.bases || ["board"])[0], mode: "share", share: 1,
+                    box_board: null, face_board: null});
     renderDrawers();
   }
 });
@@ -914,20 +944,32 @@ function renderDoors() {
       <b>Leaf ${i + 1}</b>
       <span class="note">${widths[i] || "?"} wide</span>
       ${n === 1
-        ? `<select data-leaf="0">
+        ? `<select data-leaf="0" class="hinge">
              <option value="L"${side === "L" ? " selected" : ""}>opens from the left</option>
              <option value="R"${side === "R" ? " selected" : ""}>opens from the right</option>
            </select>`
-        : `<span class="note">hinged ${side === "L" ? "left" : "right"}</span>`}
+        : `<span class="note hinge">hinged ${side === "L" ? "left" : "right"}</span>`}
       <select data-dboard="${i}" title="what this leaf is cut from">
-        <option value=""${chosen ? "" : " selected"}>exterior board</option>
+        <option value=""${chosen ? "" : " selected"}>exterior board (${
+          esc(c.exterior_board || "—")})</option>
         ${keys.map((k) => `<option value="${esc(k)}"${k === chosen ? " selected" : ""}>${
           esc(k)}</option>`).join("")}
       </select>
     </div>`);
   }
 
-  const extName = (mats[c.exterior_board] || {}).board || "";
+  // Which board is in effect, said in words: the exterior one, and any leaf
+  // that has been given a board of its own instead.
+  const named = (k) => k ? k + ((mats[k] || {}).board ? " — " + mats[k].board : "") : "—";
+  const own = [];
+  for (let i = 0; i < n; i++) {
+    const k = (c.door_boards || [])[i];
+    if (k && k !== c.exterior_board) own.push(`Leaf ${i + 1} is cut from ${named(k)} instead.`);
+  }
+  const stale = have > 2
+    ? `<p class="hint" style="color:var(--warn)">This job was saved with ${have} doors on
+       one cabinet. A cabinet takes 1 or 2 now — pick one. Until you do, it is cut as
+       ${have}, exactly as it was saved.</p>` : "";
   box.innerHTML = `<div class="grid">
       <div class="f"><label>How many</label>
         <select data-k="doors" data-t="int">${counts.map((k) =>
@@ -937,12 +979,12 @@ function renderDoors() {
                value="${c.door_height === null || c.door_height === undefined
                         ? "" : c.door_height}"></div>
     </div>
+    ${stale}
     ${leaves.join("")}
     <p class="hint">${n === 2
       ? "A pair is fixed: left leaf hinged left, right leaf hinged right. "
-      : ""}Exterior board is <b>${esc(c.exterior_board || "—")}</b>${
-      extName ? " — " + esc(extName) : ""}, and a leaf left on
-      &ldquo;exterior board&rdquo; is cut from it.</p>
+      : n === 1 ? "One door: choose which side it opens from. " : ""}External board
+      is <b>${esc(named(c.exterior_board))}</b>.${own.length ? " " + esc(own.join(" ")) : ""}</p>
     ${edgingHTML(c, "door")}
     <div class="swing" id="swingnote"></div>`;
   refreshSwing();
@@ -979,6 +1021,17 @@ function renderDrawers() {
   if (!box) return;
   const c = S.job.cabinets[S.sel];
   const std = S.def.standard || {};
+  const keys = (S.res && S.res.boards) || [];
+  // What a drawer follows when it names no board of its own: the box the
+  // Carcass board and the face the Exterior board, both from Structure (or the
+  // cabinet-wide choice an older job file may still carry).
+  const boxDefault = c.drawer_carcass_board || c.carcass_board || "";
+  const faceDefault = c.drawer_face_board || c.exterior_board || "";
+  const boardCell = (i, dk, v, follows, what) => `<td><select data-d="${i}"
+      data-dk="${dk}" title="${esc(what)} — blank follows Structure (${esc(follows || "—")})">
+      <option value=""${v ? "" : " selected"}>(${esc(follows || "—")})</option>
+      ${keys.map((k) => `<option value="${esc(k)}"${k === v ? " selected" : ""}>${
+        esc(k)}</option>`).join("")}</select></td>`;
 
   const rows = c.drawers.map((d, i) => {
     const share = (d.mode || "fixed") === "share";
@@ -995,18 +1048,24 @@ function renderDrawers() {
            value="${d.box_height}"></td>
       <td><select data-d="${i}" data-dk="base">${(S.def.bases || []).map((b) =>
         `<option${b === d.base ? " selected" : ""}>${esc(b)}</option>`).join("")}</select></td>
+      ${boardCell(i, "box_board", d.box_board || "", boxDefault,
+                  "what this drawer's box is cut from: sides, front, and a melamine base")}
+      ${boardCell(i, "face_board", d.face_board || "", faceDefault,
+                  "what this drawer's face is cut from")}
       <td><button data-drm="${i}" title="Remove this face">x</button></td>
     </tr>`;
   }).join("");
 
   box.innerHTML = `<table class="rows">
     <colgroup><col class="c-n"><col class="c-mode"><col class="c-val"><col class="c-mm">
-      <col class="c-box"><col class="c-base"><col class="c-rm"></colgroup>
+      <col class="c-box"><col class="c-base"><col class="c-mat"><col class="c-mat">
+      <col class="c-rm"></colgroup>
     <thead><tr>
       <th class="n">#</th><th>Mode</th><th>Value</th><th class="n">mm</th>
-      <th>Box</th><th>Base</th><th></th>
+      <th title="box side height">Box h</th><th>Base</th>
+      <th title="box material">Box mat.</th><th title="face material">Face mat.</th><th></th>
     </tr></thead><tbody>${rows ||
-      `<tr><td colspan="7" class="note">No faces yet — add one.</td></tr>`}</tbody></table>
+      `<tr><td colspan="9" class="note">No faces yet — add one.</td></tr>`}</tbody></table>
     <div class="dtot" id="dtot"></div>
     <div class="presets">
       <button data-preset="equal">Equal</button>
@@ -1018,16 +1077,14 @@ function renderDrawers() {
       two faces in the elevation to pin just those two at the heights you drag to.
       <b>Base</b> is how the drawer bottom is held: <b>board</b> is the 3 mm sheet
       grooved into all four panels, <b>melamine</b> a 16 mm one housed between
-      them.</p>
-    <div class="grid" style="margin-top:2px">
-      ${boardSelOpt(c, "drawer_carcass_board", "Drawer box material",
-                    c.carcass_board, "sides, fronts, and a melamine base")}
-      ${boardSelOpt(c, "drawer_face_board", "Drawer face material",
-                    c.exterior_board, "the face that shows")}
-    </div>
+      them. <b>Box mat.</b> and <b>Face mat.</b> are per drawer: left in brackets,
+      the box follows the Carcass board (${esc(boxDefault || "—")}) and the face the
+      Exterior board (${esc(faceDefault || "—")}); pick a board on one row to give
+      just that drawer a different finish.</p>
     ${edgingHTML(c, "drawer")}
-    <p class="hint">The box itself is edged in PVC in the box material's colour:
-      <b data-boxedge="1">—</b>. It follows the box and is not chosen here.</p>`;
+    <p class="hint">Each box is edged in PVC in its own box material's colour —
+      <b data-boxedge="1">—</b> for the default. It follows the box and is not
+      chosen here.</p>`;
   refreshEdging();
   solveStack();
 }
@@ -1127,7 +1184,10 @@ function renderSupports() {
       ${migrated ? `<span class="note">migrated from the old
         ${c.supports}/${c.edged_supports}/${c.white_supports} numbers — edit to keep
         it as rows</span>` : ""}</div>
-    <div class="presets"><button id="supadd">+ Support row</button></div>`;
+    <div class="presets"><button id="supadd">+ Support row</button></div>
+    <p class="hint">Front-edged supports face the front, so they take the exterior
+      board chosen in Structure — <b>${esc(c.exterior_board || "—")}</b> — as
+      <b>${esc(edges_in_force.carcass_edge || "—")}</b>.</p>`;
 }
 
 // Any edit to the rows writes them out in full, so the migrated reading becomes
@@ -1170,20 +1230,6 @@ function boardSel(c, key, label, hint) {
       <span class="note">${esc(hint)}</span></div>`;
 }
 
-// A board that may be left to follow the one chosen in Structure.
-function boardSelOpt(c, key, label, follows, hint) {
-  const mats = (S.res && S.res.materials) || {};
-  const keys = (S.res && S.res.boards) || [];
-  const v = c[key] || "";
-  return `<div class="f wide">
-      <label>${esc(label)}</label>
-      <select data-k="${key}" data-t="optext">
-        <option value=""${v ? "" : " selected"}>as in Structure — ${esc(follows || "—")}</option>
-        ${keys.map((k) => `<option value="${esc(k)}"${k === v ? " selected" : ""}>${
-          esc(k)} — ${esc((mats[k] || {}).board || k)}</option>`).join("")}
-      </select>
-      <span class="note">${esc(hint)}</span></div>`;
-}
 
 // One edging control: how thick, and what colour. 'which' is "door" or "drawer".
 function edgingHTML(c, which) {
@@ -1234,6 +1280,7 @@ function renderStructure() {
   const usesBack = c.back !== "none" ||
     (tickOn(c, "has_drawers") && (c.drawers || []).some((d) => d.base === "board"));
   const backs = S.def.backs || ["four", "three", "none"];
+  const std = S.def.standard || {};
 
   box.innerHTML = `<div class="grid">
       ${boardSel(c, "exterior_board", "Exterior board",
@@ -1254,16 +1301,22 @@ function renderStructure() {
         is cut at all</span></div>
       <div class="f"><label>Shelves</label>
         <input type="number" step="1" min="0" data-k="shelves" data-t="int"
-               value="${c.shelves || 0}"></div>
+               value="${c.shelves || 0}">
+        <span class="note">Adjustable — they sit on shelf pegs and can be moved up
+        or down. Cut ${std.shelf_gap_adjustable} mm clear of the back so they
+        lift out.</span></div>
       <div class="f"><label>Fixed shelves</label>
         <input type="number" step="1" min="0" data-k="fixed_shelves" data-t="int"
-               value="${c.fixed_shelves || 0}"></div>
+               value="${c.fixed_shelves || 0}">
+        <span class="note">Permanently fixed in place — they do not move. Cut
+        ${std.shelf_gap_fixed} mm clear of the back, so a little deeper.</span></div>
       ${unavailableField("Shelf width", c.shelf_width,
-        "only means anything once a divider splits the interior")}
+        "Greyed out: a shelf width only means something once a divider splits " +
+        "the inside into bays, and dividers are not available yet.")}
       ${unavailableField("Dividers", c.divider_count,
-        "function unavailable — a divider cannot be positioned yet")}
+        "a divider cannot be positioned yet")}
       ${unavailableField("Divider height", c.divider_height,
-        "function unavailable")}
+        "a divider cannot be positioned yet")}
     </div>`;
 }
 
@@ -1288,10 +1341,10 @@ function refreshEdging() {
    record into the job. That copy is the price capture — editing a board here
    changes what the next job is quoted at and never what an existing one was.
 
-   Tape names are generated from one token per board, for all three thicknesses.
-   The token is its own field rather than the board's name because Plazaboard's
-   Brookhill tape is "PVC WOOD"; "PVC BROOKHILL FUSION CHIP" is not a thing they
-   sell, and ordering it would be a board name reaching a real order as a tape. */
+   Edging names are generated from one token per board, for all three
+   thicknesses. The token is its own field rather than the board's name because
+   edging names are decided per order, and a long board description should not
+   reach a real order as an edging name. */
 
 S.lib = null;          // the library as /api/boards last returned it
 S.libEdit = null;      // the board being edited, or null
@@ -1367,15 +1420,15 @@ function drawBoards() {
     <div class="scroll"><table><thead><tr>
       <th title="use in this project">Use</th><th></th><th>Board</th>
       <th class="n">Thick</th><th>Grain</th><th class="n">Last price</th>
-      <th>Tapes (PVC / 1mm / 2mm)</th><th>Used by saved jobs</th><th></th>
+      <th>Edging (PVC / 1mm / 2mm)</th><th>Used by saved jobs</th><th></th>
     </tr></thead><tbody>${rows ||
       `<tr><td colspan="9" class="empty">The library is empty. Add a board.</td></tr>`
     }</tbody></table></div>
     ${bad}
     <p class="note" style="padding:8px 12px 12px;max-width:86ch">
       The library is <b>${esc(S.lib.path)}</b> in the repo, so it syncs with the code.
-      Tape names are generated from each board's token — one token, three
-      thicknesses. A board's <b>Last price</b> is what the next project to select
+      Edging names are generated from each board's edging token — one token,
+      three thicknesses. A board's <b>Last price</b> is what the next project to select
       it will be quoted at; a project already quoted keeps the price it captured.
       ${std.board_t || 16} mm is assumed everywhere a carcass size is worked out,
       so a board of another thickness is flagged on every cabinet that uses it.</p>
@@ -1417,7 +1470,7 @@ function drawBoardEditor() {
               esc(GRAIN_LABEL[g] || g)}</option>`).join("")}</select></div>
         <div class="f"><label>Last price (per board)</label>
           <input type="number" step="0.01" id="bf-price" value="${b.price || 0}"></div>
-        <div class="f"><label>Tape name</label>
+        <div class="f"><label>Edging name</label>
           <input id="bf-tape" value="${esc(b.tape || "")}"
                  placeholder="blank = use the name">
           <span class="note" id="bf-tapes"></span></div>
@@ -1430,10 +1483,10 @@ function drawBoardEditor() {
         <button id="bf-cancel">Cancel</button>
       </div>
       <p class="note" style="margin-top:8px;max-width:78ch">
-        The tape name is the token the three tapes are generated from:
+        The edging name is the token the three edgings are generated from:
         <b>PVC &lt;token&gt;</b>, <b>1mm &lt;token&gt;</b>, <b>2mm &lt;token&gt;</b>.
-        It is separate from the board's name on purpose — Plazaboard's Brookhill
-        tape is "PVC WOOD", and "PVC BROOKHILL FUSION CHIP" is not a product.
+        It is separate from the board's name on purpose: the edging name is
+        whatever this order should say, not the board's full description.
         Changing the <b>ID</b> renames the board. Saved jobs keep their own copy
         under the id they were quoted with and do not move; the project open on
         the Cabinets tab does come along, and is named before anything is written.
@@ -1442,7 +1495,7 @@ function drawBoardEditor() {
   const tapes = () => {
     const tok = ($("bf-tape").value || $("bf-name").value || "").trim();
     $("bf-tapes").textContent = tok
-      ? `PVC ${tok} · 1mm ${tok} · 2mm ${tok}` : "no name — no tape can be generated";
+      ? `PVC ${tok} · 1mm ${tok} · 2mm ${tok}` : "no name — no edging can be generated";
   };
   ["bf-tape", "bf-name"].forEach((id) => $(id).addEventListener("input", tapes));
   tapes();
@@ -1548,7 +1601,10 @@ $("boards").addEventListener("click", async (e) => {
     const cabs = S.job.cabinets.filter((c) =>
       [c.carcass_board, c.exterior_board, c.back_board, c.drawer_carcass_board,
        c.drawer_face_board, c.door_edge_board, c.drawer_edge_board]
-        .concat(c.door_boards || []).indexOf(from) >= 0).map((c) => c.number);
+        .concat(c.door_boards || [])
+        .concat((c.drawers || []).map((d) => d.box_board))
+        .concat((c.drawers || []).map((d) => d.face_board))
+        .indexOf(from) >= 0).map((c) => c.number);
     const ok = window.confirm(
       `Rename ${from} to ${board.id}?\n\n` +
       `Saved job files keep their own copy of this board under ${from} — they were ` +
@@ -1574,7 +1630,8 @@ $("boards").addEventListener("click", async (e) => {
   toast(r.renamed
     ? `Renamed ${r.from} to ${r.id}.` +
       (r.kept_by.length
-        ? ` ${r.kept_by.join(", ")} keep their own copy under ${r.from}.` : "")
+        ? ` ${r.kept_by.join(", ")} ${r.kept_by.length === 1 ? "keeps its" : "keep their"}` +
+          ` own copy under ${r.from}.` : "")
     : "Saved " + board.name + " to the library.");
   S.libEdit = null;
   renderBoardsTab();
@@ -1619,14 +1676,14 @@ async function swapBoard(fromId, to) {
       f === "carcass_board" ? "carcass" : "exterior").join(" and ")}`).join("\n");
   const shown = pre.panels.slice(0, 12).map((p) =>
     `    ${p.label}  ${p.role}  ${p.from} -> ${p.to}` +
-    (p.tape_from !== p.tape_to ? `,  tape ${p.tape_from} -> ${p.tape_to}` : "")).join("\n");
+    (p.tape_from !== p.tape_to ? `,  edging ${p.tape_from} -> ${p.tape_to}` : "")).join("\n");
   const more = pre.panels.length > 12
     ? `\n    ... and ${pre.panels.length - 12} more panels` : "";
 
   const ok = window.confirm(
     `Swap ${pre.from} for ${pre.to} across this project?\n\n` +
     `${pre.cabinets.length} cabinet${pre.cabinets.length === 1 ? "" : "s"}:\n${cabs}\n\n` +
-    `${pre.panels.length} panel${pre.panels.length === 1 ? "" : "s"} change board or tape:\n` +
+    `${pre.panels.length} panel${pre.panels.length === 1 ? "" : "s"} change board or edging:\n` +
     `${shown}${more}\n\n` +
     `Boards: ${boards(pre.before)}\n` +
     `    ->  ${boards(pre.after)}\n\n` +
@@ -1743,25 +1800,36 @@ $("elevation").addEventListener("pointerdown", async (e) => {
   const track = elevTrack();
   if (!track) return;                      // the run view has no wall to move along
   const number = +grp.dataset.cab;
-
-  const model = await post("/api/drag", {job: S.job, cabinet: number});
-  if (!model.ok) { toast(model.error, true); return; }
   const p = S.job.placements.find((x) => x.cabinet === number);
   if (!p) return;
 
+  // Everything that has to happen on the press happens now, before the snap
+  // model is fetched: stop the drawing's text being selected, and listen for
+  // the release. Waiting for the reply first meant a quick drag could let go
+  // before anything was listening, and the cabinet then stuck to the pointer.
+  e.preventDefault();
   const pt = elevPoint(track.svg, e);
-  EDRAG = {model: model, grp: grp, place: p, track: track,
-           from: {x: p.x, z: p.z},
-           // where in the carcass it was grabbed, so it does not jump to centre
-           grabX: (pt.x - track.x0) / track.scale - p.x,
-           grabZ: (track.y0 - pt.y) / track.scale - carcassZ(p, model),
-           at: {x: p.x, z: p.z}, moved: false};
+  const d = {model: null, grp: grp, place: p, track: track, press: pt,
+             from: {x: p.x, z: p.z}, at: {x: p.x, z: p.z}, moved: false,
+             last: null, released: false};
+  EDRAG = d;
   grp.classList.add("dragging");
   S.sel = S.job.cabinets.findIndex((x) => x.number === number);
   window.addEventListener("pointermove", onElevDrag);
   window.addEventListener("pointerup", endElevDrag);
   window.addEventListener("pointercancel", endElevDrag);
-  e.preventDefault();
+
+  const model = await post("/api/drag", {job: S.job, cabinet: number});
+  if (EDRAG !== d && !d.released) return;       // superseded by a newer press
+  if (!model.ok) { toast(model.error, true); d.moved = false; finishElevDrag(d); return; }
+  d.model = model;
+  // where in the carcass it was grabbed, so it does not jump to centre
+  d.grabX = (pt.x - track.x0) / track.scale - p.x;
+  d.grabZ = (track.y0 - pt.y) / track.scale - carcassZ(p, model);
+  // Replay what happened while the model was on its way: the last position the
+  // pointer reached, and the release if it has already come.
+  if (d.last) moveElevDrag(d, d.last);
+  if (d.released) finishElevDrag(d);
 });
 
 // Where the underside actually is, which is not the same as Placement.z: a
@@ -1772,7 +1840,16 @@ function carcassZ(p, model) {
 }
 
 function onElevDrag(e) {
-  if (!EDRAG) return;
+  const d = EDRAG;
+  if (!d) return;
+  // Before the snap model has arrived there is nothing to snap to: keep where
+  // the pointer is, and move there as soon as it comes.
+  if (!d.model) { d.last = {clientX: e.clientX, clientY: e.clientY}; return; }
+  moveElevDrag(d, e);
+}
+
+function moveElevDrag(d, e) {
+  const EDRAG = d;                         // this drag, whatever the global says now
   const t = EDRAG.track;
   const wall = EDRAG.model.walls[t.wall];
   if (!wall) return;
@@ -1791,14 +1868,24 @@ function onElevDrag(e) {
   z = Math.max(0, maxZ === null || maxZ === undefined ? z : Math.min(z, maxZ));
   let whyZ = "";
   const w = EDRAG.model.width;
+  // The pointer gives the underside, but "on the floor" is Placement.z 0 with
+  // the underside up on the legs. So the floor is compared where the carcass
+  // really stands, not at 0 — compared at 0 it could never be reached from a
+  // standing start, and a sideways drag with a little wobble hung the unit.
+  const legs = carcassZ({z: 0}, EDRAG.model);
+  let snapped = false;
   for (const sn of wall.z_snaps) {
     // a height that belongs to another cabinet only applies where this one is
     // actually over or under it — the engine hands over the stretch, this only
     // asks whether the two overlap
     if (sn.x0 !== null && sn.x0 !== undefined &&
         (sn.x0 >= x + w || sn.x1 <= x)) continue;
-    if (Math.abs(sn.z - z) <= tol) { z = sn.z; whyZ = sn.why; break; }
+    const at = sn.z === 0 ? legs : sn.z;
+    if (Math.abs(at - z) <= tol) { z = sn.z; whyZ = sn.why; snapped = true; break; }
   }
+  // Nothing hangs lower than its own legs would stand it: an underside between
+  // the floor and the leg height is standing on the floor.
+  if (!snapped && z > 0 && z < legs) { z = 0; whyZ = "on the floor"; }
 
   EDRAG.moved = true;
   EDRAG.at = {x: x, z: z};
@@ -1818,9 +1905,19 @@ function onElevDrag(e) {
 }
 
 function endElevDrag() {
-  if (!EDRAG) return;
   const d = EDRAG;
-  EDRAG = null;
+  if (!d) return;
+  window.removeEventListener("pointermove", onElevDrag);
+  window.removeEventListener("pointerup", endElevDrag);
+  window.removeEventListener("pointercancel", endElevDrag);
+  // Let go before the snap model arrived: the press handler finishes it, with
+  // the last position replayed, once the model is here.
+  if (!d.model) { d.released = true; return; }
+  finishElevDrag(d);
+}
+
+function finishElevDrag(d) {
+  if (EDRAG === d) EDRAG = null;
   window.removeEventListener("pointermove", onElevDrag);
   window.removeEventListener("pointerup", endElevDrag);
   window.removeEventListener("pointercancel", endElevDrag);
@@ -2513,6 +2610,7 @@ document.querySelector("nav").addEventListener("click", (e) => {
     $("tab-" + t).hidden = t !== S.tab;
   });
   renderTab();
+  alignEditor();          // measured, so only once the tab is showing
 });
 
 /* ---------- job files ----------------------------------------------------- */
@@ -2552,6 +2650,13 @@ $("load").addEventListener("click", async () => {
   const r = await post("/api/load", {path: name});
   if (!r.ok) { toast(r.error, true); return; }
   adopt(r.job);
+  // A board the file names by an id the library has since renamed, shown under
+  // its current id. Said out loud: the file itself is not touched until saved.
+  if ((r.renamed || []).length) {
+    toast(r.renamed.map((m) => `${name} names ${m.from}, which the library now ` +
+      `calls ${m.to} — shown here as ${m.to}.`).join("\n") +
+      `\nThe file on disk is unchanged until you save it.`);
+  }
 });
 
 $("fixture").addEventListener("click", async () => {

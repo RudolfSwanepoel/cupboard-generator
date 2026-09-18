@@ -18,11 +18,15 @@ from cabinetgen.export_plaza import estimate_cost, summarise  # noqa: E402
 from cabinetgen import nest as N                            # noqa: E402
 from cabinetgen.validate import blocking, report, validate  # noqa: E402
 from jobs.wardrobe_oct2025 import JOB                      # noqa: E402
+from cabinetgen.model import resolve_board                 # noqa: E402
 
 DEFAULT_CUTLIST = os.path.join(
     os.path.dirname(__file__), "..", "..", "Wardrobes", "R Swanepoel Cutlist.xlsx")
 
-SHEET_TO_MAT = {"MEL": "MEL", "Wood": "DECOR", "Backing": "BACK"}
+# The sheet says "Wood"; the job called it DECOR, which is BROOKHILL since the
+# library rename. Resolved through the job so the diff compares like with like.
+SHEET_TO_MAT = {"MEL": "MEL", "Wood": resolve_board(JOB.materials, "DECOR"),
+                "Backing": "BACK"}
 
 # Cabinets whose original rows are known to be wrong. Keyed by cabinet number.
 KNOWN = {

@@ -127,7 +127,7 @@ def main() -> int:
     check("belongs to no cabinet", p.cabinet, 0)
     check("length is the run height", p.length, 720)
     check("width is the gap plus the scribe", p.width, 115)
-    check("decor, so grain must be set", (p.material, p.grain), ("DECOR", 1))
+    check("decor, so grain must be set", (p.material, p.grain), ("BROOKHILL", 1))
     check("no edging, following the October job's fillers",
           (p.edge_l, p.edge_w, p.edge_material), (0, 0, ""))
     check("the note says where it goes and what to do",

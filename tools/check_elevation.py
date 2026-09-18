@@ -255,7 +255,7 @@ def main() -> int:
                          Panel(7, "01b", "Side", "MEL", 2400, 818, 1),
                          Panel(7, "01c", "Side", "MEL", 2400, 834, 1),
                          Panel(7, "02", "Top", "MEL", 818, 818, 1),
-                         Panel(7, "07", "Door", "DECOR", 2397, 472, 1, grain=1)])
+                         Panel(7, "07", "Door", "BROOKHILL", 2397, 472, 1, grain=1)])
     g = geometry(corner)
     check("the corner unit declares 500 but its deepest side is 834",
           (corner.depth, g.tip_depth), (500, 834))
@@ -274,7 +274,7 @@ def main() -> int:
           geometry(cab(1, 900)).tip_depth, 580)
     check("and a bespoke carcass with no carcass panels falls back to its declared depth",
           geometry(Cabinet(number=8, width=600, height=720, depth=580, template="none",
-                           bespoke=[Panel(8, "07", "Door", "DECOR", 717, 597, 1, grain=1)])).tip_depth,
+                           bespoke=[Panel(8, "07", "Door", "BROOKHILL", 717, 597, 1, grain=1)])).tip_depth,
           580)
     check("too tall to stand is not also reported as too tall to tip",
           tipping(cab(5, 600, h=2600, kind="tall"), 2650), [])

@@ -301,6 +301,11 @@ def _boards_and_tapes(job: Job):
         if c.drawer_list:
             chosen.append((c.drawer_carcass, "drawer box board"))
             chosen.append((c.drawer_face, "drawer face board"))
+            for i, d in enumerate(c.drawer_list, start=1):
+                if d.box_board:
+                    chosen.append((d.box_board, f"drawer {i} box board"))
+                if d.face_board:
+                    chosen.append((d.face_board, f"drawer {i} face board"))
         for i in range(c.door_count):
             if c.door_boards[i:i + 1] and c.door_boards[i]:
                 chosen.append((c.door_boards[i], f"door leaf {i + 1} board"))
@@ -340,12 +345,12 @@ def _boards_and_tapes(job: Job):
             if board in (mats or {}) and not tape_for(mats, board, thickness):
                 out.append(Issue(WARNING, str(c.number),
                                  f"{material_board(mats, board)!r} has no name to build "
-                                 f"a tape from, so {field} cannot be generated for "
-                                 f"{bands} — give the board a tape name in the library, "
-                                 f"or override the tape on this cabinet"))
+                                 f"edging from, so {field} cannot be generated for "
+                                 f"{bands} — give the board an edging name in the "
+                                 f"library, or override the edging on this cabinet"))
         if c.exterior_tape not in ("1mm", "2mm"):
             out.append(Issue(WARNING, str(c.number),
-                             f"exterior tape {c.exterior_tape!r} is neither 1mm nor "
+                             f"exterior edging {c.exterior_tape!r} is neither 1mm nor "
                              f"2mm — 2mm is being used"))
 
         # The drawer box is a chosen board now, not a hardcoded MEL, so there is
