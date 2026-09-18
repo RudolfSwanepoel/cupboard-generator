@@ -34,6 +34,7 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     carc, ext, back = cab.carcass_board, cab.exterior_board, cab.back_board
     carc_tape = cab.carcass_tape(mats)
     door_tape = cab.door_tape(mats)
+    face_tape = cab.drawer_face_tape(mats)
     box_tape = cab.drawer_box_tape(mats)
     # Grain follows the board, not the panel's job: a Brookhill carcass side runs
     # with the grain exactly as a Brookhill door does, and a white one does not.
@@ -98,38 +99,52 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
                 f"cabinet {n}: no runner fits a {cab.depth} mm deep box "
                 f"(need {min(std.runner_lengths) + std.runner_clearance} mm)")
         front_len = std.drawer_front_length(cab.width)
+        # The box is a board of its own and so is the face. Both default to the
+        # cabinet's — box from the carcass, face from the exterior — so a job
+        # written before they could be chosen cuts exactly what it was quoted.
+        box_board = cab.drawer_carcass
+        face_board = cab.drawer_face
+        box_grain = grain_of(mats, box_board)
 
         # group identical drawers so the cut list stays short
         for key in _dedupe([(d.box_height, d.base) for d in stack]):
             box_h, base_mat = key
             count = sum(1 for d in stack if (d.box_height, d.base) == key)
-            P.append(Panel(n, "18", "Drawer Side", "MEL", runner, box_h, 2 * count,
-                           edge_l=1, edge_material=box_tape,
-                           grain=grain_of(mats, "MEL")))
-            P.append(Panel(n, "19", "Drawer Front", "MEL", front_len, box_h, 2 * count,
-                           edge_l=1, edge_material=box_tape,
-                           grain=grain_of(mats, "MEL")))
+            P.append(Panel(n, "18", "Drawer Side", box_board, runner, box_h, 2 * count,
+                           edge_l=1, edge_material=box_tape, grain=box_grain))
+            P.append(Panel(n, "19", "Drawer Front", box_board, front_len, box_h, 2 * count,
+                           edge_l=1, edge_material=box_tape, grain=box_grain))
             bl, bwid = std.drawer_base(front_len, runner, base_mat)
             # a grooved base is the same thin sheet as the back; a housed one is
-            # 16 mm melamine, which is the drawer box's board and not the carcass's
-            base_board = back if base_mat == "board" else "MEL"
+            # 16 mm, cut from the drawer box's own board
+            base_board = back if base_mat == "board" else box_board
             P.append(Panel(n, "17", "Drawer Base", base_board, bl, bwid, count,
                            grain=grain_of(mats, base_board)))
 
         for key in _dedupe([d.face_height for d in stack]):
             count = sum(1 for d in stack if d.face_height == key)
-            P.append(Panel(n, "20", "Drawer Face", ext,
+            P.append(Panel(n, "20", "Drawer Face", face_board,
                            key, cab.width - std.door_single_gap, count,
-                           edge_l=2, edge_w=2, edge_material=door_tape,
-                           grain=ext_grain))
+                           edge_l=2, edge_w=2, edge_material=face_tape,
+                           grain=grain_of(mats, face_board)))
 
     # ---- doors -------------------------------------------------------------
-    if cab.doors > 0:
+    # cab.door_count, never cab.doors: with "Has doors" unticked the count stays
+    # in the job file and nothing is built from it.
+    leaves = cab.door_count
+    if leaves > 0:
         h = cab.door_height or (cab.height - std.door_height_gap)
-        w = std.door_width(cab.width, cab.doors)
-        P.append(Panel(n, "07", "Door", ext, h, w, cab.doors,
-                       edge_l=2, edge_w=2, edge_material=door_tape,
-                       pot_holes=std.hinges(h), grain=ext_grain))
+        w = std.door_width(cab.width, leaves)
+        # One line per board the leaves are cut from, in leaf order. Where they
+        # all take the same board — the usual case — that is one line of qty
+        # `leaves`, exactly as it always was. Where two differ, born_distinct
+        # gives each its own designation because the material is part of the
+        # signature it reads.
+        for board in _dedupe([cab.door_board(i) for i in range(leaves)]):
+            count = sum(1 for i in range(leaves) if cab.door_board(i) == board)
+            P.append(Panel(n, "07", "Door", board, h, w, count,
+                           edge_l=2, edge_w=2, edge_material=door_tape,
+                           pot_holes=std.hinges(h), grain=grain_of(mats, board)))
 
     # ---- exposed end panels ------------------------------------------------
     if cab.exposed_sides > 0:
@@ -258,9 +273,9 @@ def front_stack_check(cab: Cabinet, std: Standard = STANDARD):
     stack = cab.drawer_list
     faces = sum(d.face_height for d in stack)
     door = 0
-    if cab.doors:
+    if cab.door_count:
         door = cab.door_height or (cab.height - std.door_height_gap)
-    n_items = len(stack) + (1 if cab.doors else 0)
+    n_items = len(stack) + (1 if cab.door_count else 0)
     if n_items == 0:
         return None
     expected = cab.height - std.door_height_gap

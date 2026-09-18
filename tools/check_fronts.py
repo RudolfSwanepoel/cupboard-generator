@@ -163,14 +163,29 @@ def main() -> int:                                                  # noqa: C901
     check("a pair, as it was: hinges on the two outer edges",
           hinges, [to_world(j.room, "A", 500, g.depth)[:2],
                    to_world(j.room, "A", 500 + g.width, g.depth)[:2]])
+    # Ruled 18 September 2026: a pair is not a choice. Two leaves hang from their
+    # outer edges whatever a job file says, so an override written before the
+    # rule is simply not read — the drawing and the plan both stop offering it.
     inner = Cabinet(number=1, width=900, height=720, depth=580, kind="base",
                     doors=2, door_hinges=["R", "L"])
     j2 = kitchen([inner], [Placement(1, "A", 500)])
-    mid = 500 + g.width // 2
-    check("turned round, both hinges are in the middle of the opening",
-          [e[0] for e in swing_envelopes(j2, inner, j2.placements[0], std)],
-          [to_world(j2.room, "A", mid, g.depth)[:2],
-           to_world(j2.room, "A", mid, g.depth)[:2]])
+    check("a pair is fixed: an override on either leaf is not read",
+          [e[0] for e in swing_envelopes(j2, inner, j2.placements[0], std)], hinges)
+    single = Cabinet(number=1, width=900, height=720, depth=580, kind="base",
+                     doors=1, door_hinges=["R"])
+    j3 = kitchen([single], [Placement(1, "A", 500)])
+    gs = geometry(single, std)
+    check("a single door is the choice, and hangs off the edge it is given",
+          [e[0] for e in swing_envelopes(j3, single, j3.placements[0], std)],
+          [to_world(j3.room, "A", 500 + gs.width, gs.depth)[:2]])
+    check("and unticking Has doors takes the swing away with the panel",
+          [e[0] for e in swing_envelopes(
+              kitchen([Cabinet(number=1, width=900, height=720, depth=580,
+                               kind="base", doors=1, has_doors=False)],
+                      [Placement(1, "A", 500)]),
+              Cabinet(number=1, width=900, height=720, depth=580, kind="base",
+                      doors=1, has_doors=False),
+              Placement(1, "A", 500), std)], [])
 
     print("\nthe elevation hangs every leaf where the plan swings it")
     for cab, places in ((pair, [Placement(1, "A", 500)]),
@@ -179,7 +194,8 @@ def main() -> int:                                                  # noqa: C901
         svg = wall_elevation_svg(jj, "A")
         drawn = re.findall(r'class="edoor" data-cab="1" data-door="(\d)" data-hinge="(L|R)"', svg)
         marks = re.findall(r'class="hinge" data-cab="1" data-door="(\d)" data-side="(L|R)"', svg)
-        want = [(str(i), hinge_side(cab, i, cab.doors, False)) for i in range(cab.doors)]
+        want = [(str(i), hinge_side(cab, i, cab.door_count, False))
+                for i in range(cab.door_count)]
         check(f"cabinet {cab.number} {cab.door_hinges or 'default'}: the door you click",
               drawn, want)
         check("  and the hinge marks drawn on it", marks, want)

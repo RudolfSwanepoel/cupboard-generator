@@ -36,6 +36,9 @@ panels, boards by material, estimated cost, and the critical/warning count.
 elevation from `render.elevation_svg(job)` so the run can be checked at a
 glance. Clicking a row opens an edit panel. Fields, grouped:
 
+*(Superseded 18 September 2026 — the sections as built are in CLAUDE.md, "The
+UI". Kept here as the original brief.)*
+
 - *Size* — width, height, depth, kind (tall / upper / base)
 - *Structure* — back (four / three / none), supports, edged supports, white
   supports, shelves, fixed shelves, shelf width, dividers, divider height

@@ -240,6 +240,18 @@ class Cabinet:
     # from its outer edges), which is how every job predating the control reads.
     door_hinges: List[str] = field(default_factory=list)
 
+    # The "Has doors" tickbox, the same thing "Has drawers" is for drawers. None
+    # derives it from the count, which is how every job written before the box
+    # reads. False keeps `doors` in the job file and builds nothing from it, so
+    # re-ticking restores the doors rather than asking for them to be typed again.
+    has_doors: Optional[bool] = None
+
+    # Which board each leaf is cut from, one per leaf, index 0 being the
+    # leftmost. Empty, short, or "" on a leaf falls back to `exterior_board`,
+    # which is how every job predating the control reads. Two leaves cut from
+    # different boards come out as two cut-list lines with distinct designations.
+    door_boards: List[str] = field(default_factory=list)
+
     drawers: List[Drawer] = field(default_factory=list)
     # The "Has drawers" tickbox. None derives it from the list, which is how
     # every job written before the tickbox reads. False keeps the list in the
@@ -270,6 +282,25 @@ class Cabinet:
     # Plazaboard deducts the tape, so there is deliberately no dimensional effect
     # anywhere. The carcass tape is always the thin PVC and is not selectable.
     exterior_tape: str = "2mm"           # '1mm' | '2mm'
+
+    # ---- edging, chosen in one place per section ---------------------------
+    # A thickness and a colour, and the colour is a board — so the edging name is
+    # still generated from that board's token exactly as every other one is, and
+    # a board name can never reach an order as a tape. None on either half means
+    # "follow the cabinet": the exterior tape thickness, and the exterior board's
+    # colour. That is what every job written before these already had, so nothing
+    # they were quoted with moves.
+    door_edge_kind: Optional[str] = None      # '1mm' | '2mm' for the doors
+    door_edge_board: Optional[str] = None     # board the door edging colour comes from
+    drawer_edge_kind: Optional[str] = None    # '1mm' | '2mm' for the drawer faces
+    drawer_edge_board: Optional[str] = None   # board the face edging colour comes from
+
+    # The drawer box and the drawer face, each its own board. The box used to be
+    # hardcoded MEL in the engine whatever the cabinet was cut from, which the
+    # validator could only report after the fact. None follows the cabinet: the
+    # box takes the carcass board, the face takes the exterior board.
+    drawer_carcass_board: Optional[str] = None
+    drawer_face_board: Optional[str] = None
 
     # ---- edge tapes: derived from the boards, overridable per cabinet -------
     # None means "derive it" (see carcass_tape / door_tape / drawer_box_tape).
@@ -314,6 +345,27 @@ class Cabinet:
         if self.corner_unit is None:
             return bool(self.corner_style)
         return bool(self.corner_unit) and bool(self.corner_style)
+
+    @property
+    def door_count(self) -> int:
+        """How many door leaves are actually built. Unticking "Has doors" keeps
+        `doors` in the job file untouched — nothing here zeroes it."""
+        return 0 if self.has_doors is False else int(self.doors or 0)
+
+    def door_board(self, i: int) -> str:
+        """The board leaf `i` is cut from — its own, or the cabinet's exterior."""
+        chosen = self.door_boards[i] if 0 <= i < len(self.door_boards) else ""
+        return chosen or self.exterior_board
+
+    @property
+    def drawer_carcass(self) -> str:
+        """The board a drawer box is cut from: sides, fronts and a housed base."""
+        return self.drawer_carcass_board or self.carcass_board
+
+    @property
+    def drawer_face(self) -> str:
+        """The board a drawer face is cut from."""
+        return self.drawer_face_board or self.exterior_board
 
     @property
     def drawer_list(self) -> List[Drawer]:
@@ -361,19 +413,43 @@ class Cabinet:
         return tape_for(materials, self.exterior_board, "pvc")
 
     def door_tape(self, materials: dict) -> str:
-        """Exterior tape in the EXTERIOR board's colour, at this cabinet's chosen
-        thickness: doors, drawer faces, exposed ends."""
+        """The doors' edging, and an exposed end's: a thickness and a colour.
+
+        Both are chosen in the Doors section; with neither chosen it is the
+        cabinet's exterior tape thickness in the exterior board's colour, which
+        is what this always was. The string override still wins where a job file
+        carries one.
+        """
         if self.door_edge is not None:
             return self.door_edge
-        kind = self.exterior_tape if self.exterior_tape in EXTERIOR_TAPES else "2mm"
-        return tape_for(materials, self.exterior_board, kind)
+        kind = self.door_edge_kind or self.exterior_tape
+        if kind not in EXTERIOR_TAPES:
+            kind = "2mm"
+        return tape_for(materials, self.door_edge_board or self.exterior_board, kind)
+
+    def drawer_face_tape(self, materials: dict) -> str:
+        """The drawer faces' edging, chosen in the Drawers section.
+
+        Its own thickness and colour. With neither chosen it falls through to the
+        doors' choice and then to the cabinet's, so a job written before the two
+        were separable is edged exactly as it was quoted.
+        """
+        if self.door_edge is not None:
+            return self.door_edge
+        kind = self.drawer_edge_kind or self.door_edge_kind or self.exterior_tape
+        if kind not in EXTERIOR_TAPES:
+            kind = "2mm"
+        board = (self.drawer_edge_board or self.door_edge_board
+                 or self.exterior_board)
+        return tape_for(materials, board, kind)
 
     def drawer_box_tape(self, materials: dict) -> str:
-        """PVC in the CARCASS board's colour: drawer sides and fronts, and the
-        white-edged supports."""
+        """PVC in the DRAWER CARCASS board's colour: drawer sides and fronts, and
+        the white-edged supports. With no drawer carcass chosen that is the
+        cabinet's carcass board, which is what it always was."""
         if self.drawer_box_edge is not None:
             return self.drawer_box_edge
-        return tape_for(materials, self.carcass_board, "pvc")
+        return tape_for(materials, self.drawer_carcass, "pvc")
 
     @property
     def needs_back_board(self) -> bool:
@@ -384,6 +460,7 @@ class Cabinet:
     def tapes(self, materials: dict) -> dict:
         return {"carcass_edge": self.carcass_tape(materials),
                 "door_edge": self.door_tape(materials),
+                "drawer_face_edge": self.drawer_face_tape(materials),
                 "drawer_box_edge": self.drawer_box_tape(materials)}
 
 
@@ -391,11 +468,16 @@ def hinge_side(cab: Cabinet, i: int, leaves: int, flip: bool = False) -> str:
     """Which edge door leaf `i` of `leaves` hangs from, facing the cabinet: 'L' or 'R'.
 
     One function, so the elevation's hinge marks and the plan's swing arcs cannot
-    disagree. The per-leaf choice on the cabinet wins. With none set it falls back
-    to the rule that was always here — a single door hangs left unless the
-    placement is flipped, a pair hangs from its outer edges — which is what every
-    job predating `Cabinet.door_hinges` still does.
+    disagree.
+
+    A pair is not a choice: two leaves hang from their outer edges, left and
+    right, always (ruled 18 September 2026). A single door is the choice — 'L' or
+    'R' on the cabinet, or the placement's own handedness with none set. More
+    than two leaves is a corner or bespoke unit, where the per-leaf choice still
+    wins over the outer-edges rule.
     """
+    if leaves == 2:
+        return "L" if i == 0 else "R"
     chosen = cab.door_hinges[i] if 0 <= i < len(cab.door_hinges) else ""
     if chosen in ("L", "R"):
         return chosen

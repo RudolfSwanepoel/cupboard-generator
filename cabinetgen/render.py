@@ -32,8 +32,8 @@ def tape_legend(job: Job) -> list:
     colour looks right on paper and wrong in the room. One line per distinct
     tape, naming the cabinets that use it when they do not all agree.
     """
-    roles = (("doors & faces", "door_edge"), ("carcass fronts", "carcass_edge"),
-             ("drawer boxes", "drawer_box_edge"))
+    roles = (("doors", "door_edge"), ("drawer faces", "drawer_face_edge"),
+             ("carcass fronts", "carcass_edge"), ("drawer boxes", "drawer_box_edge"))
     out = []
     for label, field in roles:
         seen = {}
@@ -53,7 +53,7 @@ def _tape_note(job: Job, x, y, width) -> list:
     legend = tape_legend(job)
     if not legend:
         return []
-    text = "Edge tape: " + "  ·  ".join(legend)
+    text = "Edging: " + "  ·  ".join(legend)
     if len(text) * 4.6 > width:            # one line only; the cut list has the rest
         text = text[:int(width / 4.6) - 1] + "…"
     return [f'<text class="tapes" x="{x:.1f}" y="{y:.1f}" font-size="8.5" '
@@ -229,6 +229,15 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
            f'<text x="{pad_l}" y="20" font-size="12" fill="{heading_ink}">Wall {wid} — '
            f'{heading}</text>']
 
+    # What a drag reads back: where 0 mm along the wall and the floor sit on the
+    # drawing, and how many pixels a millimetre is. The browser converts with
+    # these and works out no dimension of its own — the same bargain the plan's
+    # wall tracks make, in two axes instead of one.
+    out.append(f'<rect class="etrack" data-wall="{wid}" data-len="{length}" '
+               f'data-scale="{scale:.6f}" data-x0="{X(0):.2f}" data-y0="{Y(0):.2f}" '
+               f'data-ceiling="{rm.ceiling or 0}" x="0" y="0" width="0" height="0" '
+               f'fill="none" pointer-events="none"/>')
+
     # the wall itself, with the ceiling as a datum line — only if it was measured
     if rm.ceiling:
         out.append(f'<rect x="{X(0):.1f}" y="{Y(rm.ceiling):.1f}" '
@@ -284,6 +293,9 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
         z0 = carcass_z(c, p, std)
         cx, cy, cw, ch = X(p.x), Y(z0 + g.height), g.width * scale, g.height * scale
         stroke, sw = (CRIT, "2") if c.number in bad else (INK, "1.3")
+        # One group per cabinet — the carcass, what is inside it and its number —
+        # so a drag moves the whole thing rather than an empty outline.
+        out.append(f'<g class="ecabg" data-cab="{c.number}">')
         out.append(f'<rect class="ecab" data-cab="{c.number}" x="{cx:.1f}" y="{cy:.1f}" '
                    f'width="{cw:.1f}" height="{ch:.1f}" fill="{LAYER_FILL.get(lay, CARC)}" '
                    f'stroke="{stroke}" stroke-width="{sw}"/>')
@@ -295,8 +307,9 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
             # where each leg stands is not in Standard, so none is drawn
             out.append(f'<text x="{cx + cw / 2:.1f}" y="{Y(std.leg_height / 2) + 3:.1f}" '
                        f'font-size="8" text-anchor="middle" fill="{MUTED}">legs</text>')
+        out.append('</g>')
 
-    if any(c.doors for c, _p, _lay, _g in on_wall):
+    if any(c.door_count for c, _p, _lay, _g in on_wall):
         out.append(f'<text x="{pad_l}" y="{H - 20}" font-size="8.5" fill="{MUTED}">'
                    f'Hinges drawn {std.hinge_inset_drawn} mm in from each door end, any '
                    f'between spread evenly — indicative only, not a drilling reference.'
@@ -614,7 +627,7 @@ def _hinge_side(c: Cabinet, i: int, flip: bool) -> str:
     with none set, a single door hanging left unless the placement is flipped and
     a pair hanging from its outer edges.
     """
-    return hinge_side(c, i, c.doors, bool(flip))
+    return hinge_side(c, i, c.door_count, bool(flip))
 
 
 def _hinge_marks(c: Cabinet, x0, top, dw, dh, door_h, flip, std: Standard):
@@ -630,7 +643,7 @@ def _hinge_marks(c: Cabinet, x0, top, dw, dh, door_h, flip, std: Standard):
     hinges = std.hinges(door_h)
     marks = std.hinge_positions(door_h)
     per_mm = dh / door_h
-    for i in range(c.doors):
+    for i in range(c.door_count):
         side = _hinge_side(c, i, flip)
         left, right = x0 + i * dw, x0 + i * dw + dw - 1
         hinge_x, latch_x = (left, right) if side == "L" else (right, left)
@@ -668,8 +681,9 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None):
     """
     out = []
     stack = c.drawer_list
+    leaves = c.door_count
     door_h = 0
-    if c.doors:
+    if leaves:
         door_h = c.door_height or (c.height - std.door_height_gap)
 
     cursor = y + h                      # bottom of the cabinet, in svg y
@@ -700,11 +714,11 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None):
                    f'y2="{line_y:.2f}" stroke="{RULE}" stroke-width="5" '
                    f'stroke-opacity="0" pointer-events="stroke"/>')
 
-    if c.doors:
+    if leaves:
         dh = door_h * scale
         top = cursor - dh
-        dw = (w - 4) / c.doors
-        for i in range(c.doors):
+        dw = (w - 4) / leaves
+        for i in range(leaves):
             side = _hinge_side(c, i, bool(flip))
             out.append(f'<rect class="edoor" data-cab="{c.number}" data-door="{i}" '
                        f'data-hinge="{side}" x="{x + 2 + i * dw:.1f}" y="{top:.1f}" '
@@ -715,14 +729,14 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None):
         if dh > 20:
             out.append(f'<text x="{x + w / 2:.1f}" y="{top + dh / 2 + 3.5:.1f}" '
                        f'font-size="9" text-anchor="middle" fill="{MUTED}">'
-                       f'{c.doors} x {std.door_width(c.width, c.doors)}</text>')
+                       f'{leaves} x {std.door_width(c.width, leaves)}</text>')
         cursor = top
 
     # shelves, spread through whatever the doors cover
     n = c.shelves + c.fixed_shelves
     if n and not stack:
-        span = y + h - cursor if c.doors else h
-        base = cursor if c.doors else y
+        span = y + h - cursor if leaves else h
+        base = cursor if leaves else y
         for i in range(1, n + 1):
             sy = base + span * i / (n + 1)
             out.append(f'<line x1="{x + 4:.1f}" y1="{sy:.1f}" x2="{x + w - 4:.1f}" '

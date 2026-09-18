@@ -12,12 +12,12 @@
       "picture": ""
     },
     {
-      "id": "DECOR",
-      "name": "BROOKHILL FUSION CHIP",
-      "tape": "WOOD",
+      "id": "BROOKHILL",
+      "name": "BROOKHILL FUSION",
+      "tape": "BROOKHILL",
       "thickness": 16,
       "grain": "grain",
-      "price": 999.0,
+      "price": 999,
       "picture": ""
     },
     {
@@ -27,6 +27,15 @@
       "thickness": 3,
       "grain": "plain",
       "price": 310.0,
+      "picture": ""
+    },
+    {
+      "id": "GREY",
+      "name": "Grey",
+      "tape": "Grey",
+      "thickness": 16,
+      "grain": "plain",
+      "price": 1100,
       "picture": ""
     }
   ]

@@ -9,7 +9,7 @@ import os
 from collections import defaultdict
 from typing import List
 
-from .model import Job, Panel, material_board, material_price
+from .model import Job, Panel, grain_of, material_board, material_price, material_thickness
 from .standard import Standard, STANDARD
 
 HEADER = ["Component", "Material", "Length", "Width", "qty", "Invoice Number", "JOB NO ",
@@ -20,7 +20,36 @@ HEADER = ["Component", "Material", "Length", "Width", "qty", "Invoice Number", "
 #
 # Board prices here are a FALLBACK only, for a job saved before boards carried
 # their own captured price. A job that has one is priced off its own record.
+# Nesting yield per board, for the board estimate before the nester has run.
+# Keyed by board id for the three the October job used, and otherwise read off
+# what the board IS: a grained board cannot be rotated, so it nests worse, and
+# the thin backing sheet is cut on the masonite saw. A board added to the library
+# after this was written gets the right figure rather than a house average.
 YIELD = {"MEL": 0.89, "DECOR": 0.78, "BACK": 0.80}
+YIELD_BY_KIND = {"grain": 0.78, "thin": 0.80, "plain": 0.89}
+
+
+def board_yield(job: Job, mat: str) -> float:
+    if mat in YIELD:
+        return YIELD[mat]
+    if material_thickness(job.materials, mat) <= 3:
+        return YIELD_BY_KIND["thin"]
+    return YIELD_BY_KIND["grain" if grain_of(job.materials, mat) else "plain"]
+
+
+# What Plazaboard charge to cut one board. The rate card is by saw, not by board
+# name: the beam saw takes the 16 mm boards, the masonite saw the thin backing.
+# Keyed off thickness so a board renamed or added to the library is still
+# charged for cutting — the id lookup it replaced quietly charged a new board R0.
+CUT_BY_THICKNESS = {3: 34.00, 16: 67.00, 25: 67.00}
+CUT_DEFAULT = 67.00
+
+
+def cut_rate(job: Job, mat: str) -> float:
+    if mat in RATES["cut"]:
+        return RATES["cut"][mat]
+    t = material_thickness(job.materials, mat)
+    return CUT_BY_THICKNESS.get(t, 34.00 if t and t <= 3 else CUT_DEFAULT)
 
 RATES = {
     "board": {
@@ -110,7 +139,7 @@ def summarise(job: Job, panels: List[Panel], nested: dict = None) -> dict:
             # real board count when the nester has run, otherwise the yield
             # Plazaboard achieved per material on the Oct 2025 job
             "est_boards": (len(nested[mat]) if nested and mat in nested
-                           else math.ceil(net / YIELD.get(mat, 0.84))),
+                           else math.ceil(net / board_yield(job, mat))),
             "nested": bool(nested and mat in nested),
         }
     out["edging"] = {k: round(v, 3) for k, v in out["edging"].items()}
@@ -127,7 +156,7 @@ def estimate_cost(job: Job, summary: dict) -> dict:
         # was captured into the job when the board was selected, so editing the
         # library afterwards reprices the next job and never this one.
         price = effective_price(job, mat)
-        cut = RATES["cut"].get(mat, 0.0)
+        cut = cut_rate(job, mat)
         lines.append((desc, boards, price, boards * price))
         lines.append((f"Cutting — {desc}", boards, cut, boards * cut))
         total += boards * price + boards * cut

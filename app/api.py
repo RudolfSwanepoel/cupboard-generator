@@ -25,7 +25,7 @@ from cabinetgen.room import (LAYERS, add_wall, clashes as room_clashes, closure_
                              gaps as room_gaps, geometry, layer_of,
                              overlaps as room_overlaps, placement_for,
                              plinth_choice_for, plinth_lengths, rectangular,
-                             runs as room_runs, snap_points)
+                             runs as room_runs, snap_points, z_snap_points)
 from cabinetgen.standard import STANDARD
 from cabinetgen.store import (job_from_dict, job_to_dict, load, next_number,
                               room_from_dict, room_to_dict, save)
@@ -126,6 +126,36 @@ def _geometry_info(job, cab, std):
             # the state back rather than working the rule out a second time
             "corner_on": cab.corner_on,
             "drawers_on": bool(cab.drawer_list),
+            "doors_on": bool(cab.door_count),
+            "door_count": cab.door_count,
+            # Which board each leaf is cut from, resolved, and which of those was
+            # actually chosen rather than inherited from the exterior board.
+            "door_boards": [cab.door_board(i) for i in range(n)],
+            "door_boards_set": [cab.door_boards[i] if i < len(cab.door_boards) else ""
+                                for i in range(n)],
+            "drawer_carcass": cab.drawer_carcass,
+            "drawer_face": cab.drawer_face,
+            "drawer_carcass_set": cab.drawer_carcass_board,
+            "drawer_face_set": cab.drawer_face_board,
+            # Edging, as the engine resolves it: a thickness, a colour board and
+            # the name those two generate. The browser shows these; it builds no
+            # tape name of its own.
+            "edging": {
+                "door": {"kind": cab.door_edge_kind or cab.exterior_tape,
+                         "board": cab.door_edge_board or cab.exterior_board,
+                         "name": cab.door_tape(job.materials)},
+                "drawer": {"kind": (cab.drawer_edge_kind or cab.door_edge_kind
+                                    or cab.exterior_tape),
+                           "board": (cab.drawer_edge_board or cab.door_edge_board
+                                     or cab.exterior_board),
+                           "name": cab.drawer_face_tape(job.materials)},
+                "carcass": {"name": cab.carcass_tape(job.materials)},
+                "drawer_box": {"name": cab.drawer_box_tape(job.materials)},
+            },
+            # A job file may carry a flat edging name written before the two
+            # dropdowns existed. It still wins, so it is reported rather than
+            # letting the dropdowns show something the cut list does not say.
+            "edge_override": cab.door_edge,
             # The tapes in force and where each came from. Derived values are the
             # engine's answer read back, never worked out in the browser.
             "tapes": cab.tapes(job.materials),
@@ -143,7 +173,7 @@ def _geometry_info(job, cab, std):
                            for i in range(n)],
             "opening": opening_for(cab.height,
                                    (cab.door_height or (cab.height - std.door_height_gap))
-                                   if cab.doors else 0, std)}
+                                   if cab.door_count else 0, std)}
 
 
 def _board_payload(job, key):
@@ -179,27 +209,101 @@ def board_list(payload):
             "path": os.path.basename(B.LIBRARY)}
 
 
-def board_save(payload):
-    """Add or edit one board in the library.
+def clean_board_id(raw) -> str:
+    """An id fit to be a material name.
 
-    The library only. A saved job keeps its own copy of every board it selected,
-    so nothing written here moves a job that has already been quoted.
+    It goes on every panel cut from the board, into the Plazaboard CSV and into
+    a file name, so it is upper case, letters digits and underscores only, and
+    short. Same shaping `boards.next_id` applies to a generated one, applied to a
+    typed one — an id is a key, not a description.
+    """
+    out = "".join(ch for ch in str(raw or "").upper()
+                  if ch.isalnum() or ch == "_")
+    return out[:12]
+
+
+def rename_board_in_job(job, old_id: str, new_id: str) -> list:
+    """Point everything in one job at a board's new id, and say what moved.
+
+    A job normally keeps its own copy of a board under the id it was selected
+    with — that is the price capture, and a saved job is never touched. This is
+    for the project open on screen, where the rename is part of the same edit.
+    Panel designations are not involved: a panel keeps its name and changes what
+    it is cut from.
+    """
+    moved = []
+    if old_id in (job.materials or {}):
+        job.materials = {(new_id if k == old_id else k): v
+                         for k, v in job.materials.items()}
+    job.boards = [new_id if b == old_id else b for b in job.board_ids]
+    simple = ("carcass_board", "exterior_board", "back_board",
+              "drawer_carcass_board", "drawer_face_board",
+              "door_edge_board", "drawer_edge_board")
+    for cab in job.cabinets:
+        hit = []
+        for f in simple:
+            if getattr(cab, f, None) == old_id:
+                setattr(cab, f, new_id)
+                hit.append(f)
+        if any(b == old_id for b in cab.door_boards):
+            cab.door_boards = [new_id if b == old_id else b for b in cab.door_boards]
+            hit.append("door_boards")
+        for p in cab.bespoke:
+            if p.material == old_id:
+                p.material = new_id
+                hit.append("bespoke panels")
+        if hit:
+            moved.append({"cabinet": cab.number, "fields": sorted(set(hit))})
+    for p in job.loose:
+        if p.material == old_id:
+            p.material = new_id
+    return moved
+
+
+def board_save(payload):
+    """Add or edit one board in the library, including changing its id.
+
+    The library, and — only when the id changes — the project posted with it. A
+    SAVED job keeps its own copy of every board it selected under the id it was
+    selected with, so nothing already quoted moves whatever is done here; the
+    reply names those jobs so it is never a surprise. The project on screen is
+    a live edit, so it comes along.
     """
     lib = B.load()
     d = dict(payload.get("board") or {})
     name = str(d.get("name") or "").strip()
     if not name:
         return {"ok": False, "error": "a board needs a name"}
-    board_id = str(d.get("id") or "").strip() or B.next_id(lib, name)
+
+    old_id = clean_board_id(payload.get("from"))
+    board_id = clean_board_id(d.get("id")) or old_id or B.next_id(lib, name)
+    if not board_id:
+        return {"ok": False, "error": "a board needs an id — it is the material "
+                                      "name on every panel cut from it"}
+    existing = B.by_id(lib)
+    if board_id in existing and board_id != old_id:
+        return {"ok": False,
+                "error": f"{board_id} is already {existing[board_id].name} in the "
+                         f"library — give this one an id of its own"}
+
     d["id"], d["name"] = board_id, name
     board = B.board_from_dict(d)
-    existing = B.by_id(lib)
-    if board_id in existing:
+    if old_id and old_id in existing:
+        lib = [board if b.id == old_id else b for b in lib]     # in place, order kept
+    elif board_id in existing:
         lib = [board if b.id == board_id else b for b in lib]
     else:
         lib.append(board)
     B.save(lib)
-    return {"ok": True, "id": board_id}
+
+    out = {"ok": True, "id": board_id, "renamed": bool(old_id and old_id != board_id),
+           "from": old_id, "moved": [], "kept_by": []}
+    if out["renamed"]:
+        out["kept_by"] = B.scan_jobs(JOBS_DIR).used_by.get(old_id, [])
+        job = _job(payload)
+        out["moved"] = rename_board_in_job(job, old_id, board_id)
+        out["job"] = job_to_dict(job)
+    return out
 
 
 def board_delete(payload):
@@ -625,15 +729,28 @@ def drag(payload):
     if cab is None or job.room is None:
         return {"ok": False, "error": "no such cabinet, or the job has no room"}
     here = placement_for(job, number)
+    g = geometry(cab, job.std)
+    ceiling = job.room.ceiling or 0
     return {
         "ok": True,
         "cabinet": number,
-        "width": geometry(cab, job.std).width,      # its real extent, off the panels
+        "width": g.width,                           # its real extent, off the panels
+        "height": g.height,
         "layer": layer_of(cab, here),
         "tolerance": job.std.snap_tolerance,
+        "ceiling": ceiling,
+        # How high the underside may go. 0 is the floor, where the carcass stands
+        # on its legs; above it is a hung unit's underside. None with no ceiling
+        # measured — there is nothing to cap it against, and the ceiling check
+        # blocks the export until one is taken.
+        "max_z": max(ceiling - g.height, 0) if ceiling else None,
         "walls": {w.id: {"length": w.length,
-                         "max_x": max(w.length - cab.width, 0),
-                         "snaps": snap_points(job, number, w.id, job.std)}
+                         "max_x": max(w.length - g.width, 0),
+                         "snaps": snap_points(job, number, w.id, job.std),
+                         # every height, each with the stretch of wall it
+                         # applies over — the cabinet crosses several on the way
+                         "z_snaps": z_snap_points(job, number, w.id, job.std,
+                                                  spans=True)}
                   for w in job.room.walls},
     }
 

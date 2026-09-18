@@ -65,6 +65,10 @@
   .scroll{overflow:auto}
 
   #cabwrap,.split{display:flex;gap:14px;align-items:flex-start}
+  /* The elevation and the list stack on the left; the settings panel is a
+     column of its own, starting level with the top of the drawing. */
+  #cabmain{flex:1;min-width:0}
+  #cabmain>.card:last-child{margin-bottom:0}
   #layers,#elevpick{float:right;margin-top:-3px;display:flex;gap:3px}
   #layers button,#elevpick button{padding:2px 9px;font-size:11px;text-transform:none;
                                   letter-spacing:0}
@@ -104,8 +108,10 @@
   .sec.s-doors{background:#dceaee;border-color:#c1dae0}
   .sec.s-drawers{background:#f7ead2;border-color:#e6d5b4}
   .sec.s-corner{background:#ece5f3;border-color:#d7cbe5}
-  .sec.s-back{background:#eaeee9;border-color:#d3dad1}
-  .sec.s-decor{background:#f5e6df;border-color:#e4cec3}
+  .sec.s-supports{background:#eaeee9;border-color:#d3dad1}
+  .unavail input,.unavail select{opacity:.5;background:var(--carc)}
+  .unavail label{opacity:.65}
+  .unavail .why{font-size:10.5px;color:var(--warn);font-style:italic}
   .leaf{display:flex;gap:6px;align-items:center;margin-top:4px}
   .leaf b{font-weight:600;min-width:74px}
   .leaf select{width:auto}
@@ -139,8 +145,13 @@
   #drawerbox col.c-box{width:56px}
   #drawerbox col.c-base{width:auto}
   #drawerbox col.c-rm{width:26px}
-  #elevation svg .edoor{cursor:pointer}
-  #elevation svg .edoor:hover{stroke:var(--ink);stroke-width:1.6}
+  #elevation{position:relative}
+  #elevation svg .ecabg{cursor:grab}
+  #elevation svg .ecabg:hover .ecab{stroke-width:2.2}
+  #elevation svg .ecabg.dragging{cursor:grabbing;opacity:.6}
+  #elevdrag{position:absolute;background:var(--ink);color:#fff;font-size:11px;
+            padding:2px 7px;border-radius:3px;pointer-events:none;display:none;
+            white-space:nowrap;z-index:5}
   #elevation svg .fdiv{cursor:ns-resize}
   #elevation svg .fdiv:hover{stroke-opacity:.9}
   .rows td,.rows th{padding:3px 5px}
@@ -209,14 +220,16 @@
 
 <main>
   <section id="tab-cabinets">
-    <div class="card">
-      <h2>Elevation <span id="elevpick"></span></h2>
-      <div class="scroll" id="elevation" style="padding:8px 12px"></div>
-    </div>
     <div id="cabwrap">
-      <div class="card" id="cablist">
-        <h2>Cabinets <button id="add" style="float:right;margin-top:-3px">Add cabinet</button></h2>
-        <div class="scroll" id="cabtable"></div>
+      <div id="cabmain">
+        <div class="card">
+          <h2>Elevation <span id="elevpick"></span></h2>
+          <div class="scroll" id="elevation" style="padding:8px 12px"></div>
+        </div>
+        <div class="card" id="cablist">
+          <h2>Cabinets <button id="add" style="float:right;margin-top:-3px">Add cabinet</button></h2>
+          <div class="scroll" id="cabtable"></div>
+        </div>
       </div>
       <div class="card" id="editor"></div>
     </div>
@@ -323,11 +336,13 @@ function blankCabinet(number) {
     supports: 4, edged_supports: 0, white_supports: 0,
     shelves: 0, fixed_shelves: 0, shelf_width: null,
     divider_height: null, divider_count: 0,
-    doors: 0, door_height: null, door_hinges: [],
+    doors: 1, door_height: null, door_hinges: [], has_doors: null, door_boards: [],
     drawers: [], has_drawers: null,
     exposed_sides: 0,
-    carcass_edge: "PVC WOOD", door_edge: "2mm WOOD",
     carcass_board: "", exterior_board: "", back_board: "", exterior_tape: "2mm",
+    door_edge_kind: null, door_edge_board: null,
+    drawer_edge_kind: null, drawer_edge_board: null,
+    drawer_carcass_board: null, drawer_face_board: null,
     carcass_edge: null, door_edge: null, drawer_box_edge: null,
     bespoke: [], note: "", footprint: [],
     corner_style: "", arm_a: null, arm_b: null, face_a: null, face_b: null,
@@ -413,14 +428,15 @@ async function renderElevation() {
           (S.elev || "") === k ? "on" : ""}">${esc(label)}</button>`).join("")
     : "";
   if (S.elev === null) {
-    $("elevation").innerHTML = (S.res && S.res.elevation) || "";
+    $("elevation").innerHTML = ((S.res && S.res.elevation) || "")
+      + `<div id="elevdrag"></div>`;
     return;
   }
   const seq = ++elevSeq;
   const r = await post("/api/elevation", {job: S.job, wall: S.elev});
   if (seq !== elevSeq) return;             // a newer wall or job has been asked for
   if (!r.ok) { toast(r.error, true); return; }
-  $("elevation").innerHTML = r.svg;
+  $("elevation").innerHTML = r.svg + `<div id="elevdrag"></div>`;
 }
 
 $("elevpick").addEventListener("click", (e) => {
@@ -434,7 +450,9 @@ $("elevpick").addEventListener("click", (e) => {
 
 function frontsText(c) {
   const bits = [];
-  if (c.doors) bits.push(c.doors + (c.doors > 1 ? " doors" : " door"));
+  // an unticked door count is still in the job file, but nothing is built from it
+  const d = tickOn(c, "has_doors") ? (c.doors || 0) : 0;
+  if (d) bits.push(d + (d > 1 ? " doors" : " door"));
   // an unticked stack is still in the job file, but nothing is built from it
   const n = tickOn(c, "has_drawers") ? (c.drawers || []).length : 0;
   if (n) bits.push(n + " drw");
@@ -505,16 +523,21 @@ $("add").addEventListener("click", async () => {
   }
   const r = await post("/api/next-number", {job: S.job});
   const fresh = blankCabinet(r.number);
-  // the project's boards, in selection order: the carcass takes the first, what
-  // shows takes the last, which is the usual white-box-with-a-decor-front
-  fresh.carcass_board = picked[0];
-  fresh.exterior_board = picked[picked.length - 1];
   // A back is the thin sheet, so the thinnest selected board is the sensible
   // place to start. It is a starting point and not a rule — the dropdown is
   // right there, and the validator names the cabinet if it is wrong.
   const mats = (S.res && S.res.materials) || {};
-  fresh.back_board = picked.slice().sort((a, b) =>
-    ((mats[a] || {}).thickness || 999) - ((mats[b] || {}).thickness || 999))[0];
+  const thick = (k) => (mats[k] || {}).thickness || 999;
+  fresh.back_board = picked.slice().sort((a, b) => thick(a) - thick(b))[0];
+  // The carcass and what shows are both full-thickness boards, in selection
+  // order: the first, and the last. The board the back is cut from is left out
+  // of that — a 3 mm backing sheet is not a door, and offering it as one is how
+  // a starting point becomes a wrong cut list nobody looked at twice.
+  const full = picked.filter((k) => k !== fresh.back_board);
+  const pool = full.length ? full : picked;
+  fresh.carcass_board = pool[0];
+  fresh.exterior_board = pool[pool.length - 1];
+  fresh.has_doors = false;      // tick it on when this cabinet actually has doors
   S.job.cabinets.push(fresh);
   S.sel = S.job.cabinets.length - 1;
   schedule(); renderList();
@@ -522,27 +545,28 @@ $("add").addEventListener("click", async () => {
 
 /* ---------- cabinet editor ---------------------------------------------- */
 
-/* Eight sections, each in its own colour block, in the order a cabinet gets
-   described: what it is, what shape it makes on the floor, what is inside it,
-   what closes it, and what it is finished in. */
+/* Seven sections, each in its own colour block, in the order a cabinet gets
+   described: what it is, what shape it makes on the floor, what it is built from
+   and what is inside it, what closes it, and what ties it together.
+
+   Everything a section needs is in that section. The boards are chosen once, in
+   Structure; Doors and Drawers each choose their own material and their own
+   edging and say nothing about anyone else's. */
 const SECTIONS = [
   {key: "size", name: "Size", fields: [
     ["width", "Width", "int"], ["height", "Height", "int"],
     ["depth", "Depth", "int"], ["kind", "Kind", "sel:kinds"],
-    ["number", "Number", "int"]]},
+    ["number", "Number", "int"], ["note", "Note", "text"]]},
 
   {key: "outline", name: "Outline",
    hint: "Actual plan shape, x along the wall, y out from the wall. " +
          "All geometry checks read this, not the declared width/depth.",
    fields: [["footprint", "Footprint outline", "poly"]]},
 
-  {key: "structure", name: "Structure", fields: [
-    ["shelves", "Shelves", "int"], ["fixed_shelves", "Fixed shelves", "int"],
-    ["shelf_width", "Shelf width", "opt"],
-    ["divider_count", "Dividers", "int"], ["divider_height", "Divider height", "opt"]]},
+  {key: "structure", name: "Structure", slot: "structurebox", fields: []},
 
-  {key: "doors", name: "Doors", slot: "doorbox", fields: [
-    ["doors", "How many", "int"], ["door_height", "Door height", "opt"]]},
+  {key: "doors", name: "Doors", slot: "doorbox",
+   toggle: "has_doors", tick: "Has doors", fields: []},
 
   {key: "drawers", name: "Drawers", slot: "drawerbox",
    toggle: "has_drawers", tick: "Has drawers", fields: []},
@@ -555,15 +579,20 @@ const SECTIONS = [
     ["face_a", "Face A (open face, wall-A side)", "opt"],
     ["face_b", "Face B (open face, wall-B side)", "opt"]]},
 
-  {key: "back", name: "Back & Supports", slot: "supportbox",
+  {key: "supports", name: "Supports", slot: "supportbox",
    hint: "A support is a cross rail spanning the internal width, tying the two " +
-         "sides together. One row per kind; the total is the sum of the rows.",
-   fields: [["back", "Back", "sel:backs"]]},
-
-  {key: "decor", name: "Decor", slot: "boardbox", fields: [
-    ["exposed_sides", "Exposed end panels", "int"],
-    ["note", "Note", "text"]]},
+         "sides together. One row per kind; the total is the sum of the rows. " +
+         "A front-edged one takes the carcass edging, which is PVC in the " +
+         "exterior board's colour.",
+   fields: []},
 ];
+
+// How the back is fixed, said in words rather than in a count of grooves.
+const BACK_LABEL = {
+  four: "Grooved in all round — sides, top and bottom",
+  three: "Grooved into the sides and top — open under the bottom",
+  none: "No back panel",
+};
 
 // Whether a tickbox is on. An explicit choice wins; failing that the engine's
 // own answer is read back; failing that (a cabinet not yet computed) the same
@@ -572,10 +601,21 @@ function tickOn(c, key) {
   if (c[key] === true) return true;
   if (c[key] === false) return false;
   const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
-  if (g && g.corner_on !== undefined) {
-    return key === "corner_unit" ? g.corner_on : g.drawers_on;
-  }
-  return key === "corner_unit" ? !!c.corner_style : (c.drawers || []).length > 0;
+  const read = {corner_unit: "corner_on", has_drawers: "drawers_on",
+                has_doors: "doors_on"}[key];
+  if (g && read && g[read] !== undefined) return !!g[read];
+  if (key === "corner_unit") return !!c.corner_style;
+  if (key === "has_doors") return (c.doors || 0) > 0;
+  return (c.drawers || []).length > 0;
+}
+
+// A control that is in the app but not working yet. Shown, greyed, and told why
+// — an option that silently does nothing is worse than one that says so.
+function unavailableField(label, value, why) {
+  return `<div class="f unavail"><label>${esc(label)}</label>
+    <input value="${esc(value === null || value === undefined ? "" : value)}"
+           placeholder="function unavailable" disabled>
+    <span class="why">${esc(why)}</span></div>`;
 }
 
 function fieldHTML(c, [key, label, type]) {
@@ -648,7 +688,7 @@ function renderEditor() {
   if (S.selRendered === S.sel) {
     refreshGeometryReadout();
     refreshSwing();
-    refreshTapes();
+    refreshEdging();
     return;
   }
   S.selRendered = S.sel;
@@ -662,16 +702,39 @@ function renderEditor() {
        by hand in the job file. Size and finish fields above do not drive them.</div>` : "";
 
   box.innerHTML = `<h2>Cabinet ${c.number}</h2><div class="body">${sets}${bespoke}</div>`;
-  renderDoorLeaves();
+  renderStructure();
+  renderDoors();
   renderDrawers();
   renderSupports();
-  renderBoards();
   refreshGeometryReadout();
 }
 
 $("editor").addEventListener("input", (e) => {
   const c = S.job.cabinets[S.sel];
   if (!c) return;
+
+  // which board one door leaf is cut from; "" hands it back to the exterior board
+  const dboard = e.target.dataset.dboard;
+  if (dboard !== undefined) {
+    const n = +dboard;
+    if (!Array.isArray(c.door_boards)) c.door_boards = [];
+    while (c.door_boards.length <= n) c.door_boards.push("");
+    c.door_boards[n] = e.target.value;
+    S.selRendered = -2;
+    schedule();
+    return;
+  }
+
+  // edging: a thickness and a colour, per section. "" on either hands that half
+  // back to the cabinet, and the name beside them is always the engine's.
+  const edge = e.target.dataset.edge;
+  if (edge !== undefined) {
+    c[(edge === "door" ? "door_edge_" : "drawer_edge_") + e.target.dataset.ek] =
+      e.target.value || null;
+    S.selRendered = -2;
+    schedule();
+    return;
+  }
 
   const leaf = e.target.dataset.leaf;
   if (leaf !== undefined) {
@@ -689,6 +752,8 @@ $("editor").addEventListener("input", (e) => {
     const t = e.target.dataset.t;
     const raw = e.target.value;
     if (t === "text" || t.startsWith("sel:")) c[k] = raw;
+    // a board that may be left to follow the one chosen in Structure
+    else if (t === "optext") c[k] = raw === "" ? null : raw;
     // data entry only: pairs of numbers as typed; the engine reads the shape
     else if (t === "poly") c[k] = raw.trim() === "" ? []
       : raw.trim().split(/[\s;]+/).map((pt) => pt.split(",").map((n) => parseInt(n, 10)))
@@ -697,8 +762,11 @@ $("editor").addEventListener("input", (e) => {
     else c[k] = raw === "" ? 0 : parseInt(raw, 10);
     if (k === "number") c.bespoke.forEach((p) => { p.cabinet = c.number; });
     // a board decides three tapes and two materials, so the section is rebuilt
+    // a board decides materials and edging, and the door count decides how many
+    // leaf rows there are, so the section is rebuilt rather than patched
     if (k === "carcass_board" || k === "exterior_board" || k === "back_board" ||
-        k === "exterior_tape" || k === "back") {
+        k === "exterior_tape" || k === "back" || k === "doors" ||
+        k === "drawer_carcass_board" || k === "drawer_face_board") {
       S.selRendered = -2;
     }
     schedule();
@@ -776,6 +844,14 @@ $("editor").addEventListener("change", async (e) => {
 });
 
 $("editor").addEventListener("click", (e) => {
+  if (e.target.closest("[data-clearedge]")) {
+    const c = S.job.cabinets[S.sel];
+    c.door_edge = null;
+    S.selRendered = -2;
+    renderEditor();
+    schedule();
+    return;
+  }
   const rm = e.target.closest("[data-drm]");
   if (rm) {
     S.job.cabinets[S.sel].drawers.splice(+rm.dataset.drm, 1);
@@ -806,35 +882,69 @@ $("editor").addEventListener("click", (e) => {
   }
 });
 
-/* ---------- doors: which edge each leaf hangs from -------------------------
-   One control per door panel the engine actually cut, so a bespoke or corner
-   unit gets one too — those carry no `doors` count. The side beside each row
-   is the engine's own answer, the one the plan swings from and the elevation
-   draws, so the two can never drift apart.                                  */
+/* ---------- doors ----------------------------------------------------------
+   One or two leaves and no more: a pair hangs from its outer edges, left and
+   right, and that is not a choice (ruled 18 September 2026). A single door is
+   the choice. Each leaf names the board it is cut from — two leaves of
+   different boards come out as two cut-list lines — and the section carries one
+   edging control of its own: how thick, and what colour.
 
-function renderDoorLeaves() {
+   The side beside each row is the engine's own answer, the one the plan swings
+   from and the elevation draws, so the two can never drift apart.           */
+
+function renderDoors() {
   const box = $("doorbox");
   if (!box) return;
   const c = S.job.cabinets[S.sel];
   const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const mats = (S.res && S.res.materials) || {};
+  const keys = (S.res && S.res.boards) || [];
+  const have = c.doors || 1;
+  const n = Math.max(1, have);
+  const counts = [1, 2];
+  if (have > 2) counts.push(have);      // a job file written before the limit
   const sides = (g && g.hinges) || [];
-  if (!sides.length) {
-    box.innerHTML = `<p class="off">No door panel on this cabinet yet.</p>`;
-    return;
-  }
-  const set = (g && g.hinges_set) || [];
-  box.innerHTML = sides.map((side, i) => `<div class="leaf">
+  const widths = (g && g.doors) || [];
+
+  const leaves = [];
+  for (let i = 0; i < n; i++) {
+    const side = sides[i] || (n >= 2 ? (i === 0 ? "L" : "R") : "L");
+    const chosen = (c.door_boards || [])[i] || "";
+    leaves.push(`<div class="leaf">
       <b>Leaf ${i + 1}</b>
-      <span class="note">${g.doors[i] || "?"} wide</span>
-      <select data-leaf="${i}">
-        <option value=""${set[i] ? "" : " selected"}>default (${esc(side)})</option>
-        <option value="L"${set[i] === "L" ? " selected" : ""}>Left</option>
-        <option value="R"${set[i] === "R" ? " selected" : ""}>Right</option>
+      <span class="note">${widths[i] || "?"} wide</span>
+      ${n === 1
+        ? `<select data-leaf="0">
+             <option value="L"${side === "L" ? " selected" : ""}>opens from the left</option>
+             <option value="R"${side === "R" ? " selected" : ""}>opens from the right</option>
+           </select>`
+        : `<span class="note">hinged ${side === "L" ? "left" : "right"}</span>`}
+      <select data-dboard="${i}" title="what this leaf is cut from">
+        <option value=""${chosen ? "" : " selected"}>exterior board</option>
+        ${keys.map((k) => `<option value="${esc(k)}"${k === chosen ? " selected" : ""}>${
+          esc(k)}</option>`).join("")}
       </select>
-      <span class="note">hinged ${side === "L" ? "left" : "right"}</span>
-    </div>`).join("") +
-    `<p class="hint">Click a door in the elevation to turn it round.</p>
-     <div class="swing" id="swingnote"></div>`;
+    </div>`);
+  }
+
+  const extName = (mats[c.exterior_board] || {}).board || "";
+  box.innerHTML = `<div class="grid">
+      <div class="f"><label>How many</label>
+        <select data-k="doors" data-t="int">${counts.map((k) =>
+          `<option value="${k}"${k === have ? " selected" : ""}>${k}</option>`).join("")}</select></div>
+      <div class="f"><label>Door height</label>
+        <input type="number" step="1" data-k="door_height" data-t="opt" placeholder="auto"
+               value="${c.door_height === null || c.door_height === undefined
+                        ? "" : c.door_height}"></div>
+    </div>
+    ${leaves.join("")}
+    <p class="hint">${n === 2
+      ? "A pair is fixed: left leaf hinged left, right leaf hinged right. "
+      : ""}Exterior board is <b>${esc(c.exterior_board || "—")}</b>${
+      extName ? " — " + esc(extName) : ""}, and a leaf left on
+      &ldquo;exterior board&rdquo; is cut from it.</p>
+    ${edgingHTML(c, "door")}
+    <div class="swing" id="swingnote"></div>`;
   refreshSwing();
 }
 
@@ -905,7 +1015,20 @@ function renderDrawers() {
     </div>
     <p class="hint">Listed top to bottom. The ${std.stack_gap} mm gap between faces
       comes from the standard and is never typed per drawer. Drag the join between
-      two faces in the elevation to pin just those two at the heights you drag to.</p>`;
+      two faces in the elevation to pin just those two at the heights you drag to.
+      <b>Base</b> is how the drawer bottom is held: <b>board</b> is the 3 mm sheet
+      grooved into all four panels, <b>melamine</b> a 16 mm one housed between
+      them.</p>
+    <div class="grid" style="margin-top:2px">
+      ${boardSelOpt(c, "drawer_carcass_board", "Drawer box material",
+                    c.carcass_board, "sides, fronts, and a melamine base")}
+      ${boardSelOpt(c, "drawer_face_board", "Drawer face material",
+                    c.exterior_board, "the face that shows")}
+    </div>
+    ${edgingHTML(c, "drawer")}
+    <p class="hint">The box itself is edged in PVC in the box material's colour:
+      <b data-boxedge="1">—</b>. It follows the box and is not chosen here.</p>`;
+  refreshEdging();
   solveStack();
 }
 
@@ -978,9 +1101,9 @@ function renderSupports() {
     : ((g && g.supports) || []);
   const migrated = !(c.support_rows && c.support_rows.length);
 
-  const tapes = (g && g.tapes) || {};
-  const tapeOf = (e) => e === "front" ? tapes.carcass_edge
-                      : e === "white" ? tapes.drawer_box_edge : "";
+  const edges_in_force = (g && g.tapes) || {};
+  const tapeOf = (e) => e === "front" ? edges_in_force.carcass_edge
+                      : e === "white" ? edges_in_force.drawer_box_edge : "";
 
   const body = rows.map((r, i) => `<tr>
       <td class="n">${i + 1}</td>
@@ -997,7 +1120,7 @@ function renderSupports() {
   box.innerHTML = `<table class="rows">
     <colgroup><col style="width:20px"><col style="width:120px"><col style="width:56px">
       <col><col style="width:26px"></colgroup>
-    <thead><tr><th class="n">#</th><th>Supports</th><th>Qty</th><th>Tape</th><th></th>
+    <thead><tr><th class="n">#</th><th>Supports</th><th>Qty</th><th>Edging</th><th></th>
     </tr></thead><tbody>${body ||
       `<tr><td colspan="5" class="note">No supports.</td></tr>`}</tbody></table>
     <div class="dtot"><span>total <b>${total}</b> support${total === 1 ? "" : "s"}</span>
@@ -1019,120 +1142,144 @@ function supportRows() {
   return c.support_rows;
 }
 
-/* ---------- boards and their tapes -----------------------------------------
-   Two boards per cabinet, each a key into the job's materials: the carcass
-   board the box is cut from, and the exterior board that shows. The three
-   tapes follow from them by lookup on the material record — never by sticking a
-   thickness in front of a board name — and each can be overridden here for this
-   cabinet alone. The value shown beside a derived tape is the engine's.        */
+/* ---------- boards, per section --------------------------------------------
+   The boards are chosen once, in Structure: what shows, what the back is cut
+   from, and what the box is cut from. Doors and Drawers may each take a board
+   of their own, and default to Structure's when they do not.
 
-const TAPE_FIELDS = [
-  ["carcass_edge", "Carcass edge", "PVC in the exterior board's colour — the fronts of " +
-   "the sides, top, bottom, shelves, dividers and front-edged supports"],
-  ["door_edge", "Door &amp; face edge", "2 mm in the exterior board's colour — doors, " +
-   "drawer faces and exposed end panels"],
-  ["drawer_box_edge", "Drawer box edge", "PVC in the carcass board's colour — drawer " +
-   "sides and fronts, and white-edged supports"],
-];
+   Edging is one control per section — a thickness and a colour — and the colour
+   is a board, so the name is still generated from that board's token. A board
+   name can never reach a real order as a tape (D6 / W10). The name shown beside
+   the two dropdowns is always the engine's answer, never one built here.      */
 
-function renderBoards() {
-  const box = $("boardbox");
+// A board the cabinet must name. Offers the project's boards and nothing else —
+// the library is chosen from on the Boards tab.
+function boardSel(c, key, label, hint) {
+  const mats = (S.res && S.res.materials) || {};
+  const keys = (S.res && S.res.boards) || Object.keys(mats);
+  const row = (k) => `<option value="${esc(k)}"${k === c[key] ? " selected" : ""}>${
+    esc(k)} — ${esc((mats[k] || {}).board || k)}${
+    (mats[k] || {}).thickness && mats[k].thickness !== 16
+      ? " · " + mats[k].thickness + "mm" : ""}</option>`;
+  return `<div class="f wide">
+      <label>${esc(label)}</label>
+      <select data-k="${key}" data-t="text">${
+        keys.indexOf(c[key]) < 0
+          ? `<option value="${esc(c[key])}" selected>${esc(c[key] || "—")} (not selected)</option>`
+          : ""}${keys.map(row).join("")}</select>
+      <span class="note">${esc(hint)}</span></div>`;
+}
+
+// A board that may be left to follow the one chosen in Structure.
+function boardSelOpt(c, key, label, follows, hint) {
+  const mats = (S.res && S.res.materials) || {};
+  const keys = (S.res && S.res.boards) || [];
+  const v = c[key] || "";
+  return `<div class="f wide">
+      <label>${esc(label)}</label>
+      <select data-k="${key}" data-t="optext">
+        <option value=""${v ? "" : " selected"}>as in Structure — ${esc(follows || "—")}</option>
+        ${keys.map((k) => `<option value="${esc(k)}"${k === v ? " selected" : ""}>${
+          esc(k)} — ${esc((mats[k] || {}).board || k)}</option>`).join("")}
+      </select>
+      <span class="note">${esc(hint)}</span></div>`;
+}
+
+// One edging control: how thick, and what colour. 'which' is "door" or "drawer".
+function edgingHTML(c, which) {
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const e = (g && g.edging && g.edging[which]) || {};
+  const mats = (S.res && S.res.materials) || {};
+  const keys = (S.res && S.res.boards) || [];
+  const kinds = S.def.exterior_tapes || ["1mm", "2mm"];
+  const kind = c[which + "_edge_kind"] || e.kind || "2mm";
+  const board = c[which + "_edge_board"] || e.board || c.exterior_board;
+  const override = g && g.edge_override;
+  return `<div class="tape">
+      <label>Edging</label>
+      <div class="leaf">
+        <select data-edge="${which}" data-ek="kind" title="how thick">${kinds.map((k) =>
+          `<option value="${esc(k)}"${k === kind ? " selected" : ""}>${esc(k)}</option>`
+          ).join("")}</select>
+        <select data-edge="${which}" data-ek="board" title="what colour">${keys.map((k) =>
+          `<option value="${esc(k)}"${k === board ? " selected" : ""}>${esc(k)} — ${
+            esc((mats[k] || {}).board || k)}</option>`).join("")}</select>
+        <b data-edgename="${which}" class="${e.name ? "" : "over"}">${
+          esc(e.name || "none mapped")}</b>
+      </div>
+      ${override ? `<span class="note">This job file names the edging outright as
+        <b>${esc(override)}</b>, and that still wins over the two choices above.
+        <button data-clearedge="1">Clear it</button></span>` : ""}
+    </div>`;
+}
+
+/* ---------- Structure ------------------------------------------------------
+   What the cabinet is cut from, how the back is fixed, and what is inside it.
+   The three boards come first because nothing else can be decided until they
+   are. Dividers are in the app but not working — they are shown greyed and
+   told so, rather than quietly doing nothing.                               */
+
+function renderStructure() {
+  const box = $("structurebox");
   if (!box) return;
   const c = S.job.cabinets[S.sel];
-  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
-  const mats = (S.res && S.res.materials) || {};
-  // only the boards this project selected — the library is chosen from on the
-  // Boards tab, never inline here
-  const keys = (S.res && S.res.boards) || Object.keys(mats);
+  const keys = (S.res && S.res.boards) || [];
   if (!keys.length) {
     box.innerHTML = `<p class="off">This project has no boards yet. Tick one into
       it on the <b>Boards</b> tab before choosing what this cabinet is cut from.</p>`;
     return;
   }
-  const derived = (g && g.tapes) || {};
-  const over = (g && g.tape_overrides) || {};
-
-  const boardSel = (key, label, hint) => `<div class="f wide">
-      <label>${esc(label)}</label>
-      <select data-k="${key}" data-t="text">${
-        keys.indexOf(c[key]) < 0
-          ? `<option value="${esc(c[key])}" selected>${esc(c[key] || "—")} (not selected)</option>`
-          : ""}${keys.map((k) =>
-        `<option value="${esc(k)}"${k === c[key] ? " selected" : ""}>${esc(k)} — ${
-          esc((mats[k] || {}).board || k)}${
-          (mats[k] || {}).thickness && mats[k].thickness !== 16
-            ? " · " + mats[k].thickness + "mm" : ""}</option>`).join("")}</select>
-      <span class="note">${esc(hint)}</span></div>`;
-
-  const tapeRow = ([key, label, why]) => {
-    const isOver = (c[key] !== null && c[key] !== undefined);
-    const value = isOver ? c[key] : (derived[key] || "");
-    return `<div class="tape">
-      <label>${label}</label>
-      <div class="leaf">
-        <select data-tape="${key}">
-          <option value=""${isOver ? "" : " selected"}>derived${
-            value ? " (" + esc(derived[key] || "none mapped") + ")" : ""}</option>
-          ${(S.def.edge_materials || []).map((t) =>
-            `<option value="${esc(t)}"${isOver && c[key] === t ? " selected" : ""}>${
-              esc(t)}</option>`).join("")}
-        </select>
-        <b class="${value ? "" : "over"}">${esc(value || "none mapped")}</b>
-      </div>
-      <span class="note">${why}</span></div>`;
-  };
-
-  // Exterior tape thickness is a per-cabinet choice and changes no size: we
-  // supply finished sizes and Plazaboard deducts the tape. The carcass tape is
-  // always the thin PVC and is deliberately not selectable.
-  const thickSel = `<div class="f wide"><label>Exterior tape thickness</label>
-      <select data-k="exterior_tape" data-t="text">${
-        (S.def.exterior_tapes || ["1mm", "2mm"]).map((t) =>
-          `<option value="${esc(t)}"${t === (c.exterior_tape || "2mm") ? " selected" : ""}>${
-            esc(t)}</option>`).join("")}</select>
-      <span class="note">doors, drawer faces and exposed ends. No effect on any cut
-      size — Plazaboard deduct the tape from the finished size we give them.</span>
-    </div>`;
-
   // The back board is only cut when there is a back, or a drawer on a grooved
   // 3 mm base. Nothing on this cabinet uses it otherwise, so it is not asked for.
   const usesBack = c.back !== "none" ||
     (tickOn(c, "has_drawers") && (c.drawers || []).some((d) => d.base === "board"));
+  const backs = S.def.backs || ["four", "three", "none"];
 
-  box.innerHTML =
-    `<div class="grid">
-       ${boardSel("carcass_board", "Carcass board",
-                  "sides, top, bottom, supports, shelves and dividers")}
-       ${boardSel("exterior_board", "Exterior board",
-                  "doors, drawer faces and exposed end panels")}
-       ${usesBack
-          ? boardSel("back_board", "Back board",
-                     "the backing panel, and a drawer base grooved out of the same sheet")
-          : `<div class="f wide"><label>Back board</label>
-               <p class="off">Nothing on this cabinet is cut from it — no back, and no
-               drawer on a grooved base.</p></div>`}
-       ${thickSel}
-     </div>
-     ${TAPE_FIELDS.map(tapeRow).join("")}`;
+  box.innerHTML = `<div class="grid">
+      ${boardSel(c, "exterior_board", "Exterior board",
+                 "doors, drawer faces and anything else that shows")}
+      ${usesBack
+        ? boardSel(c, "back_board", "Backing board",
+                   "the back panel, and a drawer base grooved out of the same sheet")
+        : `<div class="f wide"><label>Backing board</label>
+             <p class="off">Nothing on this cabinet is cut from it — no back, and no
+             drawer on a grooved base.</p></div>`}
+      ${boardSel(c, "carcass_board", "Carcass board",
+                 "sides, top, bottom, supports and shelves")}
+      <div class="f wide"><label>Back fixing</label>
+        <select data-k="back" data-t="sel:backs">${backs.map((b) =>
+          `<option value="${esc(b)}"${b === c.back ? " selected" : ""}>${
+            esc(BACK_LABEL[b] || b)}</option>`).join("")}</select>
+        <span class="note">what the backing board is grooved into, and whether one
+        is cut at all</span></div>
+      <div class="f"><label>Shelves</label>
+        <input type="number" step="1" min="0" data-k="shelves" data-t="int"
+               value="${c.shelves || 0}"></div>
+      <div class="f"><label>Fixed shelves</label>
+        <input type="number" step="1" min="0" data-k="fixed_shelves" data-t="int"
+               value="${c.fixed_shelves || 0}"></div>
+      ${unavailableField("Shelf width", c.shelf_width,
+        "only means anything once a divider splits the interior")}
+      ${unavailableField("Dividers", c.divider_count,
+        "function unavailable — a divider cannot be positioned yet")}
+      ${unavailableField("Divider height", c.divider_height,
+        "function unavailable")}
+    </div>`;
 }
 
-// The derived tapes are the engine's answer, so they are re-read rather than
-// recomputed whenever a compute comes back for the cabinet on screen.
-function refreshTapes() {
+// The edging names in force are the engine's answer, so they are re-read rather
+// than recomputed whenever a compute comes back for the cabinet on screen.
+function refreshEdging() {
   const c = S.sel !== null && S.job.cabinets[S.sel];
   const g = c && S.res && S.res.geometry && S.res.geometry[String(c.number)];
-  if (!g) return;
-  TAPE_FIELDS.forEach(([key]) => {
-    const row = document.querySelector(`#boardbox [data-tape="${key}"]`);
-    if (!row) return;
-    const isOver = (c[key] !== null && c[key] !== undefined);
-    const value = isOver ? c[key] : (g.tapes[key] || "");
-    const shown = row.parentElement.querySelector("b");
-    if (shown) {
-      shown.textContent = value || "none mapped";
-      shown.className = value ? "" : "over";
-    }
+  if (!g || !g.edging) return;
+  document.querySelectorAll("#editor [data-edgename]").forEach((b) => {
+    const e = g.edging[b.dataset.edgename] || {};
+    b.textContent = e.name || "none mapped";
+    b.className = e.name ? "" : "over";
   });
+  const boxEdge = document.querySelector("#editor [data-boxedge]");
+  if (boxEdge) boxEdge.textContent = (g.edging.drawer_box || {}).name || "none mapped";
 }
 
 /* ---------- the board library ----------------------------------------------
@@ -1148,6 +1295,7 @@ function refreshTapes() {
 
 S.lib = null;          // the library as /api/boards last returned it
 S.libEdit = null;      // the board being edited, or null
+S.libSwap = null;      // the swap being set up, or null — the two share the panel
 
 const GRAIN_LABEL = {grain: "Grain", plain: "Plain"};
 
@@ -1232,6 +1380,12 @@ function drawBoards() {
       ${std.board_t || 16} mm is assumed everywhere a carcass size is worked out,
       so a board of another thickness is flagged on every cabinet that uses it.</p>
     <div id="boardedit"></div>`;
+  drawBoardPanel();
+}
+
+// One panel under the table, showing whichever of the two is open.
+function drawBoardPanel() {
+  if (S.libSwap) { drawSwapPicker(); return; }
   drawBoardEditor();
 }
 
@@ -1246,7 +1400,11 @@ function drawBoardEditor() {
     <h2>${b.id ? "Edit board — " + esc(b.id) : "New board"}</h2>
     <div class="body">
       <div class="grid" style="grid-template-columns:repeat(3,1fr)">
-        <div class="f wide"><label>Name</label>
+        <div class="f"><label>ID</label>
+          <input id="bf-id" value="${esc(b.id || "")}"
+                 placeholder="${b.id ? "" : "from the name"}">
+          <span class="note">the material name on every panel cut from it</span></div>
+        <div class="f wide" style="grid-column:2/-1"><label>Name</label>
           <input id="bf-name" value="${esc(b.name || "")}"
                  placeholder="e.g. Brookhill Fusion Chip"></div>
         <div class="f"><label>Thickness</label>
@@ -1276,8 +1434,10 @@ function drawBoardEditor() {
         <b>PVC &lt;token&gt;</b>, <b>1mm &lt;token&gt;</b>, <b>2mm &lt;token&gt;</b>.
         It is separate from the board's name on purpose — Plazaboard's Brookhill
         tape is "PVC WOOD", and "PVC BROOKHILL FUSION CHIP" is not a product.
-        Saving here updates the library only; jobs already quoted keep their own
-        copy of this board, price and all.</p>
+        Changing the <b>ID</b> renames the board. Saved jobs keep their own copy
+        under the id they were quoted with and do not move; the project open on
+        the Cabinets tab does come along, and is named before anything is written.
+        Nothing else saved here reaches a job at all.</p>
     </div></div>`;
   const tapes = () => {
     const tok = ($("bf-tape").value || $("bf-name").value || "").trim();
@@ -1288,18 +1448,58 @@ function drawBoardEditor() {
   tapes();
 }
 
+function drawSwapPicker() {
+  const box = $("boardedit");
+  const sw = S.libSwap;
+  if (!box || !sw) return;
+  const others = (S.lib.boards || []).filter((b) => b.id !== sw.from);
+  if (!others.length) {
+    box.innerHTML = `<div class="card" style="margin:12px"><div class="body">
+      <p class="note">The library has no other board to swap to.</p>
+      <div class="presets"><button id="sw-cancel">Close</button></div></div></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="card" style="margin:12px">
+    <h2>Swap ${esc(sw.from)} across this project</h2>
+    <div class="body">
+      <div class="f wide"><label>Swap it for</label>
+        <select id="sw-to">${others.map((b) =>
+          `<option value="${esc(b.id)}"${b.id === sw.to ? " selected" : ""}>${
+            esc(b.id)} — ${esc(b.name)}</option>`).join("")}</select></div>
+      <div class="presets">
+        <button id="sw-go" class="primary" data-from="${esc(sw.from)}">Show me what changes</button>
+        <button id="sw-cancel">Cancel</button>
+      </div>
+      <p class="note" style="margin-top:8px;max-width:78ch">
+        Nothing is written until the change has been shown: which cabinets, which
+        panels, and what it does to the board count and the cost. No designation
+        changes — a panel keeps its name and changes what it is cut from.</p>
+    </div></div>`;
+}
+
 $("boards").addEventListener("click", async (e) => {
   const edit = e.target.closest("[data-bedit]");
   if (edit) {
+    S.libSwap = null;
     S.libEdit = Object.assign({}, S.lib.boards.find((b) => b.id === edit.dataset.bedit));
-    drawBoardEditor();
+    drawBoardPanel();
     $("boardedit").scrollIntoView({block: "nearest"});
     return;
   }
   if (e.target.id === "bnew") {
+    S.libSwap = null;
     S.libEdit = {id: "", name: "", tape: "", thickness: 16, grain: "plain",
                  price: 0, picture: ""};
-    drawBoardEditor();
+    drawBoardPanel();
+    return;
+  }
+  if (e.target.id === "sw-cancel") { S.libSwap = null; drawBoardPanel(); return; }
+  if (e.target.id === "sw-go") {
+    const from = e.target.dataset.from;
+    const to = $("sw-to").value;
+    S.libSwap = null;
+    drawBoardPanel();
+    swapBoard(from, to);
     return;
   }
   const del = e.target.closest("[data-bdel]");
@@ -1315,15 +1515,27 @@ $("boards").addEventListener("click", async (e) => {
     return;
   }
   const swap = e.target.closest("[data-bswap]");
-  if (swap) { swapBoard(swap.dataset.bswap); }
+  if (swap) {
+    const others = (S.lib.boards || []).filter((b) => b.id !== swap.dataset.bswap);
+    S.libEdit = null;
+    S.libSwap = {from: swap.dataset.bswap, to: others.length ? others[0].id : ""};
+    drawBoardPanel();
+    $("boardedit").scrollIntoView({block: "nearest"});
+  }
 });
 
-// Saving a board: the library only, never a job.
+/* Saving a board: the library, and — only when the id changes — the project on
+   screen. A SAVED job keeps its own copy of every board it selected under the id
+   it was selected with, so nothing already quoted moves whatever is done here.
+   The project open on the Cabinets tab is a live edit, so it comes along, and it
+   is named before anything is written. No panel designation changes: a panel
+   keeps its name and changes what it is cut from.                            */
 $("boards").addEventListener("click", async (e) => {
-  if (e.target.id === "bf-cancel") { S.libEdit = null; drawBoardEditor(); return; }
+  if (e.target.id === "bf-cancel") { S.libEdit = null; drawBoardPanel(); return; }
   if (e.target.id !== "bf-save") return;
+  const from = S.libEdit.id || "";
   const board = {
-    id: S.libEdit.id,
+    id: $("bf-id").value.trim().toUpperCase(),
     name: $("bf-name").value.trim(),
     tape: $("bf-tape").value.trim(),
     thickness: parseInt($("bf-thickness").value, 10),
@@ -1331,9 +1543,39 @@ $("boards").addEventListener("click", async (e) => {
     price: parseFloat($("bf-price").value) || 0,
     picture: $("bf-picture").value.trim(),
   };
-  const r = await post("/api/board-save", {board: board});
+
+  if (from && board.id && board.id !== from) {
+    const cabs = S.job.cabinets.filter((c) =>
+      [c.carcass_board, c.exterior_board, c.back_board, c.drawer_carcass_board,
+       c.drawer_face_board, c.door_edge_board, c.drawer_edge_board]
+        .concat(c.door_boards || []).indexOf(from) >= 0).map((c) => c.number);
+    const ok = window.confirm(
+      `Rename ${from} to ${board.id}?\n\n` +
+      `Saved job files keep their own copy of this board under ${from} — they were ` +
+      `quoted with it, and nothing they were quoted changes.\n\n` +
+      (cabs.length
+        ? `The project open here does move: cabinet${cabs.length === 1 ? "" : "s"} ` +
+          `${cabs.join(", ")} will be cut from ${board.id} instead. No panel ` +
+          `designation changes — a panel keeps its name and changes what it is ` +
+          `cut from.\n\n`
+        : `No cabinet in the project open here is cut from it.\n\n`) +
+      `Rename it?`);
+    if (!ok) return;
+  }
+
+  const r = await post("/api/board-save",
+                       {board: board, from: from, job: S.job});
   if (!r.ok) { toast(r.error, true); return; }
-  toast("Saved " + board.name + " to the library.");
+  if (r.job) {
+    S.job = r.job;
+    S.selRendered = -2;
+    await compute();
+  }
+  toast(r.renamed
+    ? `Renamed ${r.from} to ${r.id}.` +
+      (r.kept_by.length
+        ? ` ${r.kept_by.join(", ")} keep their own copy under ${r.from}.` : "")
+    : "Saved " + board.name + " to the library.");
   S.libEdit = null;
   renderBoardsTab();
 });
@@ -1358,16 +1600,10 @@ $("boards").addEventListener("change", async (e) => {
    written until the change has been shown: which cabinets, which panels, and
    what it does to the board count and the cost. Same pattern as the drawer
    tickbox — the engine answers first, and cancelling changes nothing. */
-async function swapBoard(fromId) {
-  const others = (S.lib.boards || []).filter((b) => b.id !== fromId);
-  if (!others.length) { toast("The library has no other board to swap to.", true); return; }
-  const to = window.prompt(
-    `Swap ${fromId} for which board?\n\n` +
-    others.map((b) => `  ${b.id}  —  ${b.name}`).join("\n") +
-    `\n\nType the id:`, others[0].id);
-  if (!to) return;
+async function swapBoard(fromId, to) {
+  if (!fromId || !to) return;
 
-  const pre = await post("/api/board-swap", {job: S.job, from: fromId, to: to.trim()});
+  const pre = await post("/api/board-swap", {job: S.job, from: fromId, to: to});
   if (!pre.ok) { toast(pre.error, true); return; }
   if (!pre.cabinets.length) {
     toast(`No cabinet is cut from ${fromId}, so nothing would change.`);
@@ -1401,7 +1637,7 @@ async function swapBoard(fromId) {
   if (!ok) return;
 
   const done = await post("/api/board-swap",
-                          {job: S.job, from: fromId, to: to.trim(), apply: true});
+                          {job: S.job, from: fromId, to: to, apply: true});
   if (!done.ok) { toast(done.error, true); return; }
   S.job = done.job;
   S.selRendered = -2;
@@ -1410,24 +1646,15 @@ async function swapBoard(fromId) {
 }
 
 /* ---------- the elevation as a control ------------------------------------
-   Clicking a door turns it round. Dragging the join between two faces pins
-   those two and leaves the rest of the stack alone. The browser works out no
-   dimension in either: the SVG carries each pair's span in both millimetres
-   and pixels, so a drag reads back into millimetres the same way a plan drag
-   projects onto a wall track, and the engine divides the pair on drop.      */
+   Dragging a cabinet moves it along the wall and up and down it. Dragging the
+   join between two drawer faces pins those two and leaves the rest of the stack
+   alone. A door is not a control here — which edge it hangs from is set in the
+   Doors section, where the answer can be read rather than guessed at from a
+   picture.
 
-$("elevation").addEventListener("click", (e) => {
-  const leaf = e.target.closest(".edoor");
-  if (!leaf) return;
-  const c = S.job.cabinets.find((x) => x.number === +leaf.dataset.cab);
-  if (!c) return;
-  const i = +leaf.dataset.door;
-  if (!Array.isArray(c.door_hinges)) c.door_hinges = [];
-  while (c.door_hinges.length <= i) c.door_hinges.push("");
-  c.door_hinges[i] = leaf.dataset.hinge === "L" ? "R" : "L";
-  S.selRendered = -2;
-  compute();                   // redraws, and re-runs the swing check with it
-});
+   The browser works out no dimension in either drag. The drawing carries the
+   millimetre-to-pixel mapping and every position the engine will allow, and the
+   browser only picks the nearest of them.                                   */
 
 let FDRAG = null;
 
@@ -1479,6 +1706,133 @@ async function endFaceDrag() {
   a.mode = "fixed"; a.face_height = r.top;
   b.mode = "fixed"; b.face_height = r.bottom;
   S.selRendered = -2;          // those two rows are Fixed now; the rest is untouched
+  compute();
+}
+
+/* ---------- dragging a cabinet in the elevation ----------------------------
+   Sideways along the wall and up and down it, in one drag. The drawing carries
+   where 0 mm and the floor are and how many pixels a millimetre is; the engine
+   hands over every position and every height it will allow, with the reason for
+   each. The browser projects the pointer onto that mapping and picks the nearest
+   candidate within the standard's snap tolerance — it invents neither a position
+   nor a height, and on drop the whole job is recomputed server-side.
+
+   Placement.z is what moves vertically: 0 is the floor, where the carcass stands
+   on its legs, and anything above it is a hung unit's underside.            */
+
+let EDRAG = null;
+
+function elevTrack() {
+  const t = document.querySelector("#elevation .etrack");
+  if (!t) return null;
+  return {wall: t.dataset.wall, len: +t.dataset.len, scale: +t.dataset.scale,
+          x0: +t.dataset.x0, y0: +t.dataset.y0, ceiling: +t.dataset.ceiling,
+          svg: t.ownerSVGElement};
+}
+
+function elevPoint(svg, evt) {
+  const r = svg.getBoundingClientRect();
+  return {x: (evt.clientX - r.left) * (svg.viewBox.baseVal.width || r.width) / r.width,
+          y: (evt.clientY - r.top) * (svg.viewBox.baseVal.height || r.height) / r.height,
+          rect: r};
+}
+
+$("elevation").addEventListener("pointerdown", async (e) => {
+  const grp = e.target.closest(".ecabg");
+  if (!grp || !S.job.room) return;
+  const track = elevTrack();
+  if (!track) return;                      // the run view has no wall to move along
+  const number = +grp.dataset.cab;
+
+  const model = await post("/api/drag", {job: S.job, cabinet: number});
+  if (!model.ok) { toast(model.error, true); return; }
+  const p = S.job.placements.find((x) => x.cabinet === number);
+  if (!p) return;
+
+  const pt = elevPoint(track.svg, e);
+  EDRAG = {model: model, grp: grp, place: p, track: track,
+           from: {x: p.x, z: p.z},
+           // where in the carcass it was grabbed, so it does not jump to centre
+           grabX: (pt.x - track.x0) / track.scale - p.x,
+           grabZ: (track.y0 - pt.y) / track.scale - carcassZ(p, model),
+           at: {x: p.x, z: p.z}, moved: false};
+  grp.classList.add("dragging");
+  S.sel = S.job.cabinets.findIndex((x) => x.number === number);
+  window.addEventListener("pointermove", onElevDrag);
+  window.addEventListener("pointerup", endElevDrag);
+  window.addEventListener("pointercancel", endElevDrag);
+  e.preventDefault();
+});
+
+// Where the underside actually is, which is not the same as Placement.z: a
+// carcass on the floor stands on its legs. The lift is the standard's.
+function carcassZ(p, model) {
+  const legs = (S.def.standard || {}).leg_height || 0;
+  return p.z > 0 ? p.z : (model.layer === "wall" ? 0 : legs);
+}
+
+function onElevDrag(e) {
+  if (!EDRAG) return;
+  const t = EDRAG.track;
+  const wall = EDRAG.model.walls[t.wall];
+  if (!wall) return;
+  const pt = elevPoint(t.svg, e);
+  const tol = EDRAG.model.tolerance;
+
+  let x = Math.round((pt.x - t.x0) / t.scale - EDRAG.grabX);
+  x = Math.max(0, Math.min(x, wall.max_x));
+  let why = "";
+  for (const sn of wall.snaps) {
+    if (Math.abs(sn.x - x) <= tol) { x = sn.x; why = sn.why; break; }
+  }
+
+  let z = Math.round((t.y0 - pt.y) / t.scale - EDRAG.grabZ);
+  const maxZ = EDRAG.model.max_z;      // null when no ceiling has been measured
+  z = Math.max(0, maxZ === null || maxZ === undefined ? z : Math.min(z, maxZ));
+  let whyZ = "";
+  const w = EDRAG.model.width;
+  for (const sn of wall.z_snaps) {
+    // a height that belongs to another cabinet only applies where this one is
+    // actually over or under it — the engine hands over the stretch, this only
+    // asks whether the two overlap
+    if (sn.x0 !== null && sn.x0 !== undefined &&
+        (sn.x0 >= x + w || sn.x1 <= x)) continue;
+    if (Math.abs(sn.z - z) <= tol) { z = sn.z; whyZ = sn.why; break; }
+  }
+
+  EDRAG.moved = true;
+  EDRAG.at = {x: x, z: z};
+  EDRAG.grp.setAttribute("transform", `translate(${
+    ((x - EDRAG.from.x) * t.scale).toFixed(2)} ${
+    ((carcassZ({z: EDRAG.from.z}, EDRAG.model) -
+      carcassZ({z: z}, EDRAG.model)) * t.scale).toFixed(2)})`);
+
+  const out = $("elevdrag");
+  if (out) {
+    out.style.display = "block";
+    out.style.left = (e.clientX - pt.rect.left + 14) + "px";
+    out.style.top = (e.clientY - pt.rect.top + 14) + "px";
+    out.textContent = `wall ${t.wall} · ${x} mm` + (why ? ` (${why})` : "") +
+      ` · ${z === 0 ? "on the floor" : z + " mm up"}` + (whyZ && z ? ` (${whyZ})` : "");
+  }
+}
+
+function endElevDrag() {
+  if (!EDRAG) return;
+  const d = EDRAG;
+  EDRAG = null;
+  window.removeEventListener("pointermove", onElevDrag);
+  window.removeEventListener("pointerup", endElevDrag);
+  window.removeEventListener("pointercancel", endElevDrag);
+  d.grp.classList.remove("dragging");
+  d.grp.removeAttribute("transform");
+  const out = $("elevdrag");
+  if (out) out.style.display = "none";
+  if (!d.moved || (d.at.x === d.from.x && d.at.z === d.from.z)) { renderList(); return; }
+  d.place.x = d.at.x;
+  d.place.z = d.at.z;
+  placesSig = null;            // the placements table shows the new numbers
+  S.selRendered = -2;
   compute();
 }
 

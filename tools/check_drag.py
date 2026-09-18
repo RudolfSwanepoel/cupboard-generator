@@ -20,6 +20,7 @@ The geometry worth being careful about:
 """
 import math
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -32,7 +33,8 @@ from cabinetgen.room import (clashes, convex_overlap, corner_outline,       # no
                              corner_shadow, gaps as room_gaps, geometry,
                              overlaps, polygons_overlap, pullout_envelope,
                              rectangular, runs as room_runs, snap_points,
-                             swing_envelopes, triangulate)
+                             swing_envelopes, triangulate, z_snap_points)
+from cabinetgen.render import wall_elevation_svg                           # noqa: E402
 from cabinetgen.standard import STANDARD                                    # noqa: E402
 from cabinetgen.store import job_to_dict                                    # noqa: E402
 from cabinetgen.validate import validate                                    # noqa: E402
@@ -420,6 +422,52 @@ def main() -> int:
           [(o.a, o.b, o.mm) for o in overlaps(j)], [(9, 2, 100)])
     check("and the snap targets clear the real width",
           [s["x"] for s in snap_points(j, 2, "A", std) if s["why"] == "right of 9"], [800])
+
+    print("\ndragging in the elevation: how high it may come to rest")
+    # The vertical twin of the snap targets. Same rule as the plan: the engine
+    # names every height, the browser only picks between them.
+    base = cab(1, 900)
+    base.height, base.depth = 720, 580
+    up = cab(2, 900)
+    up.kind, up.height, up.depth = "upper", 700, 330
+    jz = job([base, up], [Placement(1, "A", 0), Placement(2, "A", 0, z=1500)])
+    jz.room.ceiling = 2700
+    check("the floor, the top of the base unit, and tight to the ceiling",
+          [(s["z"], s["why"]) for s in z_snap_points(jz, 2, "A", std)],
+          [(0, "on the floor"), (820, "on top of 1"), (2000, "tight to the ceiling")])
+    check("the base unit's own top is leg height up, not zero",
+          [s["z"] for s in z_snap_points(jz, 2, "A", std) if s["why"] == "on top of 1"],
+          [std.leg_height + base.height])
+    jz.placements[0] = Placement(1, "A", 3000)
+    check("a cabinet that shares no span is nothing to sit on",
+          [s["why"] for s in z_snap_points(jz, 2, "A", std)],
+          ["on the floor", "tight to the ceiling"])
+    jz.room.ceiling = None
+    check("with no ceiling measured there is nothing to cap it against",
+          [s["why"] for s in z_snap_points(jz, 2, "A", std)], ["on the floor"])
+
+    # A drag crosses several of these on the way, so it asks for all of them with
+    # the stretch of wall each applies over rather than a round trip per pixel.
+    jz.room.ceiling = 2700
+    spanned = z_snap_points(jz, 2, "A", std, spans=True)
+    check("every candidate, with the stretch it applies over",
+          [(s["z"], s["why"], s["x0"], s["x1"]) for s in spanned],
+          [(0, "on the floor", None, None), (820, "on top of 1", 3000, 3900),
+           (2000, "tight to the ceiling", None, None)])
+    check("asked at a position it has not reached yet, the top is a candidate",
+          [s["why"] for s in z_snap_points(jz, 2, "A", std, at_x=3000)],
+          ["on the floor", "on top of 1", "tight to the ceiling"])
+
+    print("\nthe drawing carries what an elevation drag reads back")
+    jz.room.ceiling = 2700
+    jz.placements[0] = Placement(1, "A", 0)
+    svg = wall_elevation_svg(jz, "A")
+    track = re.search(r'<rect class="etrack"[^>]*>', svg).group(0)
+    check("where 0 mm along the wall is, and the floor, and the scale",
+          all(k in track for k in ('data-wall="A"', 'data-len="4000"', "data-scale=",
+                                   "data-x0=", "data-y0=", 'data-ceiling="2700"')), True)
+    check("and one group per cabinet, so a drag moves the whole thing",
+          sorted(re.findall(r'<g class="ecabg" data-cab="(\d+)"', svg)), ["1", "2"])
 
     print("\na job with no room is untouched by all of it")
     plain = Job(name="x", cabinets=[cab(1, 900, doors=2)])

@@ -131,13 +131,44 @@ pile, which is a guideline about cost and complexity, not a limit.
 unpriced board quotes at R0 while the total still looks like a number, which is
 the worst way to be wrong, so it blocks.
 
-### The three boards on a cabinet
+**A board's id is editable, and changing it renames the board** (18 September
+2026). The id is the material name on every panel cut from it, so it is upper
+case, alphanumeric and short — `api.clean_board_id` shapes a typed one exactly as
+`boards.next_id` shapes a generated one. A SAVED job keeps its own copy under the
+id it was quoted with and does not move; the reply names those jobs. The project
+open on screen does come along (`api.rename_board_in_job`), and is named in a
+confirm before anything is written. No panel designation changes: a panel keeps
+its name and changes what it is cut from. `DECOR` was renamed `BROOKHILL` this
+way; `jobs/Test*.json` still say `DECOR` and still open and price exactly as
+before, which is the price capture doing its job.
+
+**Yield and cut rate are read off what a board IS, not off its id.** Both used to
+be dicts keyed `MEL` / `DECOR` / `BACK`, so a renamed or newly added board fell to
+a house-average yield and — worse — a cutting charge of R0. `export_plaza.cut_rate`
+goes by thickness (the masonite saw takes the 3 mm, the beam saw the rest) and
+`board_yield` by grain and thickness, with the three original ids still pinned to
+their measured figures so the October benchmark does not move.
+
+### The boards on a cabinet
+
+The three chosen in **Structure**, which everything else falls back to:
 
 - `carcass_board` — sides (01), top (02), bottom (03), supports (04), shelves
   (05), dividers (09), and the plinth board that covers its legs.
 - `exterior_board` — doors (07), drawer faces (20), exposed end panels (08).
 - `back_board` — the backing panel (06), and the drawer base (17) when it is the
   grooved 3 mm one, because that is the same thin sheet.
+
+And four more, each `None` for "follow Structure" (18 September 2026), so every
+job written before them cuts exactly what it was quoted:
+
+- `drawer_carcass_board` — drawer sides (18), fronts (19) and a **housed 16 mm**
+  base (17). Follows `carcass_board`.
+- `drawer_face_board` — drawer faces (20). Follows `exterior_board`.
+- `door_boards[i]` — one per leaf, `""` for the exterior board. Two leaves cut
+  from different boards come out as two cut-list lines, told apart by
+  `born_distinct` because the material is part of the signature it reads
+  (`107a` / `107b`).
 
 **The back board is chosen, not reached for.** The engine used to type `"BACK"`
 onto the backing panel, so a project could cut a board it had never selected and
@@ -152,9 +183,12 @@ with neither is not nagged for one, and the editor says why rather than showing
 an empty dropdown. The stored value is kept when the section hides, the same
 discipline as the tickboxes.
 
-Drawer box sides and fronts (18, 19) and the **housed 16 mm** drawer base (17)
-are still cut from `MEL` — not from the carcass board. That was never ruled, so
-it was not changed; a cabinet whose carcass board is not MEL warns and asks.
+Drawer box sides and fronts (18, 19) and the housed 16 mm base (17) used to be
+hardcoded `MEL` in the engine whatever the cabinet was cut from, and all the
+validator could do was ask about it. They are a chosen board now, defaulting to
+the carcass, so the box and its edging agree by construction and the warning is
+gone. A board swap moves them with the carcass, which is why
+`check_library.py`'s swap figures are 102 panels and 3 MEL boards, not 101 and 4.
 
 ### Tapes are generated, not mapped
 
@@ -179,21 +213,31 @@ other banded edge takes the CARCASS board.**
 
 | Field | Derived as |
 |---|---|
-| `carcass_edge` | PVC in the **exterior** colour. Fronts of the sides, top, bottom, shelves, dividers and front-edged supports — shelf and divider fronts match the front, not the box (ruled 14 Sept 2026). |
-| `door_edge` | `Cabinet.exterior_tape` (1mm or 2mm) in the **exterior** colour. Doors, drawer faces, exposed ends. |
-| `drawer_box_edge` | PVC in the **carcass** colour. Drawer sides and fronts, and white-edged supports. |
+| `carcass_edge` | PVC in the **exterior** colour. Fronts of the sides, top, bottom, shelves, dividers and front-edged supports — shelf and divider fronts match the front, not the box (ruled 14 Sept 2026). Not selectable anywhere; it follows the exterior board. |
+| `door_edge` | `door_edge_kind` (1mm / 2mm) in `door_edge_board`'s colour. Doors and exposed ends. |
+| `drawer_face_edge` | `drawer_edge_kind` in `drawer_edge_board`'s colour. Drawer faces. |
+| `drawer_box_edge` | PVC in the **drawer box** board's colour. Drawer sides and fronts, and white-edged supports. |
 
-Each is `None` for "generate it" and a string for a per-cabinet override.
+**Edging is one control per section, and it is called edging, not tape** (18
+September 2026). Doors and Drawers each carry a thickness dropdown and a colour
+dropdown, and the colour is a *board*, so the name is still generated from that
+board's token and a board name still cannot reach a real order as a tape. Each
+half is `None` for "follow the cabinet", and the fall-through is
+drawer → door → `Cabinet.exterior_tape` / `exterior_board`, so a job quoted
+before the two were separable is edged exactly as it was quoted. The flat string
+overrides (`carcass_edge`, `door_edge`, `drawer_box_edge`) are still read and
+still win where a job file carries one; the editor says so and offers to clear it
+rather than showing dropdowns the cut list is ignoring.
 
 **`Cabinet.exterior_tape` is 1mm or 2mm, per cabinet, and has no dimensional
-effect whatsoever.** We supply finished sizes and Plazaboard deduct the tape, so
-the two cut identically and differ only in what is ordered and what it costs.
-There is no deduction logic anywhere and none is wanted. The carcass tape is
-always the thin PVC and is deliberately not selectable.
+effect whatsoever.** It is the fallback the two section choices fall through to.
+We supply finished sizes and Plazaboard deduct the tape, so the two cut
+identically and differ only in what is ordered and what it costs. There is no
+deduction logic anywhere and none is wanted.
 
-The resolved tape names show in the editor beside each edge and as a legend on
-the elevation (`render.tape_legend`), naming the cabinets when they disagree — a
-door taped in the carcass colour looks right on paper and wrong in the room.
+The resolved edging names show in the editor beside each control and as a legend
+on the elevation (`render.tape_legend`), naming the cabinets when they disagree —
+a door edged in the carcass colour looks right on paper and wrong in the room.
 
 ### Grain
 
@@ -286,16 +330,35 @@ leftovers between jobs), and simulated annealing over the panel order. The
 
 `python run_app.py`. See `docs/UI-BRIEF.md` for why it is shaped the way it is.
 
-The cabinet editor is eight sections, each a bold heading over its own coloured
-block: **Size · Outline · Structure · Doors · Drawers · Corner Unit · Back &
-Supports · Decor**. Drawers and Corner Unit are the tickbox sections above.
-**Back & Supports** carries the support rows; **Decor** carries the two board
-dropdowns and the three tapes, each showing the derived value with an override
-beside it. Both boards are dropdowns off `Job.materials` — free text there used
-to create a fourth material silently, which nested on its own sheet and priced
-at zero.
+The elevation and the cabinet list stack in the left column; the **settings panel
+is a column of its own**, starting level with the top of the drawing.
 
-Four tabs over one `POST /api/compute`. The handlers in `app/api.py` decide no
+The cabinet editor is seven sections, each a bold heading over its own coloured
+block: **Size · Outline · Structure · Doors · Drawers · Corner Unit ·
+Supports**. Doors, Drawers and Corner Unit are tickbox sections — unticking keeps
+everything in the job file and builds nothing from it, and says which cut-list
+lines would go before it does.
+
+- **Structure** is where the boards are chosen — exterior, backing, carcass, in
+  that order — then how the back is fixed, then the shelves. Every board is a
+  dropdown off `Job.materials`; free text there used to create a material
+  silently, which nested on its own sheet and priced at zero. **Structure
+  mentions no edging at all**, on purpose.
+- **Shelves** are adjustable, on pot holes, 4 mm clear of the back. **Fixed
+  shelves** are fitted into the carcass and run 3 mm deeper, 1 mm clear of it.
+- **Dividers, divider height and shelf width are shown greyed and labelled
+  "function unavailable"** — a divider cannot be positioned yet and shelves do
+  not divide around one. Shown rather than removed, because an option that
+  silently does nothing is worse than one that says so.
+- **Doors** is one or two leaves and no more. A pair is fixed, left and right; a
+  single door is the choice. Each leaf names the board it is cut from, and the
+  section carries one edging control.
+- **Drawers** carries the face table, a box board, a face board and one edging
+  control. The box's own PVC edging follows the box board and is not chosen.
+- **Supports** is the support rows and nothing else. The **Decor** section is
+  gone — added panels (exposed ends, code 08) come back with that work.
+
+Six tabs over one `POST /api/compute`. The handlers in `app/api.py` decide no
 dimension — every number in a response came out of the engine. Keep it that way:
 if the UI needs a number, add it to `cabinetgen`, do not compute it in the
 browser. `nest.nestable()` exists for exactly that reason — the UI and
@@ -316,6 +379,23 @@ critical and blocks the export rather than ordering a negative panel.
 reads — what was ordered is a list of heights. `Drawer.mode` and `Drawer.share`
 ride alongside it so a stack can be picked up and re-divided later instead of
 retyped; nothing downstream reads them.
+
+**A cabinet is dragged in the wall elevation, sideways and up and down** (18
+September 2026). Same bargain as the plan: `/api/drag` hands over every position
+(`room.snap_points`) and every height (`room.z_snap_points`) the engine will
+allow, with the reason for each, and the browser only picks the nearest within
+`Standard.snap_tolerance`. A height that belongs to another cabinet carries the
+stretch of wall it applies over, because the drag crosses several on the way and
+a round trip per pointer move is not on; testing that overlap is a comparison
+between candidates the engine named, not a dimension. The drawing carries the
+mapping in `class="etrack"` — where 0 mm and the floor are, and the scale — and
+one `class="ecabg"` group per cabinet so the whole thing moves rather than an
+empty outline. The vertical figure is `Placement.z`: 0 is the floor, where the
+carcass stands on its legs, and above it is a hung unit's underside.
+
+**Clicking a door in the elevation no longer turns it round.** Which edge a leaf
+hangs from is set in the Doors section, where the answer can be read instead of
+guessed at from a picture, and a pair is not a choice at all.
 
 Dragging the join between two faces in the elevation pins **those two only**: the
 SVG carries each pair's span in both mm and pixels (`class="fdiv"`), the browser
@@ -672,6 +752,12 @@ Everything the filler, plinth and hinge-drawing work needed was ruled on
 
 ## Not built yet
 
+0. **Dividers.** `divider_count` / `divider_height` still generate a code-09
+   panel, but nothing positions one and shelves do not divide around it, so the
+   three controls are greyed in the editor and labelled unavailable. Whatever is
+   built has to answer where a divider stands before it answers anything else.
+   Added panels — exposed ends (08) and the rest — come with the same piece of
+   work.
 1. **CAD export.** DXF per panel plus a parameter table SolidWorks can drive a
    configuration from, so the model and the cut list cannot diverge.
 2. **Obstruction cut-outs on backing panels.** Deferred 14 September 2026 for the

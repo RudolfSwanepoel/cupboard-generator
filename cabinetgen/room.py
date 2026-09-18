@@ -641,6 +641,81 @@ def snap_points(job, number: int, wall_id: str, std: Standard = STANDARD):
     return keep
 
 
+def z_snap_points(job, number: int, wall_id: str, std: Standard = STANDARD,
+                  at_x=None, spans: bool = False):
+    """How high a cabinet may come to rest on a wall, and why.
+
+    The vertical twin of `snap_points`, under the same discipline: the engine
+    names every height a drag is allowed to settle on and the browser picks the
+    nearest of them, so a dragged cabinet can never come to rest at a height
+    nothing worked out.
+
+    The figure is `Placement.z` — 0 meaning it stands on the floor, where the
+    carcass is lifted by its legs, and anything above it the underside of a hung
+    unit. Only cabinets that actually overlap this one along the wall count: a
+    unit three metres away is nothing to sit on top of.
+
+    `at_x` asks the question at a position other than where the cabinet stands —
+    a drag that has moved sideways is asking about where it is going, not where
+    it started. `spans` hands back every candidate with the stretch of wall it
+    applies over (`x0`/`x1`, both None for the floor and the ceiling) instead of
+    filtering to one position, which is what a drag needs: the cabinet crosses
+    several of them on the way, and re-asking the engine on every pointer move
+    would be a round trip per pixel. The browser then tests overlap and picks the
+    nearest — a comparison between candidates the engine named, which is the same
+    bargain the plan drag already makes.
+    """
+    rm = job.room
+    if rm is None:
+        return []
+    cab = next((c for c in job.cabinets if c.number == number), None)
+    if cab is None:
+        return []
+    try:
+        _wall(rm, wall_id)
+    except ValueError:
+        return []
+
+    here = placement_for(job, number)
+    g = geometry(cab, std)
+    x0 = at_x if at_x is not None else (here.x if here is not None else 0)
+    x1 = x0 + g.width
+    out = [(0, "on the floor", None, None)]
+    if rm.ceiling:
+        out.append((max(rm.ceiling - g.height, 0), "tight to the ceiling", None, None))
+
+    for other, op, _lay in placed(job):
+        if other.number == number or op.wall != wall_id:
+            continue
+        og = geometry(other, std)
+        ox0, ox1 = op.x, op.x + og.width
+        if not spans and (ox0 >= x1 or ox1 <= x0):
+            continue                       # nothing of it is above or below this
+        oz = carcass_z(other, op, std)
+        out.append((oz + og.height, f"on top of {other.number}", ox0, ox1))
+        under = oz - g.height
+        if under > 0:
+            out.append((under, f"under {other.number}", ox0, ox1))
+
+    # A measured ceiling caps how high the underside may go. The floor is never
+    # capped out of the list: standing on the floor is where a carcass starts,
+    # and a ceiling too low for the cabinet is the ceiling check's to report, not
+    # something to answer by offering nowhere to put it.
+    limit = rm.ceiling - g.height if rm.ceiling else None
+    seen, keep = set(), []
+    for z, why, a, b in sorted(out, key=lambda r: (r[0], r[1])):
+        z = int(z)
+        key = (z, a, b) if spans else z
+        if z < 0 or key in seen or (limit is not None and z > limit and z != 0):
+            continue
+        seen.add(key)
+        row = {"z": z, "why": why}
+        if spans:
+            row["x0"], row["x1"] = a, b
+        keep.append(row)
+    return keep
+
+
 def _arc(cx, cy, r, a0, a1, steps=10):
     return [(cx + r * math.cos(a0 + (a1 - a0) * i / steps),
              cy + r * math.sin(a0 + (a1 - a0) * i / steps))

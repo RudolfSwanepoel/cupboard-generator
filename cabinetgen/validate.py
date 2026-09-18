@@ -9,8 +9,8 @@ from typing import List
 
 from .engine import front_stack_check, generate_cabinet
 from .export_plaza import effective_price
-from .model import (Cabinet, Job, Panel, material_board, material_thickness,
-                    tape_for)
+from .model import (TAPE_PREFIX, Cabinet, Job, Panel, grain_of, material_board,
+                    material_thickness, tape_for)
 from .room import (above_ceiling, blocked_openings, cab_corner_outline,
                    clashes as room_clashes, closure_error, corner_offset,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
@@ -53,8 +53,8 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     out += _front_stacks(job.cabinets, std)
     out += _shelf_clears_back(job.cabinets, panels, std)
     out += _labels_unique(panels)
-    out += _edge_materials(panels)
-    out += _grain_on_decor(panels)
+    out += _edge_materials(job, panels)
+    out += _grain_on_boards(job, panels)
     out += _zero_quantities(panels)
     out += _drawer_boxes(job.cabinets)
     out += _project_boards(job)
@@ -87,7 +87,7 @@ def _cabinet_structure(cabinets, std):
     """D1 — cabinets 45 and 49 went to Plazaboard with no side panels."""
     out = []
     for c in cabinets:
-        if c.doors and c.width <= 0:
+        if c.door_count and c.width <= 0:
             out.append(Issue(CRITICAL, str(c.number), "door on a cabinet with no width"))
         if c.drawer_list:
             runner = std.pick_runner(c.depth)
@@ -160,11 +160,23 @@ def _labels_unique(panels):
             for lab, v in sizes.items() if len(v) > 1]
 
 
-def _edge_materials(panels):
-    """D6 / W10 — 'SOLID' is a board, not a tape; '2mm WOOD' and '2mm PVC Wood' are the same thing."""
+def _edge_materials(job, panels):
+    """D6 / W10 — 'SOLID' is a board, not a tape; '2mm WOOD' and '2mm PVC Wood'
+    are the same thing.
+
+    The lookup is the settled list plus everything this job's own boards can
+    generate, one token times three thicknesses. A board added to the library
+    after this file was written is a real tape and must not be reported as a
+    typo; a name that matches neither still is.
+    """
+    allowed = set(ALLOWED_EDGE)
+    for key in (job.materials or {}):
+        allowed.update(tape_for(job.materials, key, k) for k in TAPE_PREFIX)
+    allowed.discard("")
+    allowed.add("")
     out = []
     for p in panels:
-        if p.edge_material not in ALLOWED_EDGE:
+        if p.edge_material not in allowed:
             out.append(Issue(WARNING, p.label,
                              f"edge material {p.edge_material!r} is not in the lookup", "W10"))
         if (p.edge_l or p.edge_w) and not p.edge_material:
@@ -172,10 +184,18 @@ def _edge_materials(panels):
     return out
 
 
-def _grain_on_decor(panels):
-    """W8 / D9 — grain was zero on 60 woodgrain panels; Plazaboard caught it, not us."""
-    return [Issue(CRITICAL, p.label, "décor panel with grain not set", "W8")
-            for p in panels if p.material == "DECOR" and not p.grain]
+def _grain_on_boards(job, panels):
+    """W8 / D9 — grain was zero on 60 woodgrain panels; Plazaboard caught it, not us.
+
+    Asked of the board's own record rather than of one board id, so it holds for
+    any grained board in the library and not only the one that was in it the day
+    this was written.
+    """
+    return [Issue(CRITICAL, p.label,
+                  f"{material_board(job.materials, p.material)} is a grained board "
+                  f"and this panel has grain not set", "W8")
+            for p in panels
+            if grain_of(job.materials, p.material) and not p.grain]
 
 
 def _zero_quantities(panels):
@@ -276,6 +296,14 @@ def _boards_and_tapes(job: Job):
                   (c.exterior_board, "exterior board")]
         if c.needs_back_board:
             chosen.append((c.back_board, "back board"))
+        # The drawer box and face, and any leaf cut from a board of its own, are
+        # selections in their own right now, so they are checked like the rest.
+        if c.drawer_list:
+            chosen.append((c.drawer_carcass, "drawer box board"))
+            chosen.append((c.drawer_face, "drawer face board"))
+        for i in range(c.door_count):
+            if c.door_boards[i:i + 1] and c.door_boards[i]:
+                chosen.append((c.door_boards[i], f"door leaf {i + 1} board"))
         for board, what in chosen:
             if not board:
                 out.append(Issue(CRITICAL, str(c.number),
@@ -296,10 +324,16 @@ def _boards_and_tapes(job: Job):
         if any(r.edge == "white" for r in c.support_list) or c.drawer_list:
             wants.append(("drawer_box_edge", c.drawer_box_edge, c.carcass_board, "pvc",
                           "its drawer boxes and white-edged supports"))
-        if c.doors or c.drawer_list or c.exposed_sides:
-            wants.append(("door_edge", c.door_edge, c.exterior_board,
-                          c.exterior_tape,
-                          "its doors, drawer faces and exposed panels"))
+        if c.door_count or c.exposed_sides:
+            wants.append(("door_edge", c.door_edge,
+                          c.door_edge_board or c.exterior_board,
+                          c.door_edge_kind or c.exterior_tape,
+                          "its doors and exposed panels"))
+        if c.drawer_list:
+            wants.append(("drawer_face_edge", c.door_edge,
+                          c.drawer_edge_board or c.door_edge_board or c.exterior_board,
+                          c.drawer_edge_kind or c.door_edge_kind or c.exterior_tape,
+                          "its drawer faces"))
         for field, override, board, thickness, bands in wants:
             if override is not None:
                 continue                   # this cabinet was told what to use
@@ -314,15 +348,8 @@ def _boards_and_tapes(job: Job):
                              f"exterior tape {c.exterior_tape!r} is neither 1mm nor "
                              f"2mm — 2mm is being used"))
 
-        # A drawer box is cut from the white board but banded in the carcass
-        # board's colour. Whether it should follow the carcass board has not been
-        # ruled, so it is reported rather than decided.
-        if c.drawer_list and c.carcass_board != "MEL":
-            out.append(Issue(WARNING, str(c.number),
-                             f"carcass board is {c.carcass_board} but the drawer box "
-                             f"sides and fronts are still cut from MEL, banded in the "
-                             f"{c.carcass_board} tape — confirm which board the box "
-                             f"should be"))
+        # The drawer box is a chosen board now, not a hardcoded MEL, so there is
+        # nothing left to query — the box and its edging agree by construction.
     return out
 
 
