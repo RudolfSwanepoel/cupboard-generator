@@ -278,27 +278,10 @@ def rename_board_in_job(job, old_id: str, new_id: str) -> list:
         job.materials = {(new_id if k == old_id else k): v
                          for k, v in job.materials.items()}
     job.boards = [new_id if b == old_id else b for b in job.board_ids]
-    simple = ("carcass_board", "exterior_board", "back_board",
-              "drawer_carcass_board", "drawer_face_board",
-              "door_edge_board", "drawer_edge_board")
+    # Every field a cabinet names a board in comes from `Cabinet.board_refs`,
+    # so this and `board_swap` cannot remember different lists.
     for cab in job.cabinets:
-        hit = []
-        for f in simple:
-            if getattr(cab, f, None) == old_id:
-                setattr(cab, f, new_id)
-                hit.append(f)
-        if any(b == old_id for b in cab.door_boards):
-            cab.door_boards = [new_id if b == old_id else b for b in cab.door_boards]
-            hit.append("door_boards")
-        for d in cab.drawers:
-            for f in ("box_board", "face_board"):
-                if getattr(d, f, None) == old_id:
-                    setattr(d, f, new_id)
-                    hit.append("drawer " + f.replace("_", " ") + "s")
-        for p in cab.bespoke:
-            if p.material == old_id:
-                p.material = new_id
-                hit.append("bespoke panels")
+        hit = cab.map_board_refs(lambda b: new_id if b == old_id else b)
         if hit:
             moved.append({"cabinet": cab.number, "fields": sorted(set(hit))})
     for p in job.loose:
@@ -442,16 +425,19 @@ def board_select(payload):
         job.materials[board_id] = B.to_material(board)
         job.boards = [b for b in job.board_ids if b != board_id] + [board_id]
     else:
-        using = sorted({c.number for c in job.cabinets
-                        if board_id in (c.carcass_board, c.exterior_board)
-                        or any(board_id in (d.box_board, d.face_board)
-                               for d in c.drawers)})
+        # Every field, not just the carcass and exterior: a board used only as a
+        # door leaf, a back, a drawer face or an edging colour was being taken
+        # out of the project with the cabinet still pointing at it.
+        using = []
+        for c in job.cabinets:
+            where = sorted({label for key, label in c.board_refs() if key == board_id})
+            if where:
+                using.append((c.number, where))
         if using:
+            named = "; ".join(f"cabinet {n} ({', '.join(w)})" for n, w in using)
             return {"ok": False,
-                    "error": f"cabinet{'s' if len(using) > 1 else ''} "
-                             f"{', '.join(map(str, using))} "
-                             f"{'are' if len(using) > 1 else 'is'} cut from {board_id} "
-                             f"— change those first"}
+                    "error": f"{board_id} is still named by {named} — change those "
+                             f"first, or swap the board instead"}
         job.boards = [b for b in job.board_ids if b != board_id]
         job.materials = {k: v for k, v in (job.materials or {}).items() if k != board_id}
     return {"ok": True, "job": job_to_dict(job)}
@@ -481,14 +467,18 @@ def board_swap(payload):
         job.materials[new_id] = B.to_material(board)
         job.boards = [b for b in job.board_ids if b != new_id] + [new_id]
 
+    # Off `board_refs` too, so a swap moves a board named only as a door leaf, a
+    # back, a drawer box or face, or an edging colour — all of which it used to
+    # leave behind, pointing at a board the project was about to stop carrying.
+    # `hand=False`: a bespoke panel's material was typed out panel by panel, and
+    # a swap does not rewrite it on the way past. On the October job that is
+    # eight panels and R848 — see `Cabinet.map_board_refs`.
     touched = []
     for cab in job.cabinets:
-        fields_hit = [f for f in ("carcass_board", "exterior_board")
-                      if getattr(cab, f) == old_id]
+        fields_hit = cab.map_board_refs(lambda b: new_id if b == old_id else b,
+                                        hand=False)
         if fields_hit:
             touched.append({"cabinet": cab.number, "fields": fields_hit})
-        for f in fields_hit:
-            setattr(cab, f, new_id)
 
     after_panels = generate_job(job)
     after = _totals(job, after_panels)

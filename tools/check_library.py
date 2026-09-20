@@ -69,9 +69,34 @@ def costed(job):
                                                             job.std)))["total_incl_vat"]
 
 
+def fixture_library():
+    """The library these checks run against: built here, never read off disk.
+
+    It used to be `B.load()`, so every check below line 184 depended on the live
+    `boards.json` still having a board called `MEL`. Renaming that board to
+    `WHITEMEL` — an ordinary thing to do in the Boards tab, and exactly what the
+    id-is-editable work was for — made `B.find(lib, "MEL")` return None, and the
+    file died there with an AttributeError. Roughly thirty checks after it had
+    not run since. The workshop's library is the workshop's to edit; a check that
+    breaks when it is edited is a check that will be switched off.
+
+    The three ids are the ones the October fixture and `model.MATERIALS` use, so
+    the costing checks still line up with the real benchmark.
+    """
+    return [
+        B.Board(id="MEL", name="SUPER WHITE MELAMINE CHIP 9X6X16MM", tape="WHITE",
+                thickness=16, grain="plain", price=575.0),
+        B.Board(id="BROOKHILL", name="BROOKHILL FUSION CHIP", tape="WOOD",
+                thickness=16, grain="grain", price=999.0),
+        B.Board(id="BACK", name="IMPORTED WHITE DECOR 9X6X3MM", tape="WHITE",
+                thickness=3, grain="plain", price=310.0),
+    ]
+
+
 def main() -> int:                                                  # noqa: C901
     print("the library is a file in the repo, shared by both machines")
-    lib = B.load()
+    real = B.load()
+    lib = fixture_library()
     check("boards.json sits beside the code", os.path.basename(B.LIBRARY), "boards.json")
     check("and it is in the repo root, not inside a job",
           os.path.dirname(B.LIBRARY) == os.path.abspath(ROOT), True)
@@ -79,18 +104,22 @@ def main() -> int:                                                  # noqa: C901
     # price moved, a new colour added. Pinning the rows here would fail the
     # moment a real board is added, so what is pinned is the shape every row has
     # to have: a unique id, a name to order by, and a thickness and grain the
-    # rest of the code knows how to read.
+    # rest of the code knows how to read. This is the ONLY block that reads the
+    # real file, and it asks nothing about which boards are in it.
     check("every board has an id, and no two share one",
-          len({b.id for b in lib}) == len(lib) and all(b.id for b in lib), True)
-    check("every board has a name to order by", all(b.name for b in lib), True)
-    # Whichever board in the library is the grained one. Its id is the workshop's
-    # to change — these checks are about the rule, not about what it is called.
-    grained = next((b for b in lib if b.grain == "grain"), None)
-    check("and one of them is a grained board to check the rules against",
-          bool(grained), True)
+          len({b.id for b in real}) == len(real) and all(b.id for b in real), True)
+    check("every board has a name to order by", all(b.name for b in real), True)
     check("and a thickness and grain the engine can read",
           all(b.grain in B.GRAINS and isinstance(b.thickness, int) and b.thickness > 0
-              for b in lib), True)
+              for b in real), True)
+    check("and an edging record the rest of the code can read",
+          all(isinstance(b.has_edging, bool)
+              and set(b.edging_kinds) <= set(B.TAPE_KINDS)
+              and b.colour == B.clean_colour(b.colour) for b in real), True)
+    # Everything from here on runs against the fixture above.
+    grained = next((b for b in lib if b.grain == "grain"), None)
+    check("the fixture has a grained board to check the rules against",
+          bool(grained), True)
 
     print("\ntape names are generated from one token per board")
     # A board of its own, not one out of the library: this pins the rule, and the
@@ -332,9 +361,12 @@ def main() -> int:                                                  # noqa: C901
     print("\nswapping a project board shows the change before writing it")
     d = job_to_dict(JOB)
     pre = board_swap({"job": d, "from": "MEL", "to": "BROOKHILL"})
+    # The field is named in words now, not as an attribute: the swap, the rename
+    # and the refusal to un-select all read `Cabinet.board_refs`, whose labels
+    # are what a message says out loud ("door leaf 2 board").
     check("every cabinet cut from it is named, with which field",
           (len(pre["cabinets"]), pre["cabinets"][0]),
-          (19, {"cabinet": 1, "fields": ["carcass_board"]}))
+          (19, {"cabinet": 1, "fields": ["carcass board"]}))
     # 102, not the 101 it was: the drawer box sides, fronts and housed base used
     # to be hardcoded MEL in the engine whatever the cabinet was cut from, so a
     # carcass swap left them behind. They follow the drawer carcass board now.

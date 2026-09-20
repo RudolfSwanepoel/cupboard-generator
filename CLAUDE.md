@@ -24,7 +24,10 @@ python tools/check_drag.py
 python tools/check_elevation.py
 python tools/check_fronts.py
 python tools/check_boards.py
+python tools/check_edging.py
 python tools/check_library.py
+python tools/check_single_source.py
+python tools/snapshot.py --compare baseline.json
 ```
 
 Regenerates the October 2025 wardrobe from cabinet definitions and diffs it
@@ -66,6 +69,9 @@ tools/check_fillers.py     gap detection, taper, scribe, filler panels
 tools/check_plinth.py      runs, butt joints, long-run splits, plinth panels
 tools/check_drag.py        overlaps, snap targets, door swings, pull-outs
 tools/check_elevation.py   per-wall elevations: chains close, plinth heights, hinges
+tools/check_edging.py      Has Edging, the kinds a board offers, its colour
+tools/check_single_source.py  the one list of which cabinet fields hold a board
+tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
 docs/ROOM-LAYOUT-SPEC.md  the room / plan / 3D build spec and its phasing
 ```
@@ -219,6 +225,95 @@ validator could do was ask about it. They are a chosen board now, defaulting to
 the carcass, so the box and its edging agree by construction and the warning is
 gone. A board swap moves them with the carcass, which is why
 `check_library.py`'s swap figures are 102 panels and 3 MEL boards, not 101 and 4.
+
+### Every board attribute is stated on the Boards record
+
+**Ruled 20 September 2026.** A board says whether it has edging at all, which of
+PVC / 1mm / 2mm it offers, and what colour it is, and nothing downstream states
+one. `Board.has_edging`, `Board.edging_kinds` and `Board.colour` are real fields;
+`Board.offered` is the kinds in force, and `tape_name` / `model.tape_for` return
+`""` for a kind the board does not offer rather than generating a name it will
+never sell.
+
+**The legacy rule is what keeps the benchmark still.** A record carrying neither
+key reads as edged with all three — which is what every job quoted before the
+tickbox was quoted with — so old jobs and the frozen October fixture do not move.
+The same holds for `Job.materials` copies. `tools/check_edging.py` pins it.
+
+**Unticking keeps data**, the same discipline as "Has doors" and "Has drawers":
+Has Edging off keeps the kinds and the edging name in the file and merely stops
+anything reading them.
+
+**A needed edging the board does not offer is a CRITICAL**, tagged `EDGING`,
+naming the cabinet, the board, the kind and what to tick. It blocks the export.
+This bites in one place by design: carcass fronts are PVC in the **exterior**
+board's colour, so an exterior board ticked 2mm-only leaves them with no offered
+edging. That is the rule working, not a bug — the per-cabinet `carcass_edge`
+override is the escape hatch. A missing edging *name* stays a WARNING with its
+wording unchanged (`check_boards.py` pins the phrase "no name to build edging
+from"); the two are different faults. A cabinet named by an `EDGING` critical
+does not also collect the per-panel "edges specified but no edge material"
+critical — one problem, one message.
+
+**Colour is picked on the Boards tab and nowhere else.** `model.NO_COLOUR`
+(`#d9d6cf`) is what a board nobody has coloured draws as, and the legend says
+"no colour set" rather than guessing a finish. An unset colour is never a
+warning.
+
+**A 3 mm sheet is not something to build from.** `model.is_thin` uses the
+threshold `export_plaza.cut_rate` already sorts by, so the dropdowns and the
+costing cannot disagree about what a thin board is. The carcass, exterior,
+door-leaf, drawer-face and drawer-box dropdowns exclude thin boards; the backing
+dropdown lists only thin ones. A stored value that breaks the rule is kept,
+flagged in the editor, and named by `validate._thin_boards`.
+
+**No hardcoded edging anywhere, including supports** (ruled 20 September 2026).
+A support row names a board — any board the project has selected — and one of
+the kinds that board offers: `Support.board` and `Support.kind`. Both blank means
+the row predates the control, and it is then read from its old `edge` and edged
+exactly as that job was quoted: front-edged takes the carcass edging, and
+white-edged resolves through `model.white_edge_board` — the project's board whose
+PVC token is WHITE — rather than through a constant. `model.WHITE_EDGE` survives
+only as the fallback when the project has no such board. `Test.json` cabinet 7 is
+the case that proves it: a GREY carcass with three white-edged rows, which still
+come out `PVC WHITE`. `board` and `kind` are written to the job file only when a
+row actually names them, so a file saved before the control round-trips byte for
+byte.
+
+### One source for "which fields hold a board"
+
+**Ruled 20 September 2026.** `Cabinet._board_slots` is the single list of every
+place a cabinet names a board, and `Cabinet.board_refs()` / `map_board_refs()`
+are what everything reads. Four hand-written lists used to answer this question
+and they disagreed: a swap moved only the carcass and exterior, un-selecting
+checked only those plus the drawer boards, `boards.scan_jobs` missed the back,
+the door leaves and the edging boards, and the validator had its own list again.
+So a board could be swapped or taken out of a project with a cabinet still
+pointing at it.
+
+Each slot carries a **label a message says out loud** — "door leaf 2 board",
+"drawer 1 face board" — so a refusal names the thing to go and change.
+
+A slot is marked **hand-specified** when it is a bespoke panel's material, and
+rename and swap differ on it deliberately: a *rename* says "this board is called
+something else now", so every reference follows it, bespoke included, or it
+points at an id the library no longer has; a *swap* says "cut this from a
+different board", and a bespoke panel's material was typed out panel by panel.
+On the October job that difference is eight panels and R848 of Brookhill.
+
+`boards.cabinet_board_ids` is the one deliberate repeat — it reads raw JSON,
+because a job file that will not parse has to be reported by name rather than
+skipped. `tools/check_single_source.py` holds the two together **by reflection**:
+a `_board` field added to `Cabinet` and not to `_board_slots` fails that check
+rather than becoming the fifth list that disagrees.
+
+`check_library.py` builds its own in-memory library fixture instead of reading
+the live `boards.json`. It used to read it, so renaming `MEL` to `WHITEMEL` — an
+ordinary thing to do in the Boards tab — made `B.find(lib, "MEL")` return None
+and the file died at line 184, with about thirty checks after it silently not
+running. `boards.load` and `boards.save` resolve `LIBRARY` at call time rather
+than binding it as a default argument, so a check can point at a fixture without
+writing the workshop's real library.
 
 ### Tapes are generated, not mapped
 

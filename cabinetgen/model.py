@@ -380,6 +380,13 @@ class Cabinet:
     # decor or microwave cupboard with a Brookhill carcass is just a cabinet with
     # a different carcass board. The exterior board is what shows: doors, drawer
     # faces and exposed end panels. Each nests and prices as its own material.
+    #
+    # LEGACY DEFAULTS (audited 20 September 2026, kept deliberately). These three
+    # ids are read by the frozen October fixture and by every job file written
+    # before the boards were chosen, so they stay. Nothing that CREATES a cabinet
+    # now relies on them — the editor's `blankCabinet` sends blanks and the user
+    # picks in Structure — and no new code should: ask the job what it carries
+    # (`Job.board_ids`, `Job.materials`), never assume these names exist.
     carcass_board: str = "MEL"
     exterior_board: str = "BROOKHILL"
     # The thin sheet the back (06) is cut from, and the grooved drawer base (17)
@@ -469,6 +476,111 @@ class Cabinet:
         """The board leaf `i` is cut from — its own, or the cabinet's exterior."""
         chosen = self.door_boards[i] if 0 <= i < len(self.door_boards) else ""
         return chosen or self.exterior_board
+
+    # ---- which fields hold a board -----------------------------------------
+    #
+    # ONE list, and everything that renames, swaps, un-selects or audits a board
+    # reads it. There used to be four hand-written lists and they disagreed:
+    # a swap moved only the carcass and exterior, un-selecting checked only
+    # those plus the drawer boards, and the library scan missed the back, the
+    # door leaves and the edging boards — so a board could be swapped or taken
+    # out of a project while a cabinet still pointed at it, and the cut list
+    # quietly named a board the project no longer had.
+    #
+    # A board field added to `Cabinet` and not added here is what
+    # `tools/check_single_source.py` fails on.
+
+    def _board_slots(self):
+        """Every place this cabinet names a board, as `(label, get, set, hand)`.
+
+        The label is what a message says out loud — "door leaf 2 board",
+        "drawer 1 face board" — so a refusal can name the thing to go and change.
+
+        `hand` marks a HAND-SPECIFIED panel: a bespoke panel names its own
+        material, panel by panel, and `generate_job` puts it on the cut list
+        exactly as the job defines it. It counts as naming the board — it has to,
+        or the board could be deleted from the library or un-selected from the
+        project out from under it — but a caller that is changing what things are
+        cut from can leave it alone. See `map_board_refs`.
+        """
+        slots = []
+
+        def simple(attr, label):
+            slots.append((label,
+                          lambda a=attr: getattr(self, a, "") or "",
+                          lambda v, a=attr: setattr(self, a, v), False))
+
+        simple("carcass_board", "carcass board")
+        simple("exterior_board", "exterior board")
+        simple("back_board", "backing board")
+        simple("drawer_carcass_board", "drawer carcass board")
+        simple("drawer_face_board", "drawer face board")
+        simple("door_edge_board", "door edging board")
+        simple("drawer_edge_board", "drawer edging board")
+        for i in range(len(self.door_boards or [])):
+            slots.append((f"door leaf {i + 1} board",
+                          lambda i=i: self.door_boards[i] or "",
+                          lambda v, i=i: self.door_boards.__setitem__(i, v), False))
+        for i, d in enumerate(self.drawers or []):
+            for attr, what in (("box_board", "box"), ("face_board", "face")):
+                slots.append((f"drawer {i + 1} {what} board",
+                              lambda d=d, a=attr: getattr(d, a, "") or "",
+                              lambda v, d=d, a=attr: setattr(d, a, v), False))
+        for i, r in enumerate(self.support_rows or []):
+            slots.append((f"support row {i + 1} edging board",
+                          lambda r=r: r.board or "",
+                          lambda v, r=r: setattr(r, "board", v), False))
+        for p in (self.bespoke or []):
+            slots.append((f"bespoke panel {p.label}",
+                          lambda p=p: p.material or "",
+                          lambda v, p=p: setattr(p, "material", v), True))
+        return slots
+
+    def board_refs(self, hand=True):
+        """Every board id this cabinet names, as `(board_id, label)`.
+
+        A blank slot is "follow Structure", not a name, so it is not reported.
+        `hand=False` leaves out hand-specified bespoke panels.
+        """
+        return [(get(), label) for label, get, _, h in self._board_slots()
+                if get() and (hand or not h)]
+
+    def board_ids_used(self):
+        """Just the ids, deduped, in the order they are named."""
+        out = []
+        for key, _ in self.board_refs():
+            if key not in out:
+                out.append(key)
+        return out
+
+    def map_board_refs(self, fn, hand=True) -> list:
+        """Rewrite every board this cabinet names through `fn(board_id)`.
+
+        Returns the labels that actually changed. Rename and swap both go
+        through here, so neither can miss a field the other remembers.
+
+        `hand` is what they differ on, and deliberately:
+
+        * a RENAME says "this board is called something else now", so every
+          reference has to follow it, hand-specified panels included — leaving
+          one behind would point it at an id the library no longer has;
+        * a SWAP says "cut this from a different board", and a bespoke panel's
+          material was typed out panel by panel for a reason. On the October job
+          that is eight panels and R848 of Brookhill, so it is not something to
+          change on the way past.
+        """
+        hit = []
+        for label, get, put, h in self._board_slots():
+            if h and not hand:
+                continue
+            old = get()
+            if not old:
+                continue
+            new = fn(old)
+            if new and new != old:
+                put(new)
+                hit.append(label)
+        return hit
 
     @property
     def drawer_carcass(self) -> str:

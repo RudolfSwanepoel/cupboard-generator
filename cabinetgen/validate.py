@@ -319,6 +319,16 @@ def _boards_and_tapes(job: Job):
         for i in range(c.door_count):
             if c.door_boards[i:i + 1] and c.door_boards[i]:
                 chosen.append((c.door_boards[i], f"door leaf {i + 1} board"))
+        # Everything else the cabinet names — the two edging boards, a support
+        # row's board, a bespoke panel's material — off the one list, so a board
+        # the project does not carry cannot reach the cut list through a field
+        # this check had not heard of. Only ids not already named above: the
+        # blank ones are "follow Structure", which is not a missing choice.
+        named = {b for b, _ in chosen}
+        for board, label in c.board_refs():
+            if board not in named:
+                chosen.append((board, label))
+                named.add(board)
         for board, what in chosen:
             if not board:
                 out.append(Issue(CRITICAL, str(c.number),

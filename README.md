@@ -29,13 +29,31 @@ python tools/check_fillers.py
 python tools/check_plinth.py
 python tools/check_drag.py
 python tools/check_elevation.py
+python tools/check_fronts.py
+python tools/check_boards.py
+python tools/check_edging.py
+python tools/check_library.py
+python tools/check_single_source.py
 ```
 
 The first rebuilds the October 2025 wardrobe from cabinet definitions and
 compares it with the cut list actually sent to Plazaboard. The second checks
 every worked example in a docstring still evaluates to what it claims. The rest
-pin the room geometry, the filler arithmetic, the plinth, and the placement
-checks behind dragging.
+pin the room geometry, the filler arithmetic, the plinth, the placement checks
+behind dragging, the fronts, the board library, the edging a board offers, and
+the one list of which cabinet fields hold a board.
+
+And the wider net, which catches a change that leaves the benchmark numbers
+alone and moves something else:
+
+```
+python tools/snapshot.py --out baseline.json      # once, on a known-good tree
+python tools/snapshot.py --compare baseline.json  # after a change
+```
+
+It dumps every panel, every validation issue, the cost and a hash of each
+drawing for the three fixed jobs, and exits non-zero on any difference
+`--allow` does not name.
 
 Requires `openpyxl` for the comparison only; the engine itself has no
 dependencies, and neither does the UI.

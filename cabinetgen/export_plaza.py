@@ -27,6 +27,11 @@ HEADER = ["Component", "Material", "Length", "Width", "qty", "Invoice Number", "
 # after this was written gets the right figure rather than a house average.
 # BROOKHILL is the October job's DECOR under its current id; DECOR stays as an
 # alias because a job quoted before the rename still names it (model.BOARD_ALIASES).
+# The three original ids keep their MEASURED figures so the October benchmark
+# does not move; every other board falls through to YIELD_BY_KIND on its grain
+# and thickness. Audited 20 September 2026: a board added to the library with an
+# id nobody has pinned here still gets a real yield, a real cut rate and a real
+# price — pinned in tools/check_single_source.py. Do not "tidy" DECOR out.
 YIELD = {"MEL": 0.89, "BROOKHILL": 0.78, "DECOR": 0.78, "BACK": 0.80}
 YIELD_BY_KIND = {"grain": 0.78, "thin": 0.80, "plain": 0.89}
 

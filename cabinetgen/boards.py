@@ -220,6 +220,45 @@ class Usage:
     unreadable: List[Dict[str, str]] = field(default_factory=list)
 
 
+# Every field a cabinet names a board in, read straight off the JSON.
+#
+# This scan cannot build a `Cabinet` — a job file that will not parse has to be
+# reported by name, not skipped, so it reads the raw dict. It is therefore the
+# one place that repeats `Cabinet._board_slots`, and `tools/check_single_source.py`
+# holds the two together: a board field added to the dataclass and not here
+# would let a board be deleted from the library out from under a saved job.
+CABINET_BOARD_FIELDS = ("carcass_board", "exterior_board", "back_board",
+                        "drawer_carcass_board", "drawer_face_board",
+                        "door_edge_board", "drawer_edge_board",
+                        "decor")          # the pre-library name for the exterior
+DRAWER_BOARD_FIELDS = ("box_board", "face_board")
+
+
+def cabinet_board_ids(cab: dict) -> set:
+    """Every board id one cabinet dict names, blanks dropped."""
+    keys = set()
+    if not isinstance(cab, dict):
+        return keys
+    for f in CABINET_BOARD_FIELDS:
+        if cab.get(f):
+            keys.add(cab[f])
+    for b in cab.get("door_boards") or []:
+        if b:
+            keys.add(b)
+    for d in cab.get("drawers") or []:
+        if isinstance(d, dict):
+            for f in DRAWER_BOARD_FIELDS:
+                if d.get(f):
+                    keys.add(d[f])
+    for r in cab.get("support_rows") or []:
+        if isinstance(r, dict) and r.get("board"):
+            keys.add(r["board"])
+    for p in cab.get("bespoke") or []:
+        if isinstance(p, dict) and p.get("material"):
+            keys.add(p["material"])
+    return keys
+
+
 def scan_jobs(jobs_dir: str) -> Usage:
     out = Usage()
     if not os.path.isdir(jobs_dir):
@@ -236,13 +275,7 @@ def scan_jobs(jobs_dir: str) -> Usage:
             keys = set(data.get("materials") or {})
             keys.update(data.get("boards") or [])
             for cab in data.get("cabinets") or []:
-                for f in ("carcass_board", "exterior_board", "decor"):
-                    if cab.get(f):
-                        keys.add(cab[f])
-                for d in cab.get("drawers") or []:
-                    for f in ("box_board", "face_board"):
-                        if isinstance(d, dict) and d.get(f):
-                            keys.add(d[f])
+                keys.update(cabinet_board_ids(cab))
         except Exception as exc:                                  # noqa: BLE001
             out.unreadable.append({"job": name, "error": f"{type(exc).__name__}: {exc}"})
             continue
