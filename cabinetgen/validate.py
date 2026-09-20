@@ -9,8 +9,8 @@ from typing import List
 
 from .engine import front_stack_check, generate_cabinet
 from .export_plaza import effective_price
-from .model import (TAPE_PREFIX, Cabinet, Job, Panel, grain_of, is_thin,
-                    material_board, material_offers, material_thickness,
+from .model import (TAPE_PREFIX, WHITE_TOKEN, Cabinet, Job, Panel, grain_of,
+                    is_thin, material_board, material_offers, material_thickness,
                     material_token, tape_for)
 from .room import (above_ceiling, blocked_openings, cab_corner_outline,
                    clashes as room_clashes, closure_error, corner_offset,
@@ -71,6 +71,7 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     out += _thin_boards(job)
     out += _board_prices(job, panels)
     out += _supports(job.cabinets)
+    out += _support_edging(job)
     out += _room(job, std)
     out += _gaps(job, std)
     out += _plinth(job, std)
@@ -458,6 +459,45 @@ def _carcass_thickness(job: Job, std):
                                  f"groove, an exposed end and a plinth butt are all "
                                  f"{std.board_t} mm arithmetic. Thickness-driven "
                                  f"geometry is not built; check this cabinet by hand"))
+    return out
+
+
+def _support_edging(job: Job):
+    """A support row that asks for an edging the Boards tab cannot supply.
+
+    Nothing states an edging but the Boards record (20 September 2026), so a row
+    whose board no longer offers its kind — and a row written before the control
+    that was asking for white when the project carries no white board — has no
+    name to be given. It is named here rather than going out unedged in silence
+    or carrying a tape no board in the project sells.
+    """
+    mats = job.materials
+    out = []
+    for c in job.cabinets:
+        if c.template == "none":
+            continue
+        for i, row in enumerate(c.support_list, start=1):
+            kind = c.support_row_kind(row)
+            if not kind or c.support_row_tape(mats, row):
+                continue                   # not edged, or edged fine
+            if row.board or row.kind:
+                board = c.support_row_board(row) or c.carcass_board
+                offered = [TAPE_PREFIX[k] for k in material_offers(mats, board)]
+                has = (f"only offers {', '.join(offered)}" if offered
+                       else "has no edging (Has Edging is off)")
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"support row {i} asks for {TAPE_PREFIX[kind]} edging "
+                                 f"in {material_board(mats, board)!r}, which {has}. "
+                                 f"Tick {TAPE_PREFIX[kind]} on that board in the "
+                                 f"Boards tab, or choose another board for the row",
+                                 EDGING_REF))
+            else:
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"support row {i} is white-edged, but no board in "
+                                 f"this project offers PVC under the name "
+                                 f"{WHITE_TOKEN!r}. Give the row a board and an "
+                                 f"edging of its own, or tick PVC on the white "
+                                 f"board in the Boards tab", EDGING_REF))
     return out
 
 

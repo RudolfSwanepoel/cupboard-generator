@@ -286,14 +286,13 @@ class Support:
 
 SUPPORT_EDGES = ("none", "front", "white")
 
-# What a legacy "white-edged" support row means, and nothing else.
+# What a legacy "white-edged" support row was asking for.
 #
-# Edging is no longer stated anywhere but the Boards record (20 September 2026):
-# a support row names a board and one of the kinds that board offers. This
-# constant is not read for any row that does — it is how a row written before the
-# control is resolved, so a job quoted with it is edged exactly as it was quoted.
-# `white_edge_board` looks for a real board to mean it first; this is the answer
-# when the project has none, which the validator then names.
+# Edging is no longer stated anywhere but the Boards record (20 September 2026),
+# so this is NOT an answer any more — nothing returns it as an edging name. It
+# is kept as the description of what such a row meant, and `white_edge_board`
+# finds the project board that actually means it. Every job written so far
+# carries the white melamine that does, so none of them move.
 WHITE_EDGE = "PVC WHITE"
 WHITE_TOKEN = "WHITE"      # the token a legacy 'white' row was always asking for
 
@@ -722,8 +721,13 @@ class Cabinet:
         if row.edge == "front":
             return self.carcass_tape(materials)
         if row.edge == "white":
+            # Through the project's white BOARD, never through the constant: no
+            # edging is stated anywhere but the Boards record (20 Sept 2026).
+            # With no such board there is no name to give, and the validator
+            # names the row rather than putting a tape on the order that no
+            # board in the project sells.
             board = white_edge_board(materials)
-            return tape_for(materials, board, "pvc") if board else WHITE_EDGE
+            return tape_for(materials, board, "pvc") if board else ""
         return ""
 
     def support_tape(self, materials: dict, edge: str) -> str:

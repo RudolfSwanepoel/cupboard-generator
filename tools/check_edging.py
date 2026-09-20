@@ -52,6 +52,7 @@ from cabinetgen.model import (MATERIALS, Cabinet, Drawer, Job,                # 
 from cabinetgen.standard import STANDARD as S                                 # noqa: E402
 from cabinetgen.validate import validate                                      # noqa: E402
 
+NL = chr(10)
 FAILS = []
 
 
@@ -239,10 +240,18 @@ def main():
     check("and it came from the white BOARD",
           white_edge_board(greyjob), "MEL")
 
-    print("\nwith no white board at all it falls back, and nothing is invented")
+    print(NL + "with no white board there is no name to give, and none is invented")
     nowhite = {"GREY": dict(greyjob["GREY"])}
-    check("the constant is the last resort",
-          grey_cab.support_row_tape(nowhite, legacy_white), WHITE_EDGE)
+    check("no white board means no edging name",
+          grey_cab.support_row_tape(nowhite, legacy_white), "")
+    nj = Job(name="nw", boards=list(nowhite),
+             cabinets=[box(carcass_board="GREY", exterior_board="GREY",
+                           support_rows=[legacy_white])], materials=nowhite)
+    named = [i for i in validate(nj, generate_job(nj)) if "support row" in i.message]
+    check("the row is named instead of going out unedged in silence",
+          [(i.level, i.ref) for i in named], [("critical", "EDGING")])
+    check("and the message says what to do",
+          "tick PVC on the white board" in named[0].message, True)
 
     print("\nthe engine cuts a support from the row, not from a constant")
     cab = box(supports=0, support_rows=[Support(edge="none", qty=1,
