@@ -280,8 +280,14 @@ class Support:
     # project has selected, and any edging kind THAT board offers on the Boards
     # tab. Both blank means the row predates the control and is read from `edge`,
     # so every job written before it is edged exactly as it was quoted.
-    board: str = ""        # '' = derive from `edge`
+    board: str = ""        # EDGING COLOUR. '' = derive from `edge`
     kind: str = ""         # '' = derive from `edge`; otherwise 'pvc' | '1mm' | '2mm'
+    # What the rail itself is CUT FROM (20 September 2026). The single Board
+    # column before this set only the edging colour, so picking the white board
+    # to get a white edge also meant asking for a white rail — it did not give
+    # one, and the two questions are now asked separately. Blank follows the
+    # cabinet's carcass board, which is what a support has always been cut from.
+    cut_board: str = ""
 
 
 SUPPORT_EDGES = ("none", "front", "white")
@@ -526,6 +532,9 @@ class Cabinet:
                               lambda d=d, a=attr: getattr(d, a, "") or "",
                               lambda v, d=d, a=attr: setattr(d, a, v), False))
         for i, r in enumerate(self.support_rows or []):
+            slots.append((f"support row {i + 1} board",
+                          lambda r=r: r.cut_board or "",
+                          lambda v, r=r: setattr(r, "cut_board", v), False))
             slots.append((f"support row {i + 1} edging board",
                           lambda r=r: r.board or "",
                           lambda v, r=r: setattr(r, "board", v), False))
@@ -683,18 +692,34 @@ class Cabinet:
             return self.drawer_box_edge
         return tape_for(materials, self.drawer_carcass, "pvc")
 
-    def support_row_board(self, row: "Support") -> str:
-        """Which board a support row is edged in the colour of.
+    def support_row_cut_board(self, row: "Support") -> str:
+        """What the rail itself is cut from.
 
-        Its own choice when it has one. Otherwise the legacy meaning of `edge`:
-        a front-edged row faces the front and takes the exterior board, a
-        white-edged one takes whichever board is the white one.
+        Its own choice when it has one, otherwise the cabinet's carcass board —
+        which is what the engine has always cut a support from, so a row written
+        before this control cuts exactly what it always cut.
+        """
+        return row.cut_board or self.carcass_board
+
+    def support_row_board(self, materials: dict, row: "Support") -> str:
+        """Which board a support row is edged in the COLOUR of.
+
+        Its own choice when it has one. For a row written before the control,
+        the legacy meaning of `edge`: front-edged faces the front and takes the
+        exterior board (PVC in the exterior colour, the 14 September rule),
+        white-edged takes whichever board in the project is the white one.
+
+        With nothing stored and no legacy meaning either, the default is the
+        board the rail is cut from — its own edging, which is the answer that
+        needs no second thought when a row is added.
         """
         if row.board:
             return row.board
         if row.edge == "front":
             return self.exterior_board
-        return ""
+        if row.edge == "white":
+            return white_edge_board(materials)
+        return self.support_row_cut_board(row)
 
     def support_row_kind(self, row: "Support") -> str:
         """Which edging kind a support row asks for. '' means none."""
@@ -714,21 +739,15 @@ class Cabinet:
         exterior colour), white-edged resolves to the project's white board, and
         falls back to the constant only when the project has no such board.
         """
-        if row.board or row.kind:
-            kind = self.support_row_kind(row)
-            board = self.support_row_board(row) or self.carcass_board
-            return tape_for(materials, board, kind) if kind else ""
-        if row.edge == "front":
-            return self.carcass_tape(materials)
-        if row.edge == "white":
-            # Through the project's white BOARD, never through the constant: no
-            # edging is stated anywhere but the Boards record (20 Sept 2026).
-            # With no such board there is no name to give, and the validator
-            # names the row rather than putting a tape on the order that no
-            # board in the project sells.
-            board = white_edge_board(materials)
-            return tape_for(materials, board, "pvc") if board else ""
-        return ""
+        kind = self.support_row_kind(row)
+        if not kind:
+            return ""
+        # Through a BOARD, never through a constant: no edging is stated anywhere
+        # but the Boards record (20 Sept 2026). With no board to mean it there is
+        # no name to give, and the validator names the row rather than putting a
+        # tape on the order that no board in the project sells.
+        board = self.support_row_board(materials, row)
+        return tape_for(materials, board, kind) if board else ""
 
     def support_tape(self, materials: dict, edge: str) -> str:
         """The edging a legacy row of the given kind gets. Kept for the callers

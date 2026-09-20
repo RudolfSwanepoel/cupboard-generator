@@ -251,8 +251,10 @@ def cabinet_board_ids(cab: dict) -> set:
                 if d.get(f):
                     keys.add(d[f])
     for r in cab.get("support_rows") or []:
-        if isinstance(r, dict) and r.get("board"):
-            keys.add(r["board"])
+        if isinstance(r, dict):
+            for f in ("board", "cut_board"):
+                if r.get(f):
+                    keys.add(r[f])
     for p in cab.get("bespoke") or []:
         if isinstance(p, dict) and p.get("material"):
             keys.add(p["material"])

@@ -37,6 +37,9 @@
   header h1{font-size:14px;margin:0 10px 0 0;font-weight:700;letter-spacing:.02em}
   header .grow{flex:1}
   #jobname{width:190px}
+  .grain b{font-size:11px;text-transform:uppercase;letter-spacing:.3px}
+  .grain{white-space:nowrap}
+  .dirty{font-size:11.5px;font-weight:700;color:var(--crit);border:1px solid var(--crit);border-radius:3px;padding:2px 7px;white-space:nowrap}
   #joblist{width:170px}
 
   #strip{display:flex;gap:22px;align-items:center;padding:9px 14px;
@@ -208,6 +211,8 @@
   <button id="save">Save</button>
   <select id="joblist" title="saved jobs"></select>
   <button id="load">Load</button>
+  <button id="jobdel" title="move the selected job to jobs/_deleted/">Delete</button>
+  <span id="dirty" class="dirty" hidden>unsaved changes</span>
   <button id="fixture" title="the October 2025 wardrobe regression fixture">Oct 2025</button>
   <span class="grow"></span>
   <button id="export" class="primary">Export cut list</button>
@@ -297,6 +302,7 @@ const S = {
   res: null,        // last /api/compute response
   sel: null,        // selected cabinet index
   selRendered: -2,  // which index the editor DOM currently shows
+  dirty: false,     // edits are on screen that are not on disk
   tab: "cabinets",
   def: null,        // /api/defaults
 };
@@ -359,7 +365,33 @@ function blankCabinet(number) {
 /* ---------- compute ----------------------------------------------------- */
 
 let computeTimer = null;
+// Nothing reaches the disk until Save is pressed — a saved job is the price
+// capture, so an experiment must not be able to move one by itself (ruled
+// 20 September 2026). The marker is what makes "not saved yet" visible, and the
+// browser asks before a reload or a close throws the edits away.
+function markDirty(on) {
+  S.dirty = !!on;
+  const el = $("dirty");
+  if (el) el.hidden = !S.dirty;
+}
+
+window.addEventListener("beforeunload", (e) => {
+  if (!S.dirty) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
+// True when the edits should be thrown away: either there are none, or the
+// operator said so. Asked before anything replaces the job on screen.
+function okToDiscard(what) {
+  if (!S.dirty) return true;
+  return window.confirm(
+    `${S.job.name || "This job"} has unsaved changes.\n\n` +
+    `${what} will discard them. Save first if you want to keep them.\n\nDiscard?`);
+}
+
 function schedule() {
+  markDirty(true);
   clearTimeout(computeTimer);
   computeTimer = setTimeout(compute, 180);
 }
@@ -711,6 +743,44 @@ function refreshGeometryReadout() {
   el.textContent = `Checks use ${g.width} × ${g.depth}, ${g.height} high (${how}).`;
 }
 
+// Rebuild part of the editor without throwing away what is being typed into.
+//
+// The caret is the whole reason the editor used to skip rebuilding itself when
+// the selection had not changed. Identify the focused control by the data
+// attributes that name it, rebuild, then find it again and restore the caret and
+// the scroll position. A control that no longer exists simply loses focus, which
+// is right — it is not there any more.
+function controlId(el) {
+  if (!el || !el.dataset) return null;
+  const d = el.dataset;
+  if (el.id) return "#" + el.id;
+  const parts = ["sup", "sk", "d", "dk", "k", "dboard", "edge", "ek", "leaf", "tick"]
+    .filter((a) => d[a] !== undefined)
+    .map((a) => `[data-${a}="${d[a]}"]`);
+  return parts.length ? parts.join("") : null;
+}
+
+function withFocusKept(rebuild) {
+  const el = document.activeElement;
+  const inside = el && $("editor") && $("editor").contains(el);
+  const sel = inside ? controlId(el) : null;
+  const start = inside && el.selectionStart !== undefined ? el.selectionStart : null;
+  const end = inside && el.selectionEnd !== undefined ? el.selectionEnd : null;
+  const box = $("editor");
+  const top = box ? box.scrollTop : 0;
+
+  rebuild();
+
+  if (box) box.scrollTop = top;
+  if (!sel) return;
+  const back = box && box.querySelector(sel);
+  if (!back) return;
+  try {
+    back.focus({preventScroll: true});
+    if (start !== null && back.setSelectionRange) back.setSelectionRange(start, end);
+  } catch (err) { /* a select has no selection range; focus is enough */ }
+}
+
 function renderEditor() {
   const box = $("editor");
   if (S.sel === null || S.sel === undefined || !S.job.cabinets[S.sel]) {
@@ -718,9 +788,23 @@ function renderEditor() {
     S.selRendered = -2;
     return;
   }
-  // Already showing this cabinet: leave the DOM alone. Rebuilding it mid-edit
-  // would take the caret out of whatever field is being typed into.
+  // Already showing this cabinet. The DOM used to be left alone here, and a
+  // fixed list of refresh* calls updated the readouts — which is how the stale
+  // "Ordered as" bug happened, and it was never only that one: every dropdown
+  // whose OPTIONS depend on the boards (Structure's board lists, the edging kind
+  // and colour lists in Doors, Drawers and Supports) kept whatever the library
+  // said when the section was last built. Change a board's edging on the Boards
+  // tab and come back, and the editor still offered the old kinds.
+  //
+  // So the dependent sections are rebuilt on every compute, and the caret is put
+  // back where it was — which is the thing leaving the DOM alone was protecting.
   if (S.selRendered === S.sel) {
+    withFocusKept(() => {
+      renderStructure();
+      renderDoors();
+      renderDrawers();
+      renderSupports();
+    });
     refreshGeometryReadout();
     refreshSwing();
     refreshEdging();
@@ -826,16 +910,31 @@ $("editor").addEventListener("input", (e) => {
     const rows = supportRows();
     const sk = e.target.dataset.sk;
     const row = rows[+sup];
-    if (sk === "qty") row.qty = Math.max(parseInt(e.target.value, 10) || 0, 0);
-    else if (sk === "board") {
+    if (sk === "qty") {
+      row.qty = Math.max(parseInt(e.target.value, 10) || 0, 0);
+    } else if (sk === "cut_board") {
+      // What the rail is cut from. If the edging colour was only following the
+      // cut board, it follows it here too; a colour chosen outright stays.
+      const followed = !row.board || row.board === row.cut_board;
+      row.cut_board = e.target.value;
+      if (followed) row.board = row.cut_board;
+      if (row.kind && !boardOffers(row.board, row.kind)) row.kind = "";
+      renderSupports();
+    } else if (sk === "board") {
       row.board = e.target.value;
-      // the board no longer offers what this row asked for: drop the kind rather
-      // than order an edging that board does not have
+      // the colour board no longer offers what this row asked for: drop the kind
+      // rather than order an edging that board does not have
       if (row.kind && !boardOffers(row.board, row.kind)) row.kind = "";
       renderSupports();
     } else if (sk === "kind") {
       row.kind = e.target.value;
-      if (!row.board) row.board = c.carcass_board || "";
+      // a kind with no colour board yet takes the board the rail is cut from —
+      // its own edging, which is the answer that needs no second thought
+      if (row.kind && !row.board) row.board = row.cut_board || c.carcass_board || "";
+      if (row.kind && row.board && !boardOffers(row.board, row.kind)) {
+        const fit = ((S.res && S.res.boards) || []).find((k) => boardOffers(k, row.kind));
+        if (fit) row.board = fit;
+      }
       renderSupports();
     } else { row.edge = e.target.value; renderSupports(); }
     schedule();
@@ -959,7 +1058,11 @@ $("editor").addEventListener("click", (e) => {
     return;
   }
   if (e.target.id === "supadd") {
-    supportRows().push({edge: "none", qty: 1});
+    // A new row is cut from the carcass board and not edged, which is the
+    // plainest support there is. Both are changed in the row itself.
+    supportRows().push({edge: "none", qty: 1,
+                        cut_board: (S.job.cabinets[S.sel] || {}).carcass_board || "",
+                        board: "", kind: ""});
     renderSupports();
     schedule();
     return;
@@ -1226,10 +1329,26 @@ function renderSupports() {
   const edges = S.def.support_edges || ["none", "front", "white"];
 
   // With no rows of its own, show what the engine migrated the old numbers to.
-  const rows = c.support_rows && c.support_rows.length
-    ? c.support_rows
-    : ((g && g.supports) || []);
-  const migrated = !(c.support_rows && c.support_rows.length);
+  const own = c.support_rows && c.support_rows.length ? c.support_rows : null;
+  const fromEngine = (g && g.supports) || [];
+  const migrated = !own;
+
+  // Every row carries what it RESOLVES to, so the three dropdowns can be built
+  // without the browser working any of it out. A row that has been touched says
+  // so by carrying `cut_board`, and is then read from its own fields — which is
+  // what makes the controls correct immediately, before the next compute lands.
+  // An untouched row is read from the engine's answer for it.
+  const rows = (own || fromEngine).map((r, i) => {
+    const e = fromEngine[i] || {};
+    if (!own) return e;
+    if (!r.cut_board) return Object.assign({}, e, {qty: r.qty});
+    return {qty: r.qty, edge: r.edge, board: r.board, kind: r.kind,
+            cut_board: r.cut_board,
+            eff_cut_board: r.cut_board,
+            eff_kind: r.kind || "",
+            eff_board: r.board || r.cut_board,
+            name: e.name, legacy: false};
+  });
 
 
   const keys = (S.res && S.res.boards) || [];
@@ -1240,30 +1359,54 @@ function renderSupports() {
   // Boards tab — there is no edging name stated here. A row that still carries
   // only the old `edge` is shown at what it resolves to, and keeps it until it
   // is edited.
-  const boardCellFor = (r, i) => {
-    const eff = r.eff_board || r.board || c.carcass_board || "";
-    const lost = eff && keys.indexOf(eff) < 0;
-    return `<td><select data-sup="${i}" data-sk="board">
-      ${lost ? `<option value="${esc(eff)}" selected>${esc(eff)} (not selected)</option>` : ""}
-      ${keys.map((k) => `<option value="${esc(k)}"${k === eff ? " selected" : ""}>${
+  // A support row asks two separate questions, and they used to be one: what the
+  // rail is CUT FROM, and what colour its edging is. A single Board column meant
+  // picking the white board to get a white edge also read as asking for a white
+  // rail. Cut from defaults to the carcass board (what the engine has always
+  // cut a support from); the edging colour defaults to the cut-from board's own.
+  const cutCellFor = (r, i) => {
+    const eff = r.eff_cut_board || c.carcass_board || "";
+    const usable = keys.filter((k) => !boardIsThin(k));
+    const lost = eff && usable.indexOf(eff) < 0;
+    return `<td><select data-sup="${i}" data-sk="cut_board" title="what the rail is cut from">
+      ${lost ? `<option value="${esc(eff)}" selected>${esc(eff)} (${
+        keys.indexOf(eff) < 0 ? "not selected" : "3 mm"})</option>` : ""}
+      ${usable.map((k) => `<option value="${esc(k)}"${k === eff ? " selected" : ""}>${
         esc(k)}</option>`).join("")}</select></td>`;
   };
+
   const kindCellFor = (r, i) => {
-    const eff = r.eff_board || r.board || c.carcass_board || "";
-    const kind = r.eff_kind !== undefined ? r.eff_kind : (r.kind || "");
-    const offered = allKinds.filter((k) => boardOffers(eff, k));
+    const colour = r.eff_board || "";
+    const kind = r.eff_kind || "";
+    // only the kinds the COLOUR board offers, plus "not edged"
+    const offered = allKinds.filter((k) => boardOffers(colour, k));
     const lost = kind && offered.indexOf(kind) < 0;
-    return `<td><select data-sup="${i}" data-sk="kind">
+    return `<td><select data-sup="${i}" data-sk="kind" title="how thick, or none">
       <option value=""${kind ? "" : " selected"}>not edged</option>
       ${lost ? `<option value="${esc(kind)}" selected>${esc(pre[kind] || kind)} (not offered)</option>` : ""}
       ${offered.map((k) => `<option value="${esc(k)}"${k === kind ? " selected" : ""}>${
         esc(pre[k] || k)}</option>`).join("")}</select></td>`;
   };
 
+  const colourCellFor = (r, i) => {
+    const kind = r.eff_kind || "";
+    const colour = r.eff_board || "";
+    // only boards that offer the chosen kind; with no kind there is nothing to
+    // constrain it, so the whole project is offered
+    const usable = kind ? keys.filter((k) => boardOffers(k, kind)) : keys.slice();
+    const lost = colour && usable.indexOf(colour) < 0;
+    return `<td><select data-sup="${i}" data-sk="board" title="what colour the edging is"
+      ${kind ? "" : "disabled"}>
+      ${lost ? `<option value="${esc(colour)}" selected>${esc(colour)} (not offered)</option>` : ""}
+      ${usable.map((k) => `<option value="${esc(k)}"${k === colour ? " selected" : ""}>${
+        esc(k)}</option>`).join("")}</select></td>`;
+  };
+
   const body = rows.map((r, i) => `<tr>
       <td class="n">${i + 1}</td>
-      ${boardCellFor(r, i)}
+      ${cutCellFor(r, i)}
       ${kindCellFor(r, i)}
+      ${colourCellFor(r, i)}
       <td><input type="number" step="1" min="0" data-sup="${i}" data-sk="qty"
            value="${r.qty}"></td>
       <td class="note" data-suprow="${i}"></td>
@@ -1271,24 +1414,27 @@ function renderSupports() {
     </tr>`).join("");
 
   const total = rows.reduce((a, r) => a + (r.qty || 0), 0);
-  const anyLegacy = ((g && g.supports) || []).some((r) => r.legacy);
+  const anyLegacy = rows.some((r) => r.legacy);
   box.innerHTML = `<table class="rows">
-    <colgroup><col style="width:20px"><col style="width:132px"><col style="width:98px">
-      <col style="width:44px"><col style="width:172px"><col style="width:24px"></colgroup>
-    <thead><tr><th class="n">#</th><th>Board</th><th>Edging</th><th>Qty</th>
-      <th>Ordered as</th><th></th>
+    <colgroup><col style="width:16px"><col style="width:104px"><col style="width:74px">
+      <col style="width:104px"><col style="width:38px"><col style="width:132px">
+      <col style="width:22px"></colgroup>
+    <thead><tr><th class="n">#</th><th>Cut from</th><th>Edging</th><th>Colour</th>
+      <th>Qty</th><th>Ordered as</th><th></th>
     </tr></thead><tbody>${body ||
-      `<tr><td colspan="6" class="note">No supports.</td></tr>`}</tbody></table>
+      `<tr><td colspan="7" class="note">No supports.</td></tr>`}</tbody></table>
     <div class="dtot"><span>total <b>${total}</b> support${total === 1 ? "" : "s"}</span>
       ${migrated ? `<span class="note">migrated from the old
         ${c.supports}/${c.edged_supports}/${c.white_supports} numbers — edit to keep
         it as rows</span>` : ""}</div>
     <div class="presets"><button id="supadd">+ Support row</button></div>
-    <p class="hint">A support row is edged in a board and one of the kinds that
-      board offers on the <b>Boards</b> tab — nothing here states an edging name.
-      ${anyLegacy ? `A row marked <b>(as quoted)</b> was written before this control
-      and is still edged exactly as that job was quoted; changing it here makes it
-      the cabinet's own.` : ""}</p>`;
+    <p class="hint">A support row says what the rail is <b>cut from</b> and, separately,
+      what its edging is — a kind the colour board offers on the <b>Boards</b> tab, in
+      any project board that offers it. Nothing here states an edging name.
+      ${anyLegacy ? `A row marked <b>(as quoted)</b> was written before these controls:
+      it is cut from the carcass board and edged exactly as that job was quoted —
+      front-edged in the exterior board's colour, white-edged in the white board's.
+      Changing it here makes it the cabinet's own.` : ""}</p>`;
   refreshSupports();
 }
 
@@ -1328,10 +1474,11 @@ function supportRows() {
   if (!(c.support_rows && c.support_rows.length)) {
     const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
     // Touching a migrated cabinet writes its rows out at exactly what they were
-    // resolving to, board and kind included — so the first edit cannot silently
-    // move what the other rows are edged in.
+    // resolving to — cut board, edging kind and edging colour — so the first
+    // edit cannot silently move what the other rows are cut from or edged in.
     c.support_rows = ((g && g.supports) || []).map((r) => ({
       edge: r.edge, qty: r.qty,
+      cut_board: r.eff_cut_board || "",
       board: r.eff_board || "", kind: r.eff_kind || ""}));
   }
   return c.support_rows;
@@ -2041,6 +2188,40 @@ async function swapBoard(fromId, to) {
         `    ${u.label}  was ${u.was || "—"}`).join("\n") + "\n"
     : "";
 
+  // Grain, said out loud. `Length` IS the grain direction on a grained board and
+  // a locked panel cannot be turned by the nester, so both the direction and what
+  // the lost rotation costs are listed. Whether that direction is the right one
+  // to look at is not something the app can judge — it is listed to be checked.
+  const gr = pre.grain || [];
+  const locking = gr.filter((x) => x.locked);
+  const freeing = gr.filter((x) => !x.locked);
+  const grainLine = (x) =>
+    `    ${x.label}  ${x.role}  ${x.length} x ${x.width}${x.qty > 1 ? "  x" + x.qty : ""}` +
+    `  ${x.board}  —  grain ${x.runs}`;
+  const grainBlock = gr.length
+    ? `\nGRAIN — check these directions:\n` +
+      (locking.length
+        ? `  ${locking.length} panel${locking.length === 1 ? "" : "s"} become ` +
+          `grain-LOCKED (cannot be turned):\n` +
+          locking.slice(0, 10).map(grainLine).join("\n") +
+          (locking.length > 10 ? `\n    ... and ${locking.length - 10} more` : "") + "\n"
+        : "") +
+      (freeing.length
+        ? `  ${freeing.length} panel${freeing.length === 1 ? "" : "s"} become plain ` +
+          `(the nester may turn them):\n` +
+          freeing.slice(0, 10).map(grainLine).join("\n") +
+          (freeing.length > 10 ? `\n    ... and ${freeing.length - 10} more` : "") + "\n"
+        : "")
+    : "";
+
+  // What the lock costs on its own: the same panels re-nested with grain freed.
+  const rot = pre.rotation;
+  const rotBlock = rot && rot.cost_of_lock
+    ? `  Lost rotation costs ${money(rot.cost_of_lock)}: ` +
+      `${boards({boards: rot.boards_with_lock})} locked, against ` +
+      `${boards({boards: rot.boards_if_free})} if the grain did not hold.\n`
+    : rot && gr.length ? `  The grain lock costs no extra board on this job.\n` : "";
+
   // What the swap does to the VALIDATION, not just to the cost. A swap is how a
   // design gets previewed, so a grain lock that no longer fits a sheet, or an
   // edging the new board cannot supply, has to be on screen before it is written.
@@ -2082,6 +2263,7 @@ async function swapBoard(fromId, to) {
       : `No generated panel changes board or edging.\n`) +
     retyped + unmapped +
     (moved ? `\nPanels per board:\n${moved}\n` : "") +
+    grainBlock + rotBlock +
     fresh + fixed + blocked +
     `\nBoards: ${boards(pre.before)}\n` +
     `    ->  ${boards(pre.after)}\n\n` +
@@ -2911,7 +3093,9 @@ function renderCutlist() {
         <td>${esc(edges(p))}</td><td>${esc(p.edge_material)}</td>
         <td class="n">${p.edging_m || ""}</td>
         <td class="n">${p.holes_total || ""}</td>
-        <td class="n">${p.grain || ""}</td>
+        <td class="grain">${p.grain
+          ? `<b>locked</b> <span class="note">along L ${p.length}</span>`
+          : `<span class="note">free</span>`}</td>
         <td class="note">${esc(p.note)}</td></tr>`;
       const extra = iss.map((i) =>
         `<tr><td colspan="12" class="rowissue ${i.level}">${esc(i.message)}${
@@ -2927,7 +3111,8 @@ function renderCutlist() {
   $("cutlist").innerHTML = `<table>
     <thead><tr><th>Label</th><th>Role</th><th>Mat</th><th class="n">Length</th>
       <th class="n">Width</th><th class="n">Qty</th><th>Edges</th><th>Edge mat</th>
-      <th class="n">Edging m</th><th class="n">Holes</th><th class="n">Grain</th>
+      <th class="n">Edging m</th><th class="n">Holes</th>
+      <th title="a grained board locks the panel: Length is the grain direction and the nester cannot turn it">Grain</th>
       <th>Note</th></tr></thead><tbody>${out}</tbody></table>`;
 }
 
@@ -3026,6 +3211,7 @@ async function refreshJobs() {
 
 function adopt(job) {
   S.job = job;
+  markDirty(false);          // what is on screen is what is on disk
   S.sel = null;
   S.selRendered = -2;
   roomSig = null;
@@ -3036,19 +3222,68 @@ function adopt(job) {
   compute();
 }
 
-$("new").addEventListener("click", () => adopt(blankJob()));
+$("new").addEventListener("click", () => {
+  if (!okToDiscard("Starting a new job")) return;
+  adopt(blankJob());
+});
 
 $("save").addEventListener("click", async () => {
   const r = await post("/api/save", {job: S.job, path: $("jobname").value.trim()});
   if (!r.ok) { toast(r.error, true); return; }
+  markDirty(false);
   toast("Saved jobs/" + r.path);
   await refreshJobs();
   $("joblist").value = r.path;
 });
 
+// Deleting a saved job. It is moved to jobs/_deleted/, never unlinked: a job is
+// a quote somebody may want back, and "I picked the wrong one" has no undo
+// otherwise. The job on screen cannot be deleted — that would leave the editor
+// showing something with nowhere to save it back to — and the two fixture jobs
+// say what they are before they go, because the checks run against them.
+$("jobdel").addEventListener("click", async () => {
+  const name = $("joblist").value;
+  if (!name) { toast("No saved job selected.", true); return; }
+
+  const info = await post("/api/job-delete-info",
+                          {path: name, open: currentJobFile()});
+  if (!info.ok) { toast(info.error, true); return; }
+  if (!info.exists) { toast(`There is no saved job ${name}.`, true); return; }
+  if (info.is_open) {
+    toast(`${name} is the job open here — load or start another one first, ` +
+          `then delete it.`, true);
+    return;
+  }
+
+  const warn = info.fixture
+    ? `\n!! ${name} is one of the two jobs the CHECKS run against. ` +
+      `Deleting it stops tools/regen_check.py and several check_*.py scripts ` +
+      `working until it is put back.\n`
+    : "";
+  const ok = window.confirm(
+    `Delete the project ${name}?\n` + warn +
+    `\nIt is moved to jobs/_deleted/${name}, not erased, so it can be put back ` +
+    `by moving the file. It stops appearing in the job list.\n\nDelete ${name}?`);
+  if (!ok) return;
+
+  const r = await post("/api/job-delete", {path: name, open: currentJobFile()});
+  if (!r.ok) { toast(r.error, true); return; }
+  await refreshJobs();
+  toast(`${r.path} moved to ${r.moved_to} — put it back by moving the file.`);
+});
+
+// Which FILE the job on screen came from, which is what "do not delete the open
+// one" has to be asked of. The name box is the job's name, and Save uses it as
+// the file name, so it is the same question.
+function currentJobFile() {
+  const n = ($("jobname").value || "").trim();
+  return n ? (n.endsWith(".json") ? n : n + ".json") : "";
+}
+
 $("load").addEventListener("click", async () => {
   const name = $("joblist").value;
   if (!name) { toast("No saved job selected.", true); return; }
+  if (!okToDiscard(`Loading ${name}`)) return;
   const r = await post("/api/load", {path: name});
   if (!r.ok) { toast(r.error, true); return; }
   adopt(r.job);
@@ -3068,6 +3303,7 @@ $("load").addEventListener("click", async () => {
 });
 
 $("fixture").addEventListener("click", async () => {
+  if (!okToDiscard("Loading the October 2025 fixture")) return;
   const r = await post("/api/fixture", {});
   if (!r.ok) { toast(r.error, true); return; }
   adopt(r.job);

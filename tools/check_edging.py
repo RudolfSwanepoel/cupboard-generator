@@ -265,6 +265,59 @@ def main():
     check("an unedged row carries no edging", sup[0].edge_material, "")
     check("and no band", sup[0].edge_l, 0)
 
+    # --- cut from, and edged in, are two questions -------------------------
+    print(NL + "a support row says what it is CUT FROM, separately from its edging")
+    grey = {"name": "Grey", "board": "Grey", "tape": "Grey", "thickness": 16,
+            "grain": "plain", "price": 1100.0}
+    m = mats(GREY=grey)
+    row = Support(edge="none", qty=1, cut_board="GREY", board="MEL", kind="pvc")
+    cab = box(supports=0, support_rows=[row])
+    check("cut from its own board", cab.support_row_cut_board(row), "GREY")
+    check("edged in another board's colour", cab.support_row_tape(m, row), "PVC WHITE")
+    sup = [p for p in generate_cabinet(cab, S, m) if p.role == "Support"]
+    check("and the panel really is cut from it", sup[0].material, "GREY")
+    check("with that board's grain", sup[0].grain, 0)
+    check("a white edge on a grey rail", sup[0].edge_material, "PVC WHITE")
+
+    print(NL + "cut from a grained board and the rail locks like anything else off it")
+    row = Support(edge="none", qty=1, cut_board="BROOKHILL", board="MEL", kind="pvc")
+    cab = box(supports=0, support_rows=[row])
+    sup = [p for p in generate_cabinet(cab, S, MATERIALS) if p.role == "Support"]
+    check("material", sup[0].material, "BROOKHILL")
+    check("grain locked", sup[0].grain, 1)
+
+    print(NL + "blank cut_board follows the carcass, which is what it always was")
+    row = Support(edge="none", qty=1)
+    cab = box(supports=0, carcass_board="MEL", support_rows=[row])
+    check("follows the carcass board", cab.support_row_cut_board(row), "MEL")
+    cab2 = box(supports=0, carcass_board="BROOKHILL", support_rows=[row])
+    check("and follows it when the carcass changes",
+          cab2.support_row_cut_board(row), "BROOKHILL")
+
+    print(NL + "MIGRATION: an old row is cut and edged exactly as it was quoted")
+    front, white, none_ = (Support(edge="front", qty=1), Support(edge="white", qty=1),
+                           Support(edge="none", qty=1))
+    cab = box(carcass_board="MEL", exterior_board="BROOKHILL",
+              support_rows=[front, white, none_])
+    check("front: cut from the carcass", cab.support_row_cut_board(front), "MEL")
+    check("front: edged in the EXTERIOR board's colour",
+          cab.support_row_board(MATERIALS, front), "BROOKHILL")
+    check("front: which is the carcass edging, unchanged",
+          cab.support_row_tape(MATERIALS, front), cab.carcass_tape(MATERIALS))
+    check("white: cut from the carcass", cab.support_row_cut_board(white), "MEL")
+    check("white: edged in the board that yields PVC WHITE",
+          (cab.support_row_board(MATERIALS, white),
+           cab.support_row_tape(MATERIALS, white)), ("MEL", "PVC WHITE"))
+    check("none stays none", cab.support_row_tape(MATERIALS, none_), "")
+    check("and none is cut from the carcass too",
+          cab.support_row_cut_board(none_), "MEL")
+
+    print(NL + "a new row's edging colour defaults to the board it is cut from")
+    fresh = Support(edge="none", qty=1, cut_board="GREY", kind="pvc")
+    cab = box(support_rows=[fresh])
+    check("colour follows cut from", cab.support_row_board(m, fresh), "GREY")
+    check("so it is edged in its own colour", cab.support_row_tape(m, fresh), "PVC Grey")
+
     # --- what the editor shows is what the cut list carries ----------------
     print(NL + "every support row's edging IS the edge material on its cut-list line")
     # The editor's "Ordered as" column reads `support_row_tape`; the engine cuts

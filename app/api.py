@@ -8,7 +8,8 @@ import json
 import os
 import re
 import threading
-from dataclasses import asdict, fields as dc_fields
+import time
+from dataclasses import asdict, fields as dc_fields, replace
 from http.server import BaseHTTPRequestHandler
 
 from cabinetgen import boards as B
@@ -181,10 +182,14 @@ def _geometry_info(job, cab, std):
             # rows and this list out of step by one.
             "supports": [{"edge": r.edge, "qty": r.qty,
                           "board": r.board, "kind": r.kind,
-                          "eff_board": cab.support_row_board(r) or cab.carcass_board,
+                          "cut_board": r.cut_board,
+                          # what the row resolves to, so the editor shows the
+                          # engine's answer rather than working one out
+                          "eff_cut_board": cab.support_row_cut_board(r),
+                          "eff_board": cab.support_row_board(job.materials, r),
                           "eff_kind": cab.support_row_kind(r),
                           "name": cab.support_row_tape(job.materials, r),
-                          "legacy": not (r.board or r.kind)}
+                          "legacy": not (r.board or r.kind or r.cut_board)}
                          for r in (cab.support_rows or cab.support_list)],
             # the edging each legacy kind of support row gets, off the engine
             "support_edging": {e: cab.support_tape(job.materials, e)
@@ -493,6 +498,49 @@ def _retype_panel(p, materials, old_id, new_id) -> dict:
     return moved
 
 
+def _grain_change(before_panels, after_panels):
+    """Which panels change grain, and which way, with the size and direction.
+
+    Grain is not a detail: `Length` IS the grain direction on a grained board,
+    a locked panel cannot be turned by the nester, and W8/D9 was 60 panels going
+    out at grain 0 on a woodgrain board with only Plazaboard's counter catching
+    it. So a swap says which panels lock and which come free, and what direction
+    the grain will run on each — it does not judge whether that direction is the
+    right one to look at, which is not something the app can know.
+    """
+    was = {}
+    for p in before_panels:
+        was.setdefault((p.label, p.role, p.length, p.width), p.grain)
+    out = []
+    for p in after_panels:
+        key = (p.label, p.role, p.length, p.width)
+        if key not in was or was[key] == p.grain:
+            continue
+        out.append({"label": p.label, "role": p.role,
+                    "length": p.length, "width": p.width, "qty": p.qty,
+                    "board": p.material,
+                    "from": was[key], "to": p.grain,
+                    "locked": bool(p.grain),
+                    # what the cut list means by it, said out loud
+                    "runs": (f"along Length, {p.length} mm" if p.grain
+                             else "either way — the nester may turn it")})
+    return out
+
+
+def _rotation_cost(job, before_panels, after_panels, before, after):
+    """What the grain change costs on its own, separated from the board price.
+
+    A locked panel cannot be turned, so the nester has fewer layouts to choose
+    from and may need another board. Re-nesting the AFTER panels with every grain
+    flag cleared says how much of the change is the lock rather than the board.
+    """
+    freed = [replace(p, grain=0) for p in after_panels]
+    unlocked = _totals(job, freed)
+    return {"boards_with_lock": after["boards"], "cost_with_lock": after["cost"],
+            "boards_if_free": unlocked["boards"], "cost_if_free": unlocked["cost"],
+            "cost_of_lock": round(after["cost"] - unlocked["cost"], 2)}
+
+
 def _moved_by_board(before_panels, after_panels):
     """How many panels each material gained or lost, so the count is checkable."""
     def tally(ps):
@@ -612,6 +660,8 @@ def board_swap(payload):
            "fixed_issues": [as_dict(i) for i in gone],
            "blocks": any(i.level == "critical" for i in now_issues),
            "moved_by_board": _moved_by_board(before_panels, after_panels),
+           "grain": _grain_change(before_panels, after_panels),
+           "rotation": _rotation_cost(job, before_panels, after_panels, before, after),
            "before": before, "after": after}
     if payload.get("apply"):
         out["job"] = job_to_dict(job)
@@ -871,6 +921,59 @@ def job_list(payload):
     return {"ok": True, "jobs": names}
 
 
+# The jobs the checks run against. Deleting one does not break the repo — it is
+# recoverable, and git has it — but it does stop `regen_check` and half the
+# `check_*` scripts until it is put back, so it is said plainly before it happens.
+FIXTURE_JOBS = ("Test.json", "Test_Build.json")
+
+# Where a deleted job goes. Not unlink: a job is a quote somebody may need back,
+# and "I deleted the wrong one" has no undo otherwise.
+DELETED_DIR = os.path.join(JOBS_DIR, "_deleted")
+
+
+def job_delete(payload):
+    """Move a saved job out of jobs/, into jobs/_deleted/.
+
+    Never a real delete, and never the job on screen: deleting what is open
+    would leave the editor showing a job with nowhere to save it back to.
+    """
+    name = os.path.basename(str(payload.get("path") or "").strip())
+    if not name:
+        return {"ok": False, "error": "no job named"}
+    path = _job_path(name)
+    if not os.path.exists(path):
+        return {"ok": False, "error": f"there is no saved job {name!r}"}
+
+    # The job on screen is posted with the request, so this is asked of what is
+    # actually open rather than of what the dropdown happens to be showing.
+    open_name = os.path.basename(str(payload.get("open") or "").strip())
+    if open_name and open_name.lower() == name.lower():
+        return {"ok": False,
+                "error": f"{name} is the job open here — load or start another one "
+                         f"first, then delete it"}
+
+    os.makedirs(DELETED_DIR, exist_ok=True)
+    dest = os.path.join(DELETED_DIR, name)
+    if os.path.exists(dest):
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dest = os.path.join(DELETED_DIR, f"{name[:-5]}-{stamp}.json")
+    os.replace(path, dest)
+    return {"ok": True, "path": name,
+            "moved_to": os.path.join("jobs", "_deleted", os.path.basename(dest)),
+            "fixture": name in FIXTURE_JOBS}
+
+
+def job_delete_info(payload):
+    """What deleting this job would mean, asked before the confirm is shown."""
+    name = os.path.basename(str(payload.get("path") or "").strip())
+    path = _job_path(name) if name else ""
+    open_name = os.path.basename(str(payload.get("open") or "").strip())
+    return {"ok": True, "path": name,
+            "exists": bool(path) and os.path.exists(path),
+            "is_open": bool(open_name) and open_name.lower() == name.lower(),
+            "fixture": name in FIXTURE_JOBS}
+
+
 def job_save(payload):
     job = _job(payload)
     path = _job_path(payload.get("path") or job.name)
@@ -1033,6 +1136,8 @@ ROUTES = {
     "/api/export": export,
     "/api/jobs": job_list,
     "/api/save": job_save,
+    "/api/job-delete": job_delete,
+    "/api/job-delete-info": job_delete_info,
     "/api/load": job_load,
     "/api/fixture": job_fixture,
     "/api/next-number": job_next_number,

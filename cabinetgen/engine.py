@@ -63,9 +63,13 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     # here subtracts anything from anything.
     for row in cab.support_list:
         tape = cab.support_row_tape(mats, row)
-        P.append(Panel(n, "04", "Support", carc, Wi, SUPPORT_W, row.qty,
+        # The rail is cut from the row's own board (blank = the carcass board,
+        # which is what it always was), and its grain is that board's — a support
+        # cut from the grained board locks like every other panel off it.
+        sup_board = R(cab.support_row_cut_board(row))
+        P.append(Panel(n, "04", "Support", sup_board, Wi, SUPPORT_W, row.qty,
                        edge_l=1 if tape else 0, edge_material=tape,
-                       grain=carc_grain))
+                       grain=grain_of(mats, sup_board)))
 
     # ---- shelves -----------------------------------------------------------
     sw = cab.shelf_width or Wi

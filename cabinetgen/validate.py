@@ -504,7 +504,7 @@ def _support_edging(job: Job):
             if not kind or c.support_row_tape(mats, row):
                 continue                   # not edged, or edged fine
             if row.board or row.kind:
-                board = c.support_row_board(row) or c.carcass_board
+                board = c.support_row_board(mats, row)
                 offered = [TAPE_PREFIX[k] for k in material_offers(mats, board)]
                 has = (f"only offers {', '.join(offered)}" if offered
                        else "has no edging (Has Edging is off)")

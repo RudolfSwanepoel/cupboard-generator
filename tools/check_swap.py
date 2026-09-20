@@ -291,6 +291,81 @@ def main():
     check("and so are its loose panels",
           sorted({p["material"] for p in d["loose"]}), ["DECOR", "MEL"])
 
+    # --- grain is listed, never judged --------------------------------------
+    print(NL + "a swap says which panels lock, which come free, and which way")
+    r = swap(JOB, "MEL", "BROOKHILL")
+    g = r["grain"]
+    check("every one of them changes grain", bool(g), True)
+    check("all of these lock, because Brookhill is the grained board",
+          sorted({x["locked"] for x in g}), [True])
+    one = g[0]
+    check("each carries its size", (one["length"] > 0, one["width"] > 0), (True, True))
+    check("and the direction, said out loud",
+          one["runs"], f"along Length, {one['length']} mm")
+    check("and which board it is now cut from", one["board"], "BROOKHILL")
+
+    print(NL + "and back the other way they come free")
+    j = Job(name="free", boards=["MEL", "BROOKHILL", "BACK"], materials=mats(),
+            cabinets=[box(carcass_board="BROOKHILL", doors=1)])
+    back = swap(j, "BROOKHILL", "MEL")["grain"]
+    check("nothing is locked any more", sorted({x["locked"] for x in back}), [False])
+    check("and it says the nester may turn them",
+          "either way" in back[0]["runs"], True)
+
+    print(NL + "what the lost rotation costs is separated from the board price")
+    rot = r["rotation"]
+    check("the locked nest is the one being quoted",
+          rot["cost_with_lock"], r["after"]["cost"])
+    check("freeing the grain is re-nested, not guessed",
+          rot["cost_if_free"] < rot["cost_with_lock"], True)
+    check("and the difference is reported",
+          rot["cost_of_lock"], round(rot["cost_with_lock"] - rot["cost_if_free"], 2))
+    check("on the October job the lock costs a whole extra board",
+          rot["boards_with_lock"]["BROOKHILL"] - rot["boards_if_free"]["BROOKHILL"], 1)
+
+    # --- deleting a project -------------------------------------------------
+    print(NL + "deleting a project moves it aside; it is never unlinked")
+    import shutil, tempfile                                          # noqa: E402
+    tmp = tempfile.mkdtemp()
+    real_jobs, real_del = api.JOBS_DIR, api.DELETED_DIR
+    api.JOBS_DIR = tmp
+    api.DELETED_DIR = os.path.join(tmp, "_deleted")
+    try:
+        for name in ("Keep.json", "Test.json"):
+            with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:
+                fh.write('{"name": "x", "cabinets": []}')
+        info = api.job_delete_info({"path": "Keep.json", "open": "Other.json"})
+        check("it knows the file is there", info["exists"], True)
+        check("and that it is not the one open", info["is_open"], False)
+        check("a fixture job says so", api.job_delete_info(
+            {"path": "Test.json", "open": ""})["fixture"], True)
+        check("an ordinary one does not", info["fixture"], False)
+
+        open_now = api.job_delete({"path": "Keep.json", "open": "Keep.json"})
+        check("the job on screen cannot be deleted", open_now["ok"], False)
+        check("and it says why", "open here" in open_now["error"], True)
+        check("so the file is still there",
+              os.path.exists(os.path.join(tmp, "Keep.json")), True)
+
+        gone = api.job_delete({"path": "Keep.json", "open": "Other.json"})
+        check("deleting moves it", gone["ok"], True)
+        check("out of jobs/", os.path.exists(os.path.join(tmp, "Keep.json")), False)
+        check("and into _deleted/, still readable",
+              os.path.exists(os.path.join(tmp, "_deleted", "Keep.json")), True)
+        check("a job that is not there is refused, not invented",
+              api.job_delete({"path": "Nope.json", "open": ""})["ok"], False)
+
+        # a second delete of the same name must not overwrite the first
+        with open(os.path.join(tmp, "Keep.json"), "w", encoding="utf-8") as fh:
+            fh.write('{"name": "second", "cabinets": []}')
+        again = api.job_delete({"path": "Keep.json", "open": ""})
+        check("a second one of the same name is kept too", again["ok"], True)
+        check("under a stamped name, so the first survives",
+              len(os.listdir(os.path.join(tmp, "_deleted"))), 2)
+    finally:
+        api.JOBS_DIR, api.DELETED_DIR = real_jobs, real_del
+        shutil.rmtree(tmp, ignore_errors=True)
+
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + ", ".join(FAILS))

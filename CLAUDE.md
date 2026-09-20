@@ -282,6 +282,68 @@ come out `PVC WHITE`. `board` and `kind` are written to the job file only when a
 row actually names them, so a file saved before the control round-trips byte for
 byte.
 
+### A support row: cut from, and edged in
+
+**Ruled 20 September 2026.** A support row asks two separate questions and they
+used to be one. `Support.cut_board` is what the rail is **cut from** — any board
+the project carries, blank meaning the carcass board, which is what the engine
+has always cut a support from. `Support.board` is only the **edging colour**, and
+`Support.kind` the edging kind. Before this the single Board column set the
+colour alone, so picking the white board to get a white edge read as asking for a
+white rail, and did not give one.
+
+The rail carries its own board's **grain**, so a support cut from the grained
+board locks like every other panel off it.
+
+**Defaults:** the edging kind lists only what the colour board offers; the colour
+list only boards that offer the chosen kind; and a new row's colour follows the
+board it is cut from — its own edging.
+
+**Migration, output unchanged.** A row with nothing stored is read from its old
+`edge`: cut from the carcass board, and **front-edged takes the exterior board's
+colour** (PVC in the exterior colour, the 14 September rule), **white-edged takes
+the project board that yields `PVC WHITE`** via `white_edge_board`, and **none
+stays none**. The October job and both Test files are byte-identical through it —
+`snapshot.py --compare` proves it, and `check_edging.py` pins each case.
+
+### The editor rebuilds itself, and nothing reaches disk unasked
+
+**Every dependent surface refreshes on every compute** (20 September 2026).
+`renderEditor` used to leave the DOM alone when the selection had not changed and
+update a fixed list of readouts, which is how "Ordered as" went stale — and it
+was never only that: every dropdown whose OPTIONS depend on the boards kept
+whatever the library said when the section was last built, so changing a board's
+edging and coming back still offered the old kinds. Structure, Doors, Drawers and
+Supports are rebuilt each time, wrapped in `withFocusKept`, which records the
+focused control by its data attributes and puts the caret back afterwards — the
+caret being the thing the skip was protecting.
+
+**Save is the only thing that writes** (ruled 20 September 2026). A saved job is
+the price capture, so an experiment must not be able to move one by itself. The
+`unsaved changes` marker says when the screen and the disk disagree, and New,
+Load, the fixture button and closing the window all ask first.
+
+### Deleting a project
+
+`jobs/_deleted/`, never `unlink`. A job is a quote somebody may want back, and
+picking the wrong one has no undo otherwise; a second delete of the same name is
+stamped rather than overwriting the first. The job **open on screen** cannot be
+deleted — that would leave the editor with nowhere to save back to — and
+`Test.json` and `Test_Build.json` say what they are before they go, because
+`regen_check` and half the `check_*` scripts run against them.
+
+### Grain is listed, never judged
+
+`Length` IS the grain direction on a grained board and a locked panel cannot be
+turned by the nester, so grain is said out loud rather than shown as a `1`. The
+cut list's Grain column reads `locked along L <n>` or `free`. A board swap lists
+every panel that locks or comes free, with its size, board and direction, and
+**what the lost rotation costs**: the same panels re-nested with grain cleared,
+so the price of the lock is separated from the price of the board. On the October
+job, swapping MEL into Brookhill costs **one extra board, R1,066**, purely for
+the lock. The app does not judge whether a direction is the right one to look at
+— that is not something it can know, and the list is there to be checked.
+
 ### Swapping a board moves every use of it
 
 **Ruled 20 September 2026**, overriding an earlier choice to leave hand-specified
