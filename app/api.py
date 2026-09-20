@@ -18,10 +18,11 @@ from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
 from cabinetgen.engine import generate_job
 from cabinetgen.export_plaza import (effective_price, estimate_cost, summarise,
                                      write_csvs)
-from cabinetgen.model import (BOARD_ALIASES, CODES, EXTERIOR_TAPES, MATERIALS,
-                              NO_COLOUR, SUPPORT_EDGES,
-                              hinge_side, is_thin, material_board, material_colour,
-                              material_has_edging, material_offers, material_price,
+from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
+                              MATERIALS, NO_COLOUR, SUPPORT_EDGES,
+                              grain_of, hinge_side, is_thin, material_board,
+                              material_colour, material_has_edging,
+                              material_offers, material_price,
                               material_record, material_thickness, tape_for)
 from cabinetgen.render import elevation_svg, plan_svg, wall_elevation_svg
 from cabinetgen.room import (LAYERS, add_wall, clashes as room_clashes, closure_error,
@@ -174,13 +175,17 @@ def _geometry_info(job, cab, std):
             # Each row as it will be cut: what it is edged in, and the name that
             # produces. Both are the engine's answer — the editor shows them, it
             # does not work them out.
+            # EVERY row the editor shows, not just the ones that reach the cut
+            # list: a row sitting at qty 0 is still on screen and still has to
+            # show the engine's answer, and dropping it here put the editor's
+            # rows and this list out of step by one.
             "supports": [{"edge": r.edge, "qty": r.qty,
                           "board": r.board, "kind": r.kind,
                           "eff_board": cab.support_row_board(r) or cab.carcass_board,
                           "eff_kind": cab.support_row_kind(r),
                           "name": cab.support_row_tape(job.materials, r),
                           "legacy": not (r.board or r.kind)}
-                         for r in cab.support_list],
+                         for r in (cab.support_rows or cab.support_list)],
             # the edging each legacy kind of support row gets, off the engine
             "support_edging": {e: cab.support_tape(job.materials, e)
                                for e in SUPPORT_EDGES},
@@ -443,6 +448,63 @@ def board_select(payload):
     return {"ok": True, "job": job_to_dict(job)}
 
 
+def _typed_panels(job):
+    """Every panel whose material, grain and edging are TYPED, not derived.
+
+    A bespoke cabinet's panels and the job's loose panels. `generate_job` is
+    read-only with respect to them — they go onto the cut list exactly as the job
+    defines them — so anything that changes what they are cut from has to change
+    the rest of the record with it.
+    """
+    out = list(job.loose or [])
+    for cab in job.cabinets:
+        out.extend(cab.bespoke or [])
+    return out
+
+
+def _retype_panel(p, materials, old_id, new_id) -> dict:
+    """Bring one typed panel's grain and edging into line with its new board.
+
+    Grain is the board's, so it is simply re-read. The edging is matched by
+    KIND: if the panel was edged in the old board's PVC, it is now edged in the
+    new board's PVC. If the new board does not offer that kind there is no name
+    to give, so the edging is cleared — and because the bands are left alone, the
+    panel still says it wants edging and the validator raises the EDGING critical
+    rather than letting it go out with the board that just left written on it.
+
+    An edging that never matched the old board (a literal somebody typed) is left
+    exactly as it is: it was not derived from the old board, so it does not
+    follow it.
+    """
+    moved = {}
+    grain = grain_of(materials, new_id)
+    if p.grain != grain:
+        moved["grain_from"], moved["grain_to"] = p.grain, grain
+        p.grain = grain
+    if p.edge_material:
+        kind = next((k for k in ALL_KINDS
+                     if tape_for(materials, old_id, k) == p.edge_material), "")
+        if kind:
+            fresh = tape_for(materials, new_id, kind)
+            if fresh != p.edge_material:
+                moved["kind"] = kind
+                moved["tape_from"], moved["tape_to"] = p.edge_material, fresh
+                p.edge_material = fresh
+    return moved
+
+
+def _moved_by_board(before_panels, after_panels):
+    """How many panels each material gained or lost, so the count is checkable."""
+    def tally(ps):
+        out = {}
+        for p in ps:
+            out[p.material] = out.get(p.material, 0) + max(p.qty, 0)
+        return out
+    a, b = tally(before_panels), tally(after_panels)
+    return [{"board": m, "before": a.get(m, 0), "after": b.get(m, 0)}
+            for m in sorted(set(a) | set(b)) if a.get(m, 0) != b.get(m, 0)]
+
+
 def board_swap(payload):
     """What changes if this project swaps one board for another — and, on apply,
     the swap itself.
@@ -458,6 +520,26 @@ def board_swap(payload):
 
     before_panels = generate_job(job)
     before = _totals(job, before_panels)
+    before_issues = validate(job, before_panels)
+
+    # Read the "before" board and edging off every panel NOW, while it is still
+    # true. `engine.resolved` hands back a bespoke or loose panel as the very
+    # same object the job holds, so the swap's in-place re-derivation below
+    # rewrites these records too — and a diff taken afterwards would compare the
+    # new values with themselves and report that nothing moved.
+    #
+    # Keyed by shape as well as designation: born_distinct lets two support lines
+    # share a label when they are the same size, and keying on the label alone
+    # would show one of them changing to a blank tape it never had.
+    def key(p):
+        return (p.label, p.role, p.length, p.width, p.edge_l, p.edge_w, p.qty)
+
+    was = {key(p): (p.material, p.edge_material) for p in before_panels}
+
+    # Swapping onto a board the project ALREADY carries merges the two: after it
+    # there is nothing left to say which panels used to be which, so swapping
+    # back does not undo it. The caller is told before it writes.
+    merged = new_id in (job.materials or {}) and new_id != old_id
 
     board = B.find(B.load(), new_id)
     if new_id not in (job.materials or {}):
@@ -467,37 +549,69 @@ def board_swap(payload):
         job.materials[new_id] = B.to_material(board)
         job.boards = [b for b in job.board_ids if b != new_id] + [new_id]
 
-    # Off `board_refs` too, so a swap moves a board named only as a door leaf, a
-    # back, a drawer box or face, or an edging colour — all of which it used to
-    # leave behind, pointing at a board the project was about to stop carrying.
-    # `hand=False`: a bespoke panel's material was typed out panel by panel, and
-    # a swap does not rewrite it on the way past. On the October job that is
-    # eight panels and R848 — see `Cabinet.map_board_refs`.
+    # EVERY use of the old board moves (ruled 20 September 2026, overriding the
+    # earlier choice to leave hand-specified panels alone): every field
+    # `board_refs` knows about, every bespoke panel and every loose panel. A
+    # board that is being swapped out must not still be named anywhere.
+    # Held before anything moves: `map_board_refs` rewrites a bespoke panel's
+    # material in place, so afterwards there is no way to tell which ones it was.
+    typed = [p for p in _typed_panels(job) if p.material == old_id]
+
     touched = []
     for cab in job.cabinets:
-        fields_hit = cab.map_board_refs(lambda b: new_id if b == old_id else b,
-                                        hand=False)
+        fields_hit = cab.map_board_refs(lambda b: new_id if b == old_id else b)
         if fields_hit:
             touched.append({"cabinet": cab.number, "fields": fields_hit})
+
+    # A bespoke or loose panel stores `grain` and `edge_material` as TYPED
+    # values, not derived ones — `generate_job` puts them on the cut list exactly
+    # as the job defines them. So moving the board alone would leave a woodgrain
+    # panel at grain 0, or an edging name belonging to the board that just left.
+    # Both are re-derived here, and anything that cannot be is reported rather
+    # than carried over.
+    retyped, unmapped = [], []
+    for p in typed:
+        p.material = new_id          # a loose panel; already done for a bespoke one
+        moved = _retype_panel(p, job.materials, old_id, new_id)
+        if moved:
+            retyped.append(dict(moved, label=p.label))
+        if (p.edge_l or p.edge_w) and not p.edge_material:
+            unmapped.append({"label": p.label, "was": moved.get("tape_from", ""),
+                             "kind": moved.get("kind", "")})
 
     after_panels = generate_job(job)
     after = _totals(job, after_panels)
 
-    # Keyed by shape as well as designation: born_distinct lets two support lines
-    # share a label when they are the same size, and keying on the label alone
-    # would show one of them changing to a blank tape it never had.
-    def key(p):
-        return (p.label, p.role, p.length, p.width, p.edge_l, p.edge_w, p.qty)
-
-    was = {key(p): (p.material, p.edge_material) for p in before_panels}
     panels = [{"label": p.label, "role": p.role,
                "from": was[key(p)][0], "to": p.material,
                "tape_from": was[key(p)][1], "tape_to": p.edge_material}
               for p in after_panels
               if key(p) in was and was[key(p)] != (p.material, p.edge_material)]
 
+    # What the swap does to the validation, not just to the cost. A swap is how
+    # Rudolf previews a design, so a grain lock that no longer fits a sheet, an
+    # edging kind the new board does not offer, or a thickness that is wrong for
+    # the job it landed in has to be visible before anything is written.
+    def issue_key(i):
+        return (i.level, i.where, i.message, i.ref)
+
+    was_issues = {issue_key(i) for i in before_issues}
+    now_issues = validate(job, after_panels)
+    fresh = [i for i in now_issues if issue_key(i) not in was_issues]
+    gone = [i for i in before_issues
+            if issue_key(i) not in {issue_key(x) for x in now_issues}]
+
+    def as_dict(i):
+        return {"level": i.level, "where": i.where, "message": i.message, "ref": i.ref}
+
     out = {"ok": True, "from": old_id, "to": new_id,
            "cabinets": touched, "panels": panels,
+           "retyped": retyped, "unmapped": unmapped,
+           "merged": merged,
+           "new_issues": [as_dict(i) for i in fresh],
+           "fixed_issues": [as_dict(i) for i in gone],
+           "blocks": any(i.level == "critical" for i in now_issues),
+           "moved_by_board": _moved_by_board(before_panels, after_panels),
            "before": before, "after": after}
     if payload.get("apply"):
         out["job"] = job_to_dict(job)

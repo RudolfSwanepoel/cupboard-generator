@@ -82,13 +82,31 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
 
 
 def _panel_fits_board(panels, std):
-    """W2 — a 2882 mm strip was ordered off a 2750 mm board and quietly shortened."""
+    """W2 — a 2882 mm strip was ordered off a 2750 mm board and quietly shortened.
+
+    A grain-locked panel cannot be turned, so it is measured as it will be cut:
+    length along the sheet's length, width across it. A panel that only fits
+    rotated fits on a plain board and does not fit on a grained one, and the
+    nester would silently reject it — which is how a board swap onto a grained
+    board can take a panel off the layout without anything saying so. Checked
+    against all three fixed jobs when this was tightened: no new issue on any of
+    them, so nothing already quoted moves.
+    """
     out = []
     for p in panels:
-        long_side, short_side = max(p.length, p.width), min(p.length, p.width)
-        if long_side > std.sheet_l or short_side > std.sheet_w:
+        # Too big whichever way round it goes: the original fault, worded as it
+        # always was — check_boards and the stored snapshots pin it.
+        rotated = (max(p.length, p.width) > std.sheet_l
+                   or min(p.length, p.width) > std.sheet_w)
+        locked = bool(p.grain) and (p.length > std.sheet_l or p.width > std.sheet_w)
+        too_big = rotated or locked
+        # The grain is only worth mentioning when it is the REASON: a panel that
+        # would fit turned, on a board that will not let it turn.
+        how = "" if rotated else " with the grain locked, so it cannot be turned"
+        if too_big:
             out.append(Issue(CRITICAL, p.label,
-                             f"{p.length}x{p.width} does not fit a {std.sheet_l}x{std.sheet_w} board",
+                             f"{p.length}x{p.width} does not fit a "
+                             f"{std.sheet_l}x{std.sheet_w} board{how}",
                              "W2"))
     return out
 
@@ -191,7 +209,12 @@ def _edge_materials(job, panels, covered=frozenset()):
                              f"edge material {p.edge_material!r} is not in the lookup", "W10"))
         if ((p.edge_l or p.edge_w) and not p.edge_material
                 and str(p.cabinet) not in covered):
-            out.append(Issue(CRITICAL, p.label, "edges specified but no edge material"))
+            # Tagged EDGING like the rest: this is the one that catches a typed
+            # panel — bespoke or loose — left banded with nothing to band it in,
+            # which is what a board swap onto a board that does not offer the
+            # kind produces. The wording is unchanged; check_edging.py pins it.
+            out.append(Issue(CRITICAL, p.label, "edges specified but no edge material",
+                             EDGING_REF))
     return out
 
 

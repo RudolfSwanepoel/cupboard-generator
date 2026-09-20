@@ -367,22 +367,36 @@ def main() -> int:                                                  # noqa: C901
     check("every cabinet cut from it is named, with which field",
           (len(pre["cabinets"]), pre["cabinets"][0]),
           (19, {"cabinet": 1, "fields": ["carcass board"]}))
-    # 102, not the 101 it was: the drawer box sides, fronts and housed base used
-    # to be hardcoded MEL in the engine whatever the cabinet was cut from, so a
-    # carcass swap left them behind. They follow the drawer carcass board now.
+    # 111, not the 102 it was: the 8 bespoke panels and 1 loose panel that a swap
+    # used to leave behind on the old board now move with it (ruled 20 September
+    # 2026), so they appear in the diff as well.
+    #
+    # 102, not the 101 before that: the drawer box sides, fronts and housed base
+    # used to be hardcoded MEL in the engine whatever the cabinet was cut from,
+    # so a carcass swap left them behind. They follow the drawer carcass board.
     check("and every panel whose board or tape moves",
-          len(pre["panels"]), 102)
+          len(pre["panels"]), 111)
     check("two support lines sharing a designation are told apart by shape",
           [(x["label"], x["tape_from"], x["tape_to"])
            for x in pre["panels"] if x["label"] == "104"],
           [("104", "", ""), ("104", "PVC WOOD", "PVC WOOD")])
+    # MEL disappears entirely, where it used to be left holding 3 boards: a swap
+    # moves EVERY use of the old board now, bespoke and loose panels included
+    # (ruled 20 September 2026). A board that is swapped out must not still be
+    # named anywhere, or the cut list quotes a board the project no longer has.
     check("the board count before and after is the engine's",
-          (pre["before"]["boards"]["MEL"], pre["after"]["boards"]["MEL"]), (18, 3))
+          (pre["before"]["boards"]["MEL"], pre["after"]["boards"].get("MEL", 0)),
+          (18, 0))
+    check("and everything lands on the one board",
+          pre["after"]["boards"]["BROOKHILL"], 27)
     check("and so is the cost",
-          # 34723.50, not 34716.75: white-edged supports stay PVC WHITE on a
-          # Brookhill carcass now instead of following it into PVC WOOD, and the
-          # two edging lines round up differently (18 Sept 2026)
-          (pre["before"]["cost"], pre["after"]["cost"]), (28363.50, 34723.50))
+          # 35995.50: the 8 bespoke and 1 loose panel that used to be left behind
+          # on MEL are now Brookhill too, at R999 a board
+          (pre["before"]["cost"], pre["after"]["cost"]), (28363.50, 35995.50))
+    check("the 9 hand-specified panels are re-derived, not just re-boarded",
+          len(pre["retyped"]), 9)
+    check("swapping onto a board the project already has is a merge",
+          pre["merged"], True)
     check("a preview writes nothing", "job" in pre, False)
     check("and leaves the job it was asked about alone",
           sorted({c["carcass_board"] for c in d["cabinets"]}), ["MEL"])

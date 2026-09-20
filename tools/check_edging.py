@@ -265,6 +265,39 @@ def main():
     check("an unedged row carries no edging", sup[0].edge_material, "")
     check("and no band", sup[0].edge_l, 0)
 
+    # --- what the editor shows is what the cut list carries ----------------
+    print(NL + "every support row's edging IS the edge material on its cut-list line")
+    # The editor's "Ordered as" column reads `support_row_tape`; the engine cuts
+    # from the same call. They went out of step once — not because the engine was
+    # wrong, but because the editor kept the PREVIOUS compute's answer on screen
+    # (renderEditor leaves the DOM alone when the selection has not changed). The
+    # two are held together here so the display can only ever be the cut list's.
+    from cabinetgen.store import load as load_job                  # noqa: E402
+    import importlib.util                                          # noqa: E402
+    spec = importlib.util.spec_from_file_location(
+        "w", os.path.join(ROOT, "jobs", "wardrobe_oct2025.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    jobs = [("oct2025", mod.JOB)]
+    for name in ("Test.json", "Test_Build.json"):
+        path = os.path.join(ROOT, "jobs", name)
+        if os.path.exists(path):
+            jobs.append((name, load_job(path)))
+    rows_seen, bad = 0, []
+    for name, j in jobs:
+        panels = generate_job(j)
+        for c in j.cabinets:
+            if c.template == "none":
+                continue
+            cut = [p for p in panels
+                   if p.role == "Support" and p.cabinet == c.number]
+            shown = [c.support_row_tape(j.materials, r) for r in c.support_list]
+            rows_seen += len(shown)
+            if [p.edge_material for p in cut] != shown:
+                bad.append((name, c.number, shown, [p.edge_material for p in cut]))
+    check("rows checked across every fixed job", rows_seen > 0, True)
+    check("not one disagrees with its cut-list line", bad, [])
+
     # --- the legacy guarantee (A10) ----------------------------------------
     print("\nA JOB WHOSE MATERIALS HAVE NO NEW KEYS DOES NOT MOVE")
     old = {k: {kk: vv for kk, vv in v.items()

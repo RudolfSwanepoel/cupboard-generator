@@ -27,6 +27,7 @@ python tools/check_boards.py
 python tools/check_edging.py
 python tools/check_library.py
 python tools/check_single_source.py
+python tools/check_swap.py
 python tools/snapshot.py --compare baseline.json
 ```
 
@@ -71,6 +72,7 @@ tools/check_drag.py        overlaps, snap targets, door swings, pull-outs
 tools/check_elevation.py   per-wall elevations: chains close, plinth heights, hinges
 tools/check_edging.py      Has Edging, the kinds a board offers, its colour
 tools/check_single_source.py  the one list of which cabinet fields hold a board
+tools/check_swap.py        a swap moves every use of a board, and says what it does
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
 docs/ROOM-LAYOUT-SPEC.md  the room / plan / 3D build spec and its phasing
@@ -279,6 +281,50 @@ the case that proves it: a GREY carcass with three white-edged rows, which still
 come out `PVC WHITE`. `board` and `kind` are written to the job file only when a
 row actually names them, so a file saved before the control round-trips byte for
 byte.
+
+### Swapping a board moves every use of it
+
+**Ruled 20 September 2026**, overriding an earlier choice to leave hand-specified
+panels alone. A swap moves every use of the old board in the open project: every
+field `Cabinet.board_refs` knows about, every bespoke panel and every loose
+panel. A board being swapped out must not still be named anywhere, or the cut
+list quotes a board the project no longer carries. **No panel is renamed** — it
+keeps its designation and changes what it is cut from (the 14 September rule),
+pinned on a full merge of the October job where 254 panels change board.
+
+**A bespoke or loose panel stores `grain` and `edge_material` as TYPED values**,
+because `generate_job` is read-only with respect to them. Moving the board alone
+would leave a woodgrain panel at grain 0 — W8/D9 exactly, the 60 décor panels
+Plazaboard's counter caught and we did not. So a swap re-derives `grain` from the
+new board, and maps `edge_material` **by kind**: a panel edged in the old board's
+PVC comes out edged in the new board's PVC. An edging that never matched the old
+board is a literal somebody typed, and is left alone. If the new board does not
+offer the kind, the edging is cleared and the bands are left, so the panel still
+says it wants edging and the `EDGING` critical fires. On the October job this is
+9 panels, all of them grain 0 on a board that locks grain.
+
+**The preview reports what the swap does to the VALIDATION**, not only to the
+cost: new criticals and warnings, the ones that would go away, the panels each
+board gains and loses, and which hand-specified panels were re-derived. A swap is
+how a design gets previewed, so a problem it creates has to be on screen before
+anything is written.
+
+**`engine.resolved` hands a bespoke or loose panel back as the very same object
+the job holds.** The swap re-derives those records in place, so the "before"
+board and edging must be read *before* any of it — a diff taken afterwards
+compares the new values with themselves and reports that nothing moved. That was
+a real bug; `check_swap.py` pins it.
+
+**Swapping onto a board the project already carries MERGES the two**, and
+swapping back does not undo it: nothing records which panels used to be which.
+The confirm step says so.
+
+**A grain-locked panel is measured as it will be cut**, not turned
+(`validate._panel_fits_board`). One that only fits rotated fits on a plain board
+and does not fit on a grained one, and the nester would drop it without a word —
+which is what a swap onto a grained board can produce. A panel too big whichever
+way round it goes keeps its original wording, so the October job's `1808` reads
+exactly as it always did.
 
 ### One source for "which fields hold a board"
 

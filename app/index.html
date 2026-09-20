@@ -724,6 +724,7 @@ function renderEditor() {
     refreshGeometryReadout();
     refreshSwing();
     refreshEdging();
+    refreshSupports();
     return;
   }
   S.selRendered = S.sel;
@@ -1230,9 +1231,6 @@ function renderSupports() {
     : ((g && g.supports) || []);
   const migrated = !(c.support_rows && c.support_rows.length);
 
-  const edges_in_force = (g && g.tapes) || {};
-  // the engine's own answer for each kind of row — never worked out here
-  const tapeOf = (e) => ((g && g.support_edging) || {})[e] || "";
 
   const keys = (S.res && S.res.boards) || [];
   const allKinds = S.def.edging_kinds || ["pvc", "1mm", "2mm"];
@@ -1262,30 +1260,21 @@ function renderSupports() {
         esc(pre[k] || k)}</option>`).join("")}</select></td>`;
   };
 
-  const body = rows.map((r, i) => {
-    const name = r.name !== undefined ? r.name : tapeOf(r.edge);
-    const eff = r.eff_board || r.board || c.carcass_board || "";
-    const kind = r.eff_kind !== undefined ? r.eff_kind : (r.kind || "");
-    const wanted = kind && eff && !boardOffers(eff, kind);
-    return `<tr>
+  const body = rows.map((r, i) => `<tr>
       <td class="n">${i + 1}</td>
       ${boardCellFor(r, i)}
       ${kindCellFor(r, i)}
       <td><input type="number" step="1" min="0" data-sup="${i}" data-sk="qty"
            value="${r.qty}"></td>
-      <td class="note"${wanted ? ` style="color:var(--crit)"` : ""}>${
-        esc(name || (wanted
-          ? `${pre[kind] || kind} not offered by ${eff}`
-          : "not edged"))}${r.legacy ? ` <span class="note">(as quoted)</span>` : ""}</td>
+      <td class="note" data-suprow="${i}"></td>
       <td><button data-suprm="${i}" title="Remove this row">x</button></td>
-    </tr>`;
-  }).join("");
+    </tr>`).join("");
 
   const total = rows.reduce((a, r) => a + (r.qty || 0), 0);
-  const anyLegacy = rows.some((r) => r.legacy);
+  const anyLegacy = ((g && g.supports) || []).some((r) => r.legacy);
   box.innerHTML = `<table class="rows">
-    <colgroup><col style="width:20px"><col style="width:96px"><col style="width:86px">
-      <col style="width:52px"><col><col style="width:26px"></colgroup>
+    <colgroup><col style="width:20px"><col style="width:132px"><col style="width:98px">
+      <col style="width:44px"><col style="width:172px"><col style="width:24px"></colgroup>
     <thead><tr><th class="n">#</th><th>Board</th><th>Edging</th><th>Qty</th>
       <th>Ordered as</th><th></th>
     </tr></thead><tbody>${body ||
@@ -1300,6 +1289,35 @@ function renderSupports() {
       ${anyLegacy ? `A row marked <b>(as quoted)</b> was written before this control
       and is still edged exactly as that job was quoted; changing it here makes it
       the cabinet's own.` : ""}</p>`;
+  refreshSupports();
+}
+
+
+// "Ordered as" is the engine's answer for that row, and is only ever read back
+// — never worked out here. It is its own function because `renderEditor` leaves
+// the DOM alone when the selection has not changed (rebuilding it would take the
+// caret out of the field being typed into), so after a compute the only things
+// that update are the refresh* calls. Without this one the column kept whatever
+// the PREVIOUS compute said, which is how a row showing board WHITEMEL and PVC
+// still read "not edged".
+function refreshSupports() {
+  const c = S.sel !== null && S.job.cabinets[S.sel];
+  if (!c) return;
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const rows = (g && g.supports) || [];
+  const pre = S.def.edging_prefix || {};
+  document.querySelectorAll("#editor [data-suprow]").forEach((td) => {
+    const r = rows[+td.dataset.suprow];
+    if (!r) { td.textContent = "…"; td.style.color = ""; return; }
+    const eff = r.eff_board || "";
+    const kind = r.eff_kind || "";
+    const wanted = kind && eff && !boardOffers(eff, kind);
+    td.textContent = r.name
+      ? r.name + (r.legacy ? "  (as quoted)" : "")
+      : wanted ? `${pre[kind] || kind} not offered by ${eff}`
+      : "not edged";
+    td.style.color = (!r.name && wanted) ? "var(--crit)" : "";
+  });
 }
 
 // Any edit to the rows writes them out in full, so the migrated reading becomes
@@ -1987,26 +2005,90 @@ async function swapBoard(fromId, to) {
     {minimumFractionDigits: 2, maximumFractionDigits: 2});
   const boards = (t) => Object.keys(t.boards).sort()
     .map((m) => `${m} ${t.boards[m]}`).join(", ");
+  // The field labels are the engine's words already ("door leaf 2 board"), so
+  // they are shown as they come rather than translated here.
   const cabs = pre.cabinets.map((c) =>
-    `    cabinet ${c.cabinet} — ${c.fields.map((f) =>
-      f === "carcass_board" ? "carcass" : "exterior").join(" and ")}`).join("\n");
+    `    cabinet ${c.cabinet} — ${c.fields.join(", ")}`).join("\n");
   const shown = pre.panels.slice(0, 12).map((p) =>
     `    ${p.label}  ${p.role}  ${p.from} -> ${p.to}` +
     (p.tape_from !== p.tape_to ? `,  edging ${p.tape_from} -> ${p.tape_to}` : "")).join("\n");
   const more = pre.panels.length > 12
     ? `\n    ... and ${pre.panels.length - 12} more panels` : "";
 
+  // How many panels each board gains or loses: the figure to sanity check a
+  // swap against.
+  const moved = (pre.moved_by_board || []).map((m) =>
+    `    ${m.board}  ${m.before} -> ${m.after}`).join("\n");
+
+  // Bespoke and loose panels carry a TYPED grain and edging, so a swap brings
+  // those into line too — and says which it could not.
+  const retyped = (pre.retyped || []).length
+    ? `\n${pre.retyped.length} hand-specified panel${pre.retyped.length === 1 ? "" : "s"}` +
+      ` re-derived from the new board:\n` +
+      pre.retyped.slice(0, 8).map((r) =>
+        `    ${r.label}` +
+        (r.grain_to !== undefined ? `  grain ${r.grain_from} -> ${r.grain_to}` : "") +
+        (r.tape_to !== undefined
+          ? `  edging ${r.tape_from || "none"} -> ${r.tape_to || "NONE OFFERED"}` : "")
+      ).join("\n") +
+      (pre.retyped.length > 8 ? `\n    ... and ${pre.retyped.length - 8} more` : "") + "\n"
+    : "";
+
+  const unmapped = (pre.unmapped || []).length
+    ? `\n!! ${pre.unmapped.length} panel${pre.unmapped.length === 1 ? "" : "s"} ` +
+      `ask for edging ${pre.to} does not offer, so there is none to give:\n` +
+      pre.unmapped.slice(0, 8).map((u) =>
+        `    ${u.label}  was ${u.was || "—"}`).join("\n") + "\n"
+    : "";
+
+  // What the swap does to the VALIDATION, not just to the cost. A swap is how a
+  // design gets previewed, so a grain lock that no longer fits a sheet, or an
+  // edging the new board cannot supply, has to be on screen before it is written.
+  const issueLine = (i) =>
+    `    ${i.level === "critical" ? "CRITICAL" : "warning "}  ${i.where}  ${i.message}`;
+  const fresh = (pre.new_issues || []).length
+    ? `\nNEW problems this swap creates:\n` +
+      pre.new_issues.slice(0, 10).map(issueLine).join("\n") +
+      (pre.new_issues.length > 10
+        ? `\n    ... and ${pre.new_issues.length - 10} more` : "") + "\n"
+    : `\nNo new validation problems.\n`;
+  const fixed = (pre.fixed_issues || []).length
+    ? `\n${pre.fixed_issues.length} existing problem${
+        pre.fixed_issues.length === 1 ? "" : "s"} would go away.\n` : "";
+  // Only worth saying if THIS swap is what blocks it: a job that was already
+  // blocked before the swap is not news, and saying so every time teaches the
+  // reader to skip the line that matters.
+  const newCrits = (pre.new_issues || []).filter((i) => i.level === "critical").length;
+  const blocked = newCrits
+    ? `\nThis swap ADDS ${newCrits} critical${newCrits === 1 ? "" : "s"} — the export ` +
+      `is blocked until they are cleared.\n`
+    : pre.blocks ? `\n(The export was already blocked before this swap.)\n` : "";
+
+  // Merging is not reversible: once both boards are one, nothing records which
+  // panels used to be which, so swapping back does not undo it.
+  const merge = pre.merged
+    ? `\n!! ${pre.to} is ALREADY used in this project, so this MERGES the two ` +
+      `boards. Swapping back afterwards will not undo it — nothing records which ` +
+      `panels used to be ${pre.from}.\n`
+    : "";
+
   const ok = window.confirm(
-    `Swap ${pre.from} for ${pre.to} across this project?\n\n` +
-    `${pre.cabinets.length} cabinet${pre.cabinets.length === 1 ? "" : "s"}:\n${cabs}\n\n` +
-    `${pre.panels.length} panel${pre.panels.length === 1 ? "" : "s"} change board or edging:\n` +
-    `${shown}${more}\n\n` +
-    `Boards: ${boards(pre.before)}\n` +
+    `Swap ${pre.from} for ${pre.to} across this project?\n` +
+    merge +
+    `\n${pre.cabinets.length} cabinet${pre.cabinets.length === 1 ? "" : "s"}:\n${cabs}\n\n` +
+    (pre.panels.length
+      ? `${pre.panels.length} panel${pre.panels.length === 1 ? "" : "s"} change ` +
+        `board or edging:\n${shown}${more}\n`
+      : `No generated panel changes board or edging.\n`) +
+    retyped + unmapped +
+    (moved ? `\nPanels per board:\n${moved}\n` : "") +
+    fresh + fixed + blocked +
+    `\nBoards: ${boards(pre.before)}\n` +
     `    ->  ${boards(pre.after)}\n\n` +
     `Cost:   ${money(pre.before.cost)}\n` +
     `    ->  ${money(pre.after.cost)}\n\n` +
-    `No designation changes — a panel keeps its name and changes what it is cut ` +
-    `from. Cancel and nothing is written.\n\nApply?`);
+    `No panel is renamed — a panel keeps its designation and changes what it is ` +
+    `cut from. Cancel and nothing is written.\n\nApply?`);
   if (!ok) return;
 
   const done = await post("/api/board-swap",

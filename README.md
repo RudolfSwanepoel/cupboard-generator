@@ -34,6 +34,7 @@ python tools/check_boards.py
 python tools/check_edging.py
 python tools/check_library.py
 python tools/check_single_source.py
+python tools/check_swap.py
 ```
 
 The first rebuilds the October 2025 wardrobe from cabinet definitions and
