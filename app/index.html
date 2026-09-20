@@ -529,7 +529,7 @@ function renderList() {
     </tr>`;
   }).join("");
 
-  $("cabtable").innerHTML = S.job.cabinets.length ? `<table>
+  slot($("cabtable")).innerHTML = S.job.cabinets.length ? `<table>
     <thead><tr><th class="n">#</th><th class="n">W</th><th class="n">H</th><th class="n">D</th>
       <th>Kind</th><th>Fronts</th><th class="n">Shv</th><th></th><th>Note</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>`
@@ -721,7 +721,7 @@ function sectionHTML(c, sec) {
   } else {
     body = (sec.fields.length
             ? `<div class="grid">${sec.fields.map((f) => fieldHTML(c, f)).join("")}</div>`
-            : "") + (sec.slot ? `<div id="${sec.slot}"></div>` : "");
+            : "") + (sec.slot ? `<div id="${sec.slot}" data-slot="1"></div>` : "");
   }
   return `<div class="sec s-${sec.key}"><h3>${esc(sec.name)}${tick}</h3>${hint}${body}</div>`;
 }
@@ -744,44 +744,138 @@ function refreshGeometryReadout() {
   el.textContent = `Checks use ${g.width} × ${g.depth}, ${g.height} high (${how}).`;
 }
 
-// Rebuild part of the editor without throwing away what is being typed into.
-//
-// The caret is the whole reason the editor used to skip rebuilding itself when
-// the selection had not changed. Identify the focused control by the data
-// attributes that name it, rebuild, then find it again and restore the caret and
-// the scroll position. A control that no longer exists simply loses focus, which
-// is right — it is not there any more.
-function controlId(el) {
-  if (!el || !el.dataset) return null;
-  const d = el.dataset;
-  if (el.id) return "#" + el.id;
-  const parts = ["sup", "sk", "d", "dk", "k", "dboard", "edge", "ek", "leaf", "tick"]
-    .filter((a) => d[a] !== undefined)
-    .map((a) => `[data-${a}="${d[a]}"]`);
-  return parts.length ? parts.join("") : null;
+/* ---------- painting, instead of rebuilding ---------------------------------
+   The editor has to be rebuilt from the job on every compute, or a dropdown
+   keeps the options the library had when its section was last built — that is
+   how "Ordered as" went stale, and it was never only that one.
+
+   But rebuilding it with innerHTML threw away 49 of the editor's 59 controls on
+   every compute. A native dropdown belongs to the DOM node it was opened on, so
+   replacing that node closes it; the caret, the hover and the scroll go with it.
+   Measured on Test.json cabinet 4: every control in Structure, Drawers and
+   Supports was a new object after each compute, and the focused <select> was no
+   longer in the document at all.
+
+   So the new HTML is still built in full, and then APPLIED to the DOM that is
+   already there. A node that has not changed is left exactly as it is; a value
+   that has changed is written into the control in place; only a control that has
+   genuinely changed shape — or gone — is replaced. Two rules make that safe:
+
+   - A focused control is never touched: not its options, not its value. Focus
+     is what an open dropdown is, and it is also what is being typed into. It
+     catches up the moment focus leaves it (the focusout listener below).
+   - A slot div belongs to its own render function. sectionHTML emits it empty,
+     and wiping what renderStructure and the rest put there would defeat the lot.
+
+   Nothing in the editor attaches a listener to a control — they are all
+   delegated on #editor — so reusing a node cannot stack a second handler on it. */
+
+const VALUE_TAGS = {INPUT: 1, SELECT: 1, TEXTAREA: 1};
+
+function paint(box, html) {
+  if (!box) return;
+  if (!box.firstChild) { box.innerHTML = html; return; }
+  const next = document.createElement("div");
+  next.innerHTML = html;
+  morphChildren(box, next);
 }
 
-function withFocusKept(rebuild) {
-  const el = document.activeElement;
-  const inside = el && $("editor") && $("editor").contains(el);
-  const sel = inside ? controlId(el) : null;
-  const start = inside && el.selectionStart !== undefined ? el.selectionStart : null;
-  const end = inside && el.selectionEnd !== undefined ? el.selectionEnd : null;
-  const box = $("editor");
-  const top = box ? box.scrollTop : 0;
-
-  rebuild();
-
-  if (box) box.scrollTop = top;
-  if (!sel) return;
-  const back = box && box.querySelector(sel);
-  if (!back) return;
-  try {
-    back.focus({preventScroll: true});
-    if (start !== null && back.setSelectionRange) back.setSelectionRange(start, end);
-  } catch (err) { /* a select has no selection range; focus is enough */ }
+function morphChildren(dst, src) {
+  const want = src.childNodes;
+  for (let i = 0; i < want.length; i++) {
+    const b = want[i];
+    const a = dst.childNodes[i];
+    if (!a) { dst.appendChild(document.importNode(b, true)); continue; }
+    if (!alike(a, b)) { dst.replaceChild(document.importNode(b, true), a); continue; }
+    morphNode(a, b);
+  }
+  while (dst.childNodes.length > want.length) dst.removeChild(dst.lastChild);
 }
 
+// Two nodes are the same thing when they are the same sort of node in the same
+// place. A control is told apart by what NAMES it as well, so a rebuild that
+// reorders rows replaces the control rather than quietly re-pointing it at
+// another row — a drawer's board landing on the wrong drawer would be a wrong
+// cut list, which is worse than a flicker.
+function alike(a, b) {
+  if (a.nodeType !== b.nodeType) return false;
+  if (a.nodeType !== 1) return true;
+  if (a.tagName !== b.tagName) return false;
+  if ((a.id || "") !== (b.id || "")) return false;
+  if (!VALUE_TAGS[a.tagName]) return true;
+  return controlKey(a) === controlKey(b);
+}
+
+function controlKey(el) {
+  const d = el.dataset || {};
+  return ["sup", "sk", "d", "dk", "k", "dboard", "edge", "ek", "leaf", "tick", "t"]
+    .map((a) => (d[a] === undefined ? "" : d[a])).concat(el.type || "").join("|");
+}
+
+function morphNode(a, b) {
+  if (a.nodeType !== 1) {
+    if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
+    return;
+  }
+  if (a === document.activeElement) return;      // open, or being typed into
+  syncAttrs(a, b);
+  if (a.dataset.slot !== undefined) return;      // its render function owns it
+  if (a.tagName === "SELECT") { morphSelect(a, b); return; }
+  morphChildren(a, b);
+  if (a.tagName === "INPUT" || a.tagName === "TEXTAREA") morphValue(a, b);
+}
+
+function syncAttrs(a, b) {
+  for (let i = a.attributes.length - 1; i >= 0; i--) {
+    const n = a.attributes[i].name;
+    if (!b.hasAttribute(n)) a.removeAttribute(n);
+  }
+  for (let i = 0; i < b.attributes.length; i++) {
+    const at = b.attributes[i];
+    if (a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value);
+  }
+}
+
+// A control's value is a property, not an attribute, the moment anything has
+// typed into it — so the attribute is synced above and the property here.
+function morphValue(a, b) {
+  if (a.type === "checkbox" || a.type === "radio") {
+    const on = b.hasAttribute("checked");
+    if (a.checked !== on) a.checked = on;
+    return;
+  }
+  const v = b.getAttribute("value");
+  if (v !== null && a.value !== v) a.value = v;
+}
+
+// The options are morphed like any other children, so the <select> itself is
+// never replaced and an open list is never yanked out from under the pointer.
+function morphSelect(a, b) {
+  morphChildren(a, b);
+  const want = pickedValue(b);
+  if (want !== null && a.value !== want) a.value = want;
+}
+
+// A stand-in for a section's element, whose `innerHTML =` paints instead of
+// rebuilding. Each render function goes on writing its whole section as one
+// template literal — which is how they read best — and the DOM underneath is
+// updated in place.
+function slot(el) {
+  if (!el) return null;
+  return {el: el, set innerHTML(html) { paint(el, html); }};
+}
+
+function pickedValue(sel) {
+  const opts = sel.options;
+  for (let i = 0; i < opts.length; i++) {
+    if (opts[i].hasAttribute("selected")) return opts[i].value;
+  }
+  return opts.length ? opts[0].value : null;
+}
+
+// The whole editor, every time. What that costs is one HTML string; what it
+// buys is that no control can still be offering what the library said an edit
+// ago. `paint` is what stops it being a rebuild — see above.
 function renderEditor() {
   const box = $("editor");
   if (S.sel === null || S.sel === undefined || !S.job.cabinets[S.sel]) {
@@ -789,30 +883,6 @@ function renderEditor() {
     S.selRendered = -2;
     return;
   }
-  // Already showing this cabinet. The DOM used to be left alone here, and a
-  // fixed list of refresh* calls updated the readouts — which is how the stale
-  // "Ordered as" bug happened, and it was never only that one: every dropdown
-  // whose OPTIONS depend on the boards (Structure's board lists, the edging kind
-  // and colour lists in Doors, Drawers and Supports) kept whatever the library
-  // said when the section was last built. Change a board's edging on the Boards
-  // tab and come back, and the editor still offered the old kinds.
-  //
-  // So the dependent sections are rebuilt on every compute, and the caret is put
-  // back where it was — which is the thing leaving the DOM alone was protecting.
-  if (S.selRendered === S.sel) {
-    withFocusKept(() => {
-      renderStructure();
-      renderDoors();
-      renderDrawers();
-      renderSupports();
-    });
-    refreshGeometryReadout();
-    refreshSwing();
-    refreshEdging();
-    refreshSupports();
-    return;
-  }
-  S.selRendered = S.sel;
 
   const c = S.job.cabinets[S.sel];
   const sets = SECTIONS.map((sec) => sectionHTML(c, sec)).join("");
@@ -822,13 +892,39 @@ function renderEditor() {
        its ${c.bespoke.length} panel${c.bespoke.length === 1 ? " is" : "s are"} specified
        by hand in the job file. Size and finish fields above do not drive them.</div>` : "";
 
-  box.innerHTML = `<h2>Cabinet ${c.number}</h2><div class="body">${sets}${bespoke}</div>`;
+  const html = `<h2>Cabinet ${c.number}</h2><div class="body">${sets}${bespoke}</div>`;
+
+  // A different cabinet is a different editor and there is nothing on screen
+  // worth protecting, so it is built outright. The same cabinet is painted over
+  // what is already there.
+  if (S.selRendered !== S.sel) {
+    box.innerHTML = html;
+    S.selRendered = S.sel;
+  } else {
+    paint(box, html);
+  }
+
   renderStructure();
   renderDoors();
   renderDrawers();
   renderSupports();
   refreshGeometryReadout();
+  refreshSwing();
+  refreshEdging();
+  refreshSupports();
 }
+
+// A control that had focus was skipped by the paint — that is the rule that
+// keeps an open dropdown open and the caret where it was. Paint again once
+// focus has left it, so it cannot sit there offering options the Boards tab has
+// moved on from.
+let repaintTimer = null;
+$("editor").addEventListener("focusout", () => {
+  clearTimeout(repaintTimer);
+  repaintTimer = setTimeout(() => {
+    if (S.sel !== null && S.sel === S.selRendered) renderEditor();
+  }, 120);
+});
 
 $("editor").addEventListener("input", (e) => {
   const c = S.job.cabinets[S.sel];
@@ -841,7 +937,6 @@ $("editor").addEventListener("input", (e) => {
     if (!Array.isArray(c.door_boards)) c.door_boards = [];
     while (c.door_boards.length <= n) c.door_boards.push("");
     c.door_boards[n] = e.target.value;
-    S.selRendered = -2;
     schedule();
     return;
   }
@@ -852,7 +947,6 @@ $("editor").addEventListener("input", (e) => {
   if (edge !== undefined) {
     c[(edge === "door" ? "door_edge_" : "drawer_edge_") + e.target.dataset.ek] =
       e.target.value || null;
-    S.selRendered = -2;
     schedule();
     return;
   }
@@ -863,8 +957,7 @@ $("editor").addEventListener("input", (e) => {
     if (!Array.isArray(c.door_hinges)) c.door_hinges = [];
     while (c.door_hinges.length <= n) c.door_hinges.push("");
     c.door_hinges[n] = e.target.value;      // "" hands it back to the default rule
-    S.selRendered = -2;        // the side shown beside it is the engine's answer
-    schedule();
+    schedule();                // the side shown beside it is the engine's answer
     return;
   }
 
@@ -885,14 +978,10 @@ $("editor").addEventListener("input", (e) => {
           .filter((pt) => pt.length === 2 && pt.every((n) => !isNaN(n)));
     else if (t === "opt") c[k] = raw === "" ? null : parseInt(raw, 10);
     else c[k] = raw === "" ? 0 : parseInt(raw, 10);
-    // a board decides three tapes and two materials, so the section is rebuilt
-    // a board decides materials and edging, and the door count decides how many
-    // leaf rows there are, so the section is rebuilt rather than patched
-    if (k === "carcass_board" || k === "exterior_board" || k === "back_board" ||
-        k === "exterior_tape" || k === "back" || k === "doors" ||
-        k === "drawer_carcass_board" || k === "drawer_face_board") {
-      S.selRendered = -2;
-    }
+    // A board decides materials and edging, and the door count decides how many
+    // leaf rows there are. Both used to force the whole editor to be rebuilt;
+    // the compute that follows repaints every section off the reply, which is
+    // the same answer without throwing the controls away.
     schedule();
     return;
   }
@@ -901,8 +990,7 @@ $("editor").addEventListener("input", (e) => {
   if (tape !== undefined) {
     // "" is not a tape name: it means hand it back to the boards
     c[tape] = e.target.value === "" ? null : e.target.value;
-    S.selRendered = -2;         // the value beside it is the engine's answer
-    schedule();
+    schedule();                 // the value beside it is the engine's answer
     return;
   }
 
@@ -995,7 +1083,6 @@ $("editor").addEventListener("change", (e) => {
   });
   (S.job.plinths || []).forEach((p) => { if (p.first === from) p.first = to; });
   placesSig = null; gapsSig = null; plinthSig = null;
-  S.selRendered = -2;
   schedule(); renderList();
 });
 
@@ -1029,7 +1116,6 @@ $("editor").addEventListener("change", async (e) => {
   // A cabinet saved with no doors has a count of 0, and ticking the box must
   // not show "1" while building nothing: it gets the one door it is showing.
   if (key === "has_doors" && on && !((c.doors || 0) > 0)) c.doors = 1;
-  S.selRendered = -2;
   renderEditor();
   schedule();
 });
@@ -1038,10 +1124,9 @@ $("editor").addEventListener("click", (e) => {
   if (e.target.closest("[data-clearedge]")) {
     const c = S.job.cabinets[S.sel];
     c.door_edge = null;
-    // Rebuilt once the engine has answered, not before: the note being cleared
-    // is the engine's report of the override, so rebuilding now would show it
-    // again off the reply that still carried it.
-    S.selRendered = -2;
+    // Repainted once the engine has answered, not before: the note being
+    // cleared is the engine's report of the override, so painting now would
+    // show it again off the reply that still carried it.
     schedule();
     return;
   }
@@ -1091,7 +1176,7 @@ $("editor").addEventListener("click", (e) => {
    from and the elevation draws, so the two can never drift apart.           */
 
 function renderDoors() {
-  const box = $("doorbox");
+  const box = slot($("doorbox"));
   if (!box) return;
   const c = S.job.cabinets[S.sel];
   const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
@@ -1189,7 +1274,7 @@ function refreshSwing() {
    drawers.divide's, fetched, not worked out here.                           */
 
 function renderDrawers() {
-  const box = $("drawerbox");
+  const box = slot($("drawerbox"));
   if (!box) return;
   const c = S.job.cabinets[S.sel];
   const std = S.def.standard || {};
@@ -1285,8 +1370,20 @@ async function solveStack() {
   if (seq !== solveSeq) return;          // a newer stack is already being solved
   if (!r.ok) { toast(r.error, true); return; }
 
-  // what is ordered is still a list of heights: the engine's, written straight in
-  r.heights.forEach((h, i) => { if (c.drawers[i]) c.drawers[i].face_height = h; });
+  // What is ordered is still a list of heights: the engine's, written straight
+  // in. Only a height that actually MOVED schedules another compute. It used to
+  // schedule one every time, and since every compute re-renders the drawer table
+  // and every render re-solves the stack, a drawer cabinet sitting untouched on
+  // screen computed about three times a second for ever — rebuilding all 59
+  // controls each time, and lighting the unsaved-changes marker on a job nobody
+  // had edited.
+  let moved = false;
+  r.heights.forEach((h, i) => {
+    if (c.drawers[i] && c.drawers[i].face_height !== h) {
+      c.drawers[i].face_height = h;
+      moved = true;
+    }
+  });
   document.querySelectorAll("#drawerbox [data-mm]").forEach((td) => {
     td.textContent = r.heights[+td.dataset.mm];
   });
@@ -1300,7 +1397,7 @@ async function solveStack() {
       (over ? `<span class="over">the fixed faces over-run the opening —
                export is blocked until they fit</span>` : "");
   }
-  schedule();
+  if (moved) schedule();
 }
 
 async function applyPreset(which) {
@@ -1323,7 +1420,7 @@ async function applyPreset(which) {
 const SUPPORT_LABEL = {front: "Front-edged", white: "White-edged", none: "No edge"};
 
 function renderSupports() {
-  const box = $("supportbox");
+  const box = slot($("supportbox"));
   if (!box) return;
   const c = S.job.cabinets[S.sel];
   const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
@@ -1612,7 +1709,7 @@ function edgingHTML(c, which, opts) {
    told so, rather than quietly doing nothing.                               */
 
 function renderStructure() {
-  const box = $("structurebox");
+  const box = slot($("structurebox"));
   if (!box) return;
   const c = S.job.cabinets[S.sel];
   const keys = (S.res && S.res.boards) || [];
@@ -2343,8 +2440,7 @@ async function endFaceDrag() {
   if (!r.ok) { toast(r.error, true); return; }
   a.mode = "fixed"; a.face_height = r.top;
   b.mode = "fixed"; b.face_height = r.bottom;
-  S.selRendered = -2;          // those two rows are Fixed now; the rest is untouched
-  compute();
+  compute();                   // those two rows are Fixed now; the rest is untouched
 }
 
 /* ---------- dragging a cabinet in the elevation ----------------------------
@@ -2520,7 +2616,6 @@ function finishElevDrag(d) {
   d.place.x = d.at.x;
   d.place.z = d.at.z;
   placesSig = null;            // the placements table shows the new numbers
-  S.selRendered = -2;
   compute();
 }
 
