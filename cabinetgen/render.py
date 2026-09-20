@@ -7,21 +7,241 @@ wrong here it is wrong in the cut list too.
 from html import escape
 from typing import List
 
-from .model import Cabinet, Job, hinge_side
+from .model import (NO_COLOUR, Cabinet, Job, grain_of, hinge_side,
+                    material_board, material_colour, material_record)
 from .room import (LAYERS, cabinet_footprint, carcass_z, clashes, corner_points,
-                   gap_outline, gaps, geometry, overlaps, placed, plinth_choice_for,
-                   plinth_lengths, pullout_envelope, return_profiles, run_key, runs,
-                   swing_envelopes, to_world, wall_frames)
+                   gap_outline, gaps, geometry, layer_of, overlaps, placed,
+                   plinth_choice_for, plinth_lengths, pullout_envelope,
+                   return_profiles, run_key, runs, swing_envelopes, to_world,
+                   wall_frames)
 from .standard import Standard, STANDARD
 
 INK = "#191c1a"
 RULE = "#aab1a9"
 FAINT = "#d3d7d0"
-CARC = "#f2f3f0"
-DOOR = "#dceaea"
-FACE = "#f5ebd6"
 MUTED = "#767e78"
 CRIT = "#a4303f"
+
+PAPER = "#ffffff"
+
+# base / wall / tall are told apart by the OUTLINE now, because the fill says
+# which board a part is cut from (20 Sept 2026). The dash is 7 4, not the 4 3
+# the shelf lines and the openings already use, so an outline is never read as
+# one of those.
+LAYER_STROKE = {"base": ("1.3", ""),
+                "wall": ("1.3", ' stroke-dasharray="7 4"'),
+                "tall": ("2.2", "")}
+LEGEND_ROW = 15
+
+
+def board_look(job, board_id: str) -> dict:
+    """What one board looks like on a drawing: `colour`, `grain`, `picture`.
+
+    The one resolver. Every fill in the run, the wall elevations and the plan
+    comes through here, and no drawing states a colour of its own, so what you
+    see is what the cut list cuts. `job` is a Job or — for `_interior`, which is
+    handed the materials and nothing else — the job's `materials` dict straight.
+
+    A board nobody has coloured comes back NO_COLOUR with `set` False. That is
+    what the legend says "no colour set" from; it is never a warning.
+
+    `picture` is carried because the record has one. Nothing draws it yet.
+    """
+    materials = job.materials if isinstance(job, Job) else (job or {})
+    if not board_id:
+        return {"colour": NO_COLOUR, "set": False, "grain": False,
+                "picture": "", "ink": ink_on(NO_COLOUR)}
+    rec = material_record(materials, board_id)
+    colour = _hex(material_colour(materials, board_id))
+    return {"colour": colour,
+            "set": bool(_hex(str(rec.get("colour") or ""), "")),
+            "grain": bool(grain_of(materials, board_id)),
+            "picture": str(rec.get("picture") or ""),
+            "ink": ink_on(colour)}
+
+
+def _hex(colour: str, fallback: str = NO_COLOUR) -> str:
+    """`colour` as #rrggbb, or the fallback when it is not one.
+
+    Every fill in every drawing goes out through here. A colour picked in the
+    Boards tab is already cleaned on the way in, but a job file is a text file
+    somebody can edit, and a fill is written into the SVG as it stands — so
+    what is written is a hex value or nothing.
+    """
+    raw = (colour or "").strip().lstrip("#").lower()
+    if len(raw) == 3:
+        raw = "".join(ch * 2 for ch in raw)
+    if len(raw) != 6 or any(ch not in "0123456789abcdef" for ch in raw):
+        return fallback
+    return "#" + raw
+
+
+def _luminance(colour: str) -> float:
+    """Relative luminance of an #rrggbb — the sRGB definition WCAG contrast uses."""
+    raw = (colour or "").strip().lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(ch * 2 for ch in raw)
+    if len(raw) != 6:
+        return 1.0
+    try:
+        channels = [int(raw[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    except ValueError:
+        return 1.0
+    lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+           for c in channels]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def ink_on(fill: str) -> str:
+    """The ink that reads on a fill: dark on a light board, white on a dark one.
+
+    A board colour is chosen for the board, not for the numbers that end up on
+    it, so the ink is computed rather than stated — whichever of the two gives
+    the better contrast ratio against that fill wins. Computed here, because the
+    browser works out no dimension and no colour of its own.
+    """
+    lum = _luminance(fill)
+    against_ink = (lum + 0.05) / (_luminance(INK) + 0.05)
+    against_white = 1.05 / (lum + 0.05)
+    return INK if against_ink >= against_white else PAPER
+
+
+def _contrast(a: str, b: str) -> float:
+    """The WCAG contrast ratio between two colours, 1 to 21."""
+    la, lb = _luminance(a), _luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def _mix(a: str, b: str, t: float) -> str:
+    """`a` moved `t` of the way towards `b`, as #rrggbb."""
+    raw = [(c or "").strip().lstrip("#") for c in (a, b)]
+    raw = ["".join(ch * 2 for ch in r) if len(r) == 3 else r for r in raw]
+    if any(len(r) != 6 for r in raw):
+        return b
+    try:
+        ends = [[int(r[i:i + 2], 16) for i in (0, 2, 4)] for r in raw]
+    except ValueError:
+        return b
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}"
+                         for x, y in zip(ends[0], ends[1]))
+
+
+def muted_on(fill: str) -> str:
+    """The secondary ink on a fill — a face height, the size under a number.
+
+    MUTED wherever MUTED still reads, which is every light board, so the
+    drawings on white look exactly as they always have. On a mid or a dark
+    board it disappears — grey on grey is 1.04:1 — so there it is the fill
+    mixed most of the way towards whichever ink `ink_on` chose: a step quieter
+    than the number beside it, and never invisible.
+    """
+    return MUTED if _contrast(fill, MUTED) >= 3.0 else _mix(fill, ink_on(fill), 0.78)
+
+
+def _grain_lines(x, y, w, h, vertical, ink, pitch=7.0):
+    """Fine parallel lines over a fill, for a board whose record says `grain`.
+
+    The direction is the cut list's. `Length` is the grain direction, and a door
+    and a drawer face are both cut with `Length` up the front, so both get
+    vertical lines. Vertical on a drawer face is right — ruled 20 Sept 2026.
+
+    Decoration: nothing reads it back.
+    """
+    out = []
+    if w < 4 or h < 4:
+        return out
+    span = w if vertical else h
+    for i in range(1, int(span // pitch) + 1):
+        at = i * pitch
+        if vertical:
+            out.append(f'<line x1="{x + at:.1f}" y1="{y + 1:.1f}" '
+                       f'x2="{x + at:.1f}" y2="{y + h - 1:.1f}" '
+                       f'stroke="{ink}" stroke-width="0.5" stroke-opacity="0.22"/>')
+        else:
+            out.append(f'<line x1="{x + 1:.1f}" y1="{y + at:.1f}" '
+                       f'x2="{x + w - 1:.1f}" y2="{y + at:.1f}" '
+                       f'stroke="{ink}" stroke-width="0.5" stroke-opacity="0.22"/>')
+    return out
+
+
+def _layer_outline(layer: str, bad: bool = False):
+    """Stroke colour, width and dash for a carcass outline: `(ink, width, dash)`.
+
+    A clash still wins — red and heavy — but keeps its layer's dash, so a wall
+    unit in the way is still recognisably a wall unit.
+    """
+    width, dash = LAYER_STROKE.get(layer, ("1.3", ""))
+    return (CRIT, "2", dash) if bad else (INK, width, dash)
+
+
+def _seen(into: list, board_id: str):
+    if board_id and board_id not in into:
+        into.append(board_id)
+
+
+def _boards_drawn(job: Job, cabs) -> list:
+    """The boards a front elevation actually put on the paper, first drawn first.
+
+    The legend names what is in the drawing, not what the project carries: the
+    body's carcass board, each door leaf's, each drawer face's, and the boards
+    whose colour bands them.
+    """
+    into = []
+    for c in cabs:
+        _seen(into, c.carcass_board)
+        for i in range(c.door_count):
+            _seen(into, c.door_board(i))
+        for d in c.drawer_list:
+            _seen(into, c.face_board_of(d))
+        if c.door_count and c.door_tape(job.materials):
+            _seen(into, c.door_edge_colour_board)
+        if c.drawer_list and c.drawer_face_tape(job.materials):
+            _seen(into, c.drawer_face_edge_colour_board)
+    return into
+
+
+def _legend_rows(job: Job, ids, width) -> list:
+    """The legend, wrapped to the drawing's width. Wrapped, never truncated: an
+    ellipsis would drop a board off a list whose whole job is to be complete."""
+    mats = job.materials
+    rows, row, used = [], [], 0.0
+    for board_id in ids:
+        look = board_look(mats, board_id)
+        text = f"{board_id} — {material_board(mats, board_id)}"
+        if not look["set"]:
+            text += " (no colour set)"
+        entry = (look, text, 17 + len(text) * 4.9 + 16)
+        if row and used + entry[2] > width:
+            rows.append(row)
+            row, used = [], 0.0
+        row.append(entry)
+        used += entry[2]
+    if row:
+        rows.append(row)
+    return rows
+
+
+def _legend_height(rows) -> int:
+    return LEGEND_ROW * len(rows) + 4 if rows else 0
+
+
+def _legend_svg(rows, x, y) -> list:
+    """One swatch per board: its colour, a grain mark when the board is grained,
+    and `id - name`."""
+    out = []
+    for r, entries in enumerate(rows):
+        at_y = y + r * LEGEND_ROW
+        at_x = x
+        for look, text, width in entries:
+            out.append(f'<rect class="swatch" x="{at_x:.1f}" y="{at_y:.1f}" '
+                       f'width="13" height="10" fill="{look["colour"]}" '
+                       f'stroke="{RULE}" stroke-width="0.8"/>')
+            if look["grain"]:
+                out += _grain_lines(at_x, at_y, 13, 10, True, look["ink"], pitch=3.0)
+            out.append(f'<text x="{at_x + 17:.1f}" y="{at_y + 8.5:.1f}" '
+                       f'font-size="8.5" fill="{MUTED}">{escape(text)}</text>')
+            at_x += width
+    return out
 
 
 def tape_legend(job: Job) -> list:
@@ -74,34 +294,41 @@ def elevation_svg(job: Job, max_width: int = 1100) -> str:
     pad = 46
     scale = min((max_width - pad * 2) / total_w, 520 / max_h)
     W = int(total_w * scale) + pad * 2
-    H = int(max_h * scale) + pad * 2 + 14        # room under the floor for the tapes
+    rows = _legend_rows(job, _boards_drawn(job, cabs), W - pad * 2)
+    leg = _legend_height(rows)
+    H = int(max_h * scale) + pad * 2 + 14 + leg   # under the floor: tapes, then boards
 
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
            f'viewBox="0 0 {W} {H}" font-family="system-ui,sans-serif">',
            f'<rect width="{W}" height="{H}" fill="none"/>']
     x = pad
-    floor = H - pad - 14
+    floor = int(max_h * scale) + pad
     for c in cabs:
+        look = board_look(job, c.carcass_board)
+        stroke, sw, dash = _layer_outline(layer_of(c))
         w = c.width * scale
         h = c.height * scale
         y = floor - h
-        out.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" '
-                   f'fill="{CARC}" stroke="{INK}" stroke-width="1.4"/>')
-        out += _interior(c, x, y, w, h, scale, std)
+        # One group per cabinet, carrying its number — the run has no wall to
+        # drag along, so the press selects rather than moves (C9).
+        out.append(f'<g class="ecabg erun" data-cab="{c.number}">')
+        out.append(f'<rect class="ecab" data-cab="{c.number}" x="{x:.1f}" y="{y:.1f}" '
+                   f'width="{w:.1f}" height="{h:.1f}" fill="{look["colour"]}" '
+                   f'stroke="{stroke}" stroke-width="{sw}"{dash}/>')
+        out += _interior(c, x, y, w, h, scale, std, materials=job.materials)
         out.append(f'<text x="{x + w / 2:.1f}" y="{floor + 16:.1f}" font-size="11" '
                    f'text-anchor="middle" fill="{INK}">{c.number}</text>')
         out.append(f'<text x="{x + w / 2:.1f}" y="{floor + 29:.1f}" font-size="9.5" '
                    f'text-anchor="middle" fill="{MUTED}">{c.width}x{c.height}x{c.depth}</text>')
+        out.append("</g>")
         x += w + gap_mm * scale
 
     out.append(f'<line x1="{pad - 8}" y1="{floor:.1f}" x2="{W - pad + 8}" y2="{floor:.1f}" '
                f'stroke="{INK}" stroke-width="1.6"/>')
-    out += _tape_note(job, pad, H - 8, W - pad * 2)
+    out += _tape_note(job, pad, H - 8 - leg, W - pad * 2)
+    out += _legend_svg(rows, pad, H - leg + 2)
     out.append("</svg>")
     return "\n".join(out)
-
-
-LAYER_FILL = {"base": CARC, "wall": DOOR, "tall": FACE}
 
 
 def _note_svg(text: str, w: int = 260) -> str:
@@ -205,7 +432,10 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
     pad_l, pad_r, pad_t, pad_b = 72, 30, 64, 80
     scale = min((max_width - pad_l - pad_r) / length, 540 / top)
     W = int(length * scale) + pad_l + pad_r
-    H = int(top * scale) + pad_t + pad_b
+    rows = _legend_rows(job, _boards_drawn(job, [c for c, _p, _l, _g in on_wall]),
+                        W - pad_l - pad_r)
+    leg = _legend_height(rows)
+    H = int(top * scale) + pad_t + pad_b + leg
 
     def X(v):
         return pad_l + v * scale
@@ -313,23 +543,25 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
                        f'{", ".join(map(str, sorted(nums)))}</text>')
         out.append('</g>')
     if shapes:
-        out.append(f'<text x="{pad_l}" y="{H - 32}" font-size="8.5" fill="{MUTED}">'
+        out.append(f'<text x="{pad_l}" y="{H - 32 - leg}" font-size="8.5" fill="{MUTED}">'
                    f'Shaded outlines at the corners are the runs on the walls either side, '
                    f'seen end on.</text>')
 
     for c, p, lay, g in on_wall:
         z0 = carcass_z(c, p, std)
         cx, cy, cw, ch = X(p.x), Y(z0 + g.height), g.width * scale, g.height * scale
-        stroke, sw = (CRIT, "2") if c.number in bad else (INK, "1.3")
+        look = board_look(job, c.carcass_board)
+        stroke, sw, dash = _layer_outline(lay, c.number in bad)
         # One group per cabinet — the carcass, what is inside it and its number —
         # so a drag moves the whole thing rather than an empty outline.
         out.append(f'<g class="ecabg" data-cab="{c.number}">')
         out.append(f'<rect class="ecab" data-cab="{c.number}" x="{cx:.1f}" y="{cy:.1f}" '
-                   f'width="{cw:.1f}" height="{ch:.1f}" fill="{LAYER_FILL.get(lay, CARC)}" '
-                   f'stroke="{stroke}" stroke-width="{sw}"/>')
-        out += _interior(c, cx, cy, cw, ch, scale, std, flip=p.flip)
+                   f'width="{cw:.1f}" height="{ch:.1f}" fill="{look["colour"]}" '
+                   f'stroke="{stroke}" stroke-width="{sw}"{dash}/>')
+        out += _interior(c, cx, cy, cw, ch, scale, std, flip=p.flip,
+                         materials=job.materials)
         out.append(f'<text x="{cx + 4:.1f}" y="{cy + 11:.1f}" font-size="9.5" '
-                   f'fill="{INK}">{c.number}</text>')
+                   f'fill="{look["ink"]}">{c.number}</text>')
         if p.z == 0 and lay != "wall" and c.number not in boarded and cw >= 30:
             # no board covers these legs, so say what the space under the carcass is;
             # where each leg stands is not in Standard, so none is drawn
@@ -338,11 +570,12 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
         out.append('</g>')
 
     if any(c.door_count for c, _p, _lay, _g in on_wall):
-        out.append(f'<text x="{pad_l}" y="{H - 20}" font-size="8.5" fill="{MUTED}">'
+        out.append(f'<text x="{pad_l}" y="{H - 20 - leg}" font-size="8.5" fill="{MUTED}">'
                    f'Hinges drawn {std.hinge_inset_drawn} mm in from each door end, any '
                    f'between spread evenly — indicative only, not a drilling reference.'
                    f'</text>')
-    out += _tape_note(job, pad_l, H - 8, W - pad_l - pad_r)
+    out += _tape_note(job, pad_l, H - 8 - leg, W - pad_l - pad_r)
+    out += _legend_svg(rows, pad_l, H - leg + 2)
 
     for ob in wall.obstructions:
         kind = escape(ob.kind)
@@ -406,7 +639,10 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     span_y = max(max(ys) - min(ys), 1)
     scale = min((max_width - pad * 2) / span_x, (max_height - pad * 2) / span_y)
     W = int(span_x * scale) + pad * 2
-    H = int(span_y * scale) + pad * 2
+    rows = _legend_rows(job, _dedup(c.exterior_board for c, _p, _l in items),
+                        W - pad * 2)
+    leg = _legend_height(rows)
+    H = int(span_y * scale) + pad * 2 + leg
 
     def T(q):
         return (pad + (q[0] - min(xs)) * scale, pad + (q[1] - min(ys)) * scale)
@@ -427,10 +663,12 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     clashing = {c.cabinet for c in clashes(job, std)}
     colliding = {n for o in overlaps(job) for n in (o.a, o.b)}
     for cab, p, lay in faint:
-        out += _plan_cabinet(rm, cab, p, lay, T, faint=True, bad=False)
+        out += _plan_cabinet(rm, cab, p, lay, T, faint=True, bad=False,
+                             colour=board_look(job, cab.exterior_board)["colour"])
     for cab, p, lay in solid:
         out += _plan_cabinet(rm, cab, p, lay, T, faint=False,
-                             bad=cab.number in colliding)
+                             bad=cab.number in colliding,
+                             colour=board_look(job, cab.exterior_board)["colour"])
     # over the cabinets, not under them: a swing that fouls something has to be
     # visible against the thing it fouls
     out += _plan_fronts(job, solid, clashing, T, std)
@@ -441,6 +679,7 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     out += _plan_plinths(job, show, T)
     out += _plan_obstructions(rm, T)
     out += _plan_tracks(rm, corners, T)
+    out += _legend_svg(rows, pad, H - leg + 2)
 
     out.append("</svg>")
     return "\n".join(out)
@@ -613,20 +852,35 @@ def _wall_spans(w):
     return spans or [(0, w.length)]
 
 
-def _plan_cabinet(rm, cab, p, layer, T, faint, bad=False):
+def _dedup(ids) -> list:
+    into = []
+    for board_id in ids:
+        _seen(into, board_id)
+    return into
+
+
+def _plan_cabinet(rm, cab, p, layer, T, faint, bad=False, colour=None):
+    """One footprint, tinted with the exterior board's colour.
+
+    A tint, not a fill: the number and the size go on top of it, and a plan is
+    read for where things are before it is read for what they are made of. The
+    layer is in the outline, the way it is in the elevations — a tall unit drawn
+    heavier, and a wall unit dashed. The plan keeps its own 5 3 dash rather than
+    the elevations' 7 4: that is the kitchen-drawing convention it has always
+    used and tools/check_room.py pins it.
+    """
     fp = [T(q) for q in cabinet_footprint(rm, p, cab)]
     pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in fp)
-    # A wall unit sits over the base run, so it is drawn the way a kitchen plan
-    # draws one: dashed, and translucent enough to read what is underneath.
+    _stroke, width, _dash = _layer_outline(layer, bad)
     dash = ' stroke-dasharray="5 3"' if layer == "wall" else ""
-    fill_op = ' fill-opacity="0.45"' if layer == "wall" else ""
+    fill = "#f6e0e3" if bad else (colour or NO_COLOUR)
+    fill_op = ' fill-opacity="0.22"' if layer == "wall" else ' fill-opacity="0.35"'
+    if bad:
+        fill_op = ''
     op = ' opacity="0.30"' if faint else ""
-    fill = "#f6e0e3" if bad else LAYER_FILL.get(layer, CARC)
-    stroke = CRIT if bad else INK
-    width = "2" if bad else "1.1"
     return [f'<polygon class="cab" data-cab="{cab.number}" data-layer="{layer}" '
             f'points="{pts}" fill="{fill}"{fill_op} '
-            f'stroke="{stroke}" stroke-width="{width}"{dash}{op}/>']
+            f'stroke="{_stroke}" stroke-width="{width}"{dash}{op}/>']
 
 
 def _plan_label(rm, cab, p, T):
@@ -658,7 +912,8 @@ def _hinge_side(c: Cabinet, i: int, flip: bool) -> str:
     return hinge_side(c, i, c.door_count, bool(flip))
 
 
-def _hinge_marks(c: Cabinet, x0, top, dw, dh, door_h, flip, std: Standard):
+def _hinge_marks(c: Cabinet, x0, top, dw, dh, door_h, flip, std: Standard,
+                 materials=None):
     """The opening triangle, point on the hinge side, the hinges and their count.
 
     The count is the pot-hole figure the cut list already orders. The positions
@@ -673,31 +928,41 @@ def _hinge_marks(c: Cabinet, x0, top, dw, dh, door_h, flip, std: Standard):
     per_mm = dh / door_h
     for i in range(c.door_count):
         side = _hinge_side(c, i, flip)
+        # on the leaf's own colour: a grey door swallows a muted mark
+        mark = muted_on(board_look(materials or {}, c.door_board(i))["colour"])
         left, right = x0 + i * dw, x0 + i * dw + dw - 1
         hinge_x, latch_x = (left, right) if side == "L" else (right, left)
         out.append(f'<g class="hinge" data-cab="{c.number}" data-door="{i}" '
                    f'data-side="{side}">'
                    f'<polyline points="{latch_x:.1f},{top:.1f} {hinge_x:.1f},{top + dh / 2:.1f} '
-                   f'{latch_x:.1f},{top + dh:.1f}" fill="none" stroke="{MUTED}" '
+                   f'{latch_x:.1f},{top + dh:.1f}" fill="none" stroke="{mark}" '
                    f'stroke-width="0.7" stroke-dasharray="3 2"/>')
         for mm in marks:                      # measured up from the bottom of the door
             out.append(f'<circle class="hinge-at" data-mm="{mm}" '
                        f'cx="{hinge_x + (3 if side == "L" else -3):.1f}" '
-                       f'cy="{top + dh - mm * per_mm:.1f}" r="1.8" fill="{MUTED}"/>')
+                       f'cy="{top + dh - mm * per_mm:.1f}" r="1.8" fill="{mark}"/>')
         if dh > 30 and dw > 34:
             tx = hinge_x + (5 if side == "L" else -5)
             anchor = "start" if side == "L" else "end"
             out.append(f'<text x="{tx:.1f}" y="{top + dh - 5:.1f}" font-size="7.5" '
-                       f'text-anchor="{anchor}" fill="{MUTED}">{hinges} hinges</text>')
+                       f'text-anchor="{anchor}" fill="{mark}">{hinges} hinges</text>')
         out.append("</g>")
     return out
 
 
-def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None):
+def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
+              materials=None):
     """Doors, drawer faces and shelf lines, drawn from the bottom up.
 
     `flip` turns on the hinge marks and says which way a single door hangs. Left
     as None it draws exactly what the side-by-side sanity check always drew.
+
+    `materials` is the job's board records. Every fill here is the colour of the
+    board the cut list cuts that part from, resolved through `board_look`, and
+    no colour is stated here: leaf *i* is `door_board(i)`, a drawer face is
+    `face_board_of(d)`, and what is left of the body is the carcass board. With
+    none passed the whole thing falls back to the neutral colour, so a caller
+    that has no job still draws.
 
     Two things here are handles rather than drawing: each door leaf carries its
     cabinet, its index and the edge it hangs from, so clicking it can turn it
@@ -708,26 +973,42 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None):
     the stack on drop.
     """
     out = []
+    mats = materials or {}
+    body = board_look(mats, c.carcass_board)
     stack = c.drawer_list
     leaves = c.door_count
     door_h = 0
     if leaves:
         door_h = c.door_height or (c.height - std.door_height_gap)
 
+    # The band round a front is the colour of the board its edging is named
+    # from, and it is only there when the front carries edging at all — the same
+    # answer the cut list gives, through the same chain.
+    face_edge = (board_look(mats, c.drawer_face_edge_colour_board)["colour"]
+                 if stack and c.drawer_face_tape(mats) else "")
+    door_edge = (board_look(mats, c.door_edge_colour_board)["colour"]
+                 if leaves and c.door_tape(mats) else "")
+
     cursor = y + h                      # bottom of the cabinet, in svg y
     tops = [0.0] * len(stack)           # svg y of each face's top edge
     for i in range(len(stack) - 1, -1, -1):
         d = stack[i]
+        look = board_look(mats, c.face_board_of(d))
         fh = d.face_height * scale
         cursor -= fh
         tops[i] = cursor
-        out.append(f'<rect x="{x + 2:.1f}" y="{cursor + 1:.1f}" width="{w - 4:.1f}" '
-                   f'height="{max(fh - 2, 1):.1f}" fill="{FACE}" stroke="{RULE}" '
+        fx, fy, fw, fhh = x + 2, cursor + 1, w - 4, max(fh - 2, 1)
+        out.append(f'<rect x="{fx:.1f}" y="{fy:.1f}" width="{fw:.1f}" '
+                   f'height="{fhh:.1f}" fill="{look["colour"]}" stroke="{RULE}" '
                    f'stroke-width="0.8"/>')
+        if look["grain"]:
+            out += _grain_lines(fx, fy, fw, fhh, True, look["ink"])
+        if face_edge:
+            out += _edge_band(fx, fy, fw, fhh, face_edge)
         if fh > 13:
             out.append(f'<text x="{x + w / 2:.1f}" y="{cursor + fh / 2 + 3.5:.1f}" '
-                       f'font-size="9" text-anchor="middle" fill="{MUTED}">'
-                       f'{d.face_height}</text>')
+                       f'font-size="9" text-anchor="middle" '
+                       f'fill="{muted_on(look["colour"])}">{d.face_height}</text>')
         cursor -= std.stack_gap * scale
 
     # the join between two faces, as a grab handle. Its span is the two faces and
@@ -748,19 +1029,29 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None):
         dw = (w - 4) / leaves
         for i in range(leaves):
             side = _hinge_side(c, i, bool(flip))
+            look = board_look(mats, c.door_board(i))
+            dx = x + 2 + i * dw
             out.append(f'<rect class="edoor" data-cab="{c.number}" data-door="{i}" '
-                       f'data-hinge="{side}" x="{x + 2 + i * dw:.1f}" y="{top:.1f}" '
-                       f'width="{dw - 1:.1f}" height="{dh:.1f}" fill="{DOOR}" '
-                       f'stroke="{RULE}" stroke-width="0.8"/>')
+                       f'data-hinge="{side}" x="{dx:.1f}" y="{top:.1f}" '
+                       f'width="{dw - 1:.1f}" height="{dh:.1f}" '
+                       f'fill="{look["colour"]}" stroke="{RULE}" stroke-width="0.8"/>')
+            if look["grain"]:
+                out += _grain_lines(dx, top, dw - 1, dh, True, look["ink"])
+            if door_edge:
+                out += _edge_band(dx, top, dw - 1, dh, door_edge)
         if flip is not None:
-            out += _hinge_marks(c, x + 2, top, dw, dh, door_h, flip, std)
+            out += _hinge_marks(c, x + 2, top, dw, dh, door_h, flip, std, mats)
         if dh > 20:
+            lead = board_look(mats, c.door_board(0))
             out.append(f'<text x="{x + w / 2:.1f}" y="{top + dh / 2 + 3.5:.1f}" '
-                       f'font-size="9" text-anchor="middle" fill="{MUTED}">'
+                       f'font-size="9" text-anchor="middle" '
+                       f'fill="{muted_on(lead["colour"])}">'
                        f'{leaves} x {std.door_width(c.width, leaves)}</text>')
         cursor = top
 
-    # shelves, spread through whatever the doors cover
+    # shelves, spread through whatever the doors cover. Their ink follows the
+    # body's colour: a hairline in FAINT vanishes on a dark carcass.
+    inside = muted_on(body["colour"])
     n = c.shelves + c.fixed_shelves
     if n and not stack:
         span = y + h - cursor if leaves else h
@@ -768,10 +1059,23 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None):
         for i in range(1, n + 1):
             sy = base + span * i / (n + 1)
             out.append(f'<line x1="{x + 4:.1f}" y1="{sy:.1f}" x2="{x + w - 4:.1f}" '
-                       f'y2="{sy:.1f}" stroke="{FAINT}" stroke-width="1" '
-                       f'stroke-dasharray="4 3"/>')
+                       f'y2="{sy:.1f}" stroke="{inside}" stroke-width="1" '
+                       f'stroke-opacity="0.55" stroke-dasharray="4 3"/>')
     if c.divider_count:
         out.append(f'<line x1="{x + w / 2:.1f}" y1="{y + 4:.1f}" x2="{x + w / 2:.1f}" '
-                   f'y2="{y + h - 4:.1f}" stroke="{FAINT}" stroke-width="1.2"/>')
+                   f'y2="{y + h - 4:.1f}" stroke="{inside}" stroke-width="1.2" '
+                   f'stroke-opacity="0.55"/>')
     return out
 
+
+def _edge_band(x, y, w, h, colour):
+    """The edging on a front, as a thin line just inside its outline.
+
+    Inside rather than instead of the outline: a door edged in its own colour
+    would otherwise have nothing to show, and the front would lose its edge.
+    """
+    if w < 4 or h < 4:
+        return []
+    return [f'<rect class="eband" x="{x + 1:.1f}" y="{y + 1:.1f}" '
+            f'width="{w - 2:.1f}" height="{h - 2:.1f}" fill="none" '
+            f'stroke="{colour}" stroke-width="1.3"/>']

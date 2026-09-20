@@ -28,6 +28,7 @@ python tools/check_edging.py
 python tools/check_library.py
 python tools/check_single_source.py
 python tools/check_swap.py
+python tools/check_colour.py
 python tools/snapshot.py --compare baseline.json
 ```
 
@@ -43,6 +44,82 @@ against the cut list that was really sent to Plazaboard. Current state:
 If a change drops the clean-cabinet count or moves the cost estimate, it broke
 something. The eight cabinets that do not reproduce are listed in `KNOWN` in
 that script, each tied to a logged finding — those differences are correct.
+
+## Status
+
+**Part A (boards record and edging), Part B (one source for which fields hold
+a board) and Part C (board colour in the drawings) are built and checked.**
+Against the brief in `Claude outputs/claude-code-brief-boards-colour-panels-3d-2026-09-20.md`:
+
+- **A** — `has_edging`, `edging_kinds` and `colour` are fields on `Board`; the
+  Boards form owns them; every edging control and every piece of edging text
+  follows them. No edging name is stated anywhere but the Boards record.
+- **B** — `Cabinet._board_slots` is the one list of which fields hold a board, and
+  the swap, the un-select, the library scan and the validator all read it.
+- **C** — every fill in the run, the wall elevations and the plan is the colour of
+  the board that part is cut from, through `render.board_look`. See
+  **Drawings** below.
+
+Since then, and not in the brief: support rows carry a per-row **Cut from**
+board; a swap moves every panel; the editors refresh themselves; deleting a
+project moves its files to `jobs/_deleted/`; grain is shown in the swap step
+and on the cut list.
+
+**Next: Part D (independent panels), then E (placing them), then F (3D).**
+Nothing of D, E or F is built.
+
+Open questions from the brief that Rudolf has not ruled: **Q1** line endings
+and git hygiene (the working tree is CRLF, HEAD is LF; edit without changing a
+file's existing endings and review with `--ignore-space-at-eol`), **Q2** the
+panel cut-list code, **Q3** carcass-front edging when the exterior board offers
+no PVC, **Q5** `WHITE_EDGE`. **Q4 is ruled: drawer-face grain runs vertical, up
+the face height, exactly as the cut list has it. Never question it.** The
+proposed hard rules H5 and H6 are not in this file yet because they are his to
+accept; Part C was built as though they hold.
+
+## Drawings
+
+**A drawing is a read-only view of the model. Nothing reads one back.** The
+colours, the grain lines and the legend are output; no check, no cut list and
+no validation derives anything from them.
+
+**Every fill is the colour of the board that part is cut from**, resolved
+through the one function `render.board_look(job, board_id)` — colour, grain
+and picture off `Job.materials`, and nothing else. There is no colour literal
+for a board anywhere in `render.py`; `tools/check_colour.py` fails on one. A
+door leaf is `Cabinet.door_board(i)`, a drawer face `face_board_of(d)`, a
+carcass body `carcass_board`, a plan footprint `exterior_board` — the same
+resolvers the engine cuts from, so the paper and the cut list cannot disagree.
+A board nobody has coloured draws neutral (`model.NO_COLOUR`) and the legend
+says "no colour set". That is never a warning: a colour changes no cut.
+
+**Base, wall and tall are in the outline, not the fill** (20 September 2026).
+The fill was carrying the layer and now carries the board, so: base a normal
+stroke, wall dashed, tall heavier. The dash is `7 4`, deliberately not the
+`4 3` the shelf lines and openings use. The plan keeps its own `5 3` for a wall
+unit — the kitchen convention it always drew, pinned in `check_room.py`. A
+clash is still red and heavy, and keeps its layer's dash.
+
+**Ink is computed, never stated.** A board colour is picked for the board, not
+for the numbers that land on it, so `render.ink_on(fill)` takes whichever of
+the dark ink and white gives the better contrast ratio, and `muted_on(fill)`
+keeps the secondary text a step quieter without letting it vanish — a fixed
+grey on a mid grey board was 1.04:1. Both clear 3:1 on every fill.
+
+**Grain lines run the way the cut list cuts them.** `Length` is the grain
+direction, and doors and drawer faces are both cut with `Length` up the front,
+so both draw vertical lines. **Vertical on a drawer face is correct** (ruled 20
+September 2026) — no note on the drawing, no change to the cut list, and never
+raise it again. A plain board draws none.
+
+**Only a hex value reaches an SVG fill.** A job file is a text file somebody
+can edit, and a fill is written into the drawing as it stands, so `board_look`
+puts every colour through `render._hex` and falls back to neutral.
+
+**The run selects, it does not drag.** Its cabinets carry `data-cab` in a
+`g.ecabg.erun`; there is no wall to move along, so a press selects the cabinet
+and starts nothing. The run still ignores placements — it is the cabinet list
+drawn side by side, not a view of the room.
 
 ## Layout
 
@@ -73,6 +150,7 @@ tools/check_elevation.py   per-wall elevations: chains close, plinth heights, hi
 tools/check_edging.py      Has Edging, the kinds a board offers, its colour
 tools/check_single_source.py  the one list of which cabinet fields hold a board
 tools/check_swap.py        a swap moves every use of a board, and says what it does
+tools/check_colour.py      board colour in the drawings, and the ink that reads on it
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
 docs/ROOM-LAYOUT-SPEC.md  the room / plan / 3D build spec and its phasing
@@ -120,8 +198,9 @@ docs/ROOM-LAYOUT-SPEC.md  the room / plan / 3D build spec and its phasing
 **`boards.json` in the repo is the board library.** It is shared through git, so
 both machines see the same boards. `cabinetgen/boards.py` loads and saves it, and
 the Boards tab is where boards are added, edited and ticked into a project. Each
-record is a name, a tape token, a thickness, Grain or Plain, a last price and an
-optional picture.
+record is a name, a tape token, a thickness, Grain or Plain, a last price, an
+optional picture, whether it has edging and which kinds it offers, and its
+colour. Every one of those is stated there and nowhere else.
 
 **A project selects from the library, and selecting copies the record into the
 job.** `Job.boards` is the selection; `Job.materials[id]` is the copy. That copy

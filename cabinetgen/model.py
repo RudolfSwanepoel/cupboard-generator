@@ -666,7 +666,7 @@ class Cabinet:
         kind = self.door_edge_kind or self.exterior_tape
         if kind not in EXTERIOR_TAPES:
             kind = "2mm"
-        return tape_for(materials, self.door_edge_board or self.exterior_board, kind)
+        return tape_for(materials, self.door_edge_colour_board, kind)
 
     def drawer_face_tape(self, materials: dict) -> str:
         """The drawer faces' edging, chosen in the Drawers section.
@@ -680,9 +680,22 @@ class Cabinet:
         kind = self.drawer_edge_kind or self.door_edge_kind or self.exterior_tape
         if kind not in EXTERIOR_TAPES:
             kind = "2mm"
-        board = (self.drawer_edge_board or self.door_edge_board
-                 or self.exterior_board)
-        return tape_for(materials, board, kind)
+        return tape_for(materials, self.drawer_face_edge_colour_board, kind)
+
+    @property
+    def door_edge_colour_board(self) -> str:
+        """Which board the doors' edging takes its COLOUR from — its own choice,
+        or the cabinet's exterior board. One chain, so the tape name the cut list
+        carries and the band the drawing puts round a door leaf cannot name two
+        different boards."""
+        return self.door_edge_board or self.exterior_board
+
+    @property
+    def drawer_face_edge_colour_board(self) -> str:
+        """The same, for drawer faces: their own choice, then the doors', then the
+        cabinet's exterior board."""
+        return (self.drawer_edge_board or self.door_edge_board
+                or self.exterior_board)
 
     def drawer_box_tape(self, materials: dict) -> str:
         """PVC in the DRAWER CARCASS board's colour: drawer sides and fronts, and

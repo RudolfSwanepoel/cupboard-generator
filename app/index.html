@@ -156,6 +156,7 @@
   #elevation{position:relative}
   #elevation svg{user-select:none;-webkit-user-select:none}
   #elevation svg .ecabg{cursor:grab}
+  #elevation svg .ecabg.erun{cursor:pointer}
   #elevation svg .ecabg:hover .ecab{stroke-width:2.2}
   #elevation svg .ecabg.dragging{cursor:grabbing;opacity:.6}
   #elevdrag{position:absolute;background:var(--ink);color:#fff;font-size:11px;
@@ -2376,10 +2377,16 @@ function elevPoint(svg, evt) {
 
 $("elevation").addEventListener("pointerdown", async (e) => {
   const grp = e.target.closest(".ecabg");
-  if (!grp || !S.job.room) return;
-  const track = elevTrack();
-  if (!track) return;                      // the run view has no wall to move along
+  if (!grp) return;
   const number = +grp.dataset.cab;
+  const track = elevTrack();
+  // The run has no wall to move along, so a press there selects the cabinet and
+  // starts nothing: it is the list, drawn. The same for a job with no room.
+  if (!track || !S.job.room) {
+    const i = S.job.cabinets.findIndex((x) => x.number === number);
+    if (i >= 0 && i !== S.sel) { S.sel = i; renderList(); }
+    return;
+  }
   const p = S.job.placements.find((x) => x.cabinet === number);
   if (!p) return;
 

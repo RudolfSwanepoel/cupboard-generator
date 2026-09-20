@@ -240,7 +240,11 @@ base run, which is the standard kitchen drawing convention.
 ## Plan view
 
 `render.plan_svg(job, show=(...), ghost=(...))` in the existing `render.py`,
-same house style and colours as `elevation_svg`.
+same house style as `elevation_svg`. Since 20 September 2026 the fill is the
+board: each footprint is tinted faintly with its exterior board's colour
+through `render.board_look`, and base / wall / tall are told apart by the
+outline rather than by the fill — tall heavier, wall still dashed. See
+**Drawings** in CLAUDE.md.
 
 Draws: wall lines with lengths, openings as breaks in the wall, obstructions as
 marked boxes, each cabinet as a rectangle at its true plan position, fillers
