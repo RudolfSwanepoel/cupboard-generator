@@ -3,11 +3,11 @@
   "boards": [
     "BACK",
     "BROOKHILL",
-    "MEL",
+    "WHITEMEL",
     "GREY"
   ],
   "materials": {
-    "MEL": {
+    "WHITEMEL": {
       "board": "SUPER WHITE MELAMINE 16MM",
       "name": "SUPER WHITE MELAMINE 16MM",
       "tape": "WHITE",
@@ -49,7 +49,7 @@
       "number": 1,
       "width": 600,
       "height": 2400,
-      "depth": 500,
+      "depth": 600,
       "kind": "tall",
       "back": "four",
       "template": "standard",
@@ -75,7 +75,7 @@
       "drawers": [],
       "has_drawers": null,
       "exposed_sides": 0,
-      "carcass_board": "MEL",
+      "carcass_board": "WHITEMEL",
       "exterior_board": "BROOKHILL",
       "back_board": "BACK",
       "exterior_tape": "2mm",
@@ -102,7 +102,7 @@
       "number": 2,
       "width": 450,
       "height": 780,
-      "depth": 500,
+      "depth": 570,
       "kind": "base",
       "back": "three",
       "template": "standard",
@@ -125,7 +125,7 @@
       "drawers": [],
       "has_drawers": null,
       "exposed_sides": 0,
-      "carcass_board": "MEL",
+      "carcass_board": "WHITEMEL",
       "exterior_board": "BROOKHILL",
       "back_board": "BACK",
       "exterior_tape": "2mm",
@@ -152,7 +152,7 @@
       "number": 3,
       "width": 450,
       "height": 780,
-      "depth": 500,
+      "depth": 570,
       "kind": "base",
       "back": "three",
       "template": "standard",
@@ -175,7 +175,7 @@
       "drawers": [],
       "has_drawers": null,
       "exposed_sides": 0,
-      "carcass_board": "MEL",
+      "carcass_board": "WHITEMEL",
       "exterior_board": "BROOKHILL",
       "back_board": "BACK",
       "exterior_tape": "2mm",
@@ -230,7 +230,7 @@
       "drawers": [],
       "has_drawers": null,
       "exposed_sides": 0,
-      "carcass_board": "MEL",
+      "carcass_board": "WHITEMEL",
       "exterior_board": "BROOKHILL",
       "back_board": "BACK",
       "exterior_tape": "2mm",
@@ -257,7 +257,7 @@
       "number": 4,
       "width": 400,
       "height": 780,
-      "depth": 500,
+      "depth": 570,
       "kind": "base",
       "back": "three",
       "template": "standard",
@@ -315,7 +315,7 @@
       ],
       "has_drawers": null,
       "exposed_sides": 1,
-      "carcass_board": "MEL",
+      "carcass_board": "WHITEMEL",
       "exterior_board": "BROOKHILL",
       "back_board": "BACK",
       "exterior_tape": "2mm",
@@ -368,7 +368,7 @@
       "drawers": [],
       "has_drawers": null,
       "exposed_sides": 0,
-      "carcass_board": "MEL",
+      "carcass_board": "WHITEMEL",
       "exterior_board": "GREY",
       "back_board": "BACK",
       "exterior_tape": "2mm",
@@ -395,7 +395,7 @@
       "number": 7,
       "width": 350,
       "height": 780,
-      "depth": 500,
+      "depth": 570,
       "kind": "base",
       "back": "none",
       "template": "standard",
@@ -429,7 +429,7 @@
           "base": "board",
           "mode": "share",
           "share": 1,
-          "box_board": null,
+          "box_board": "WHITEMEL",
           "face_board": null
         },
         {
@@ -438,7 +438,7 @@
           "base": "board",
           "mode": "share",
           "share": 1,
-          "box_board": null,
+          "box_board": "WHITEMEL",
           "face_board": null
         },
         {
@@ -447,7 +447,7 @@
           "base": "board",
           "mode": "share",
           "share": 1,
-          "box_board": null,
+          "box_board": "WHITEMEL",
           "face_board": null
         },
         {
@@ -456,7 +456,7 @@
           "base": "board",
           "mode": "share",
           "share": 1,
-          "box_board": null,
+          "box_board": "WHITEMEL",
           "face_board": null
         }
       ],
