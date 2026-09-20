@@ -13,8 +13,15 @@
       "tape": "WHITE",
       "thickness": 16,
       "grain": "plain",
-      "price": 575,
-      "picture": ""
+      "price": 575.0,
+      "picture": "",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#ffffff"
     },
     "BROOKHILL": {
       "board": "BROOKHILL FUSION",
@@ -22,8 +29,15 @@
       "tape": "BROOKHILL",
       "thickness": 16,
       "grain": "grain",
-      "price": 999,
-      "picture": ""
+      "price": 999.0,
+      "picture": "",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#d2b36a"
     },
     "BACK": {
       "board": "WHITE MASONITE BACKING 3MM",
@@ -31,8 +45,15 @@
       "tape": "WHITE",
       "thickness": 3,
       "grain": "plain",
-      "price": 310,
-      "picture": ""
+      "price": 310.0,
+      "picture": "",
+      "has_edging": false,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": ""
     },
     "GREY": {
       "board": "Grey",
@@ -40,8 +61,15 @@
       "tape": "Grey",
       "thickness": 16,
       "grain": "plain",
-      "price": 1100,
-      "picture": ""
+      "price": 1100.0,
+      "picture": "",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#504f4e"
     }
   },
   "cabinets": [
@@ -350,6 +378,18 @@
         {
           "edge": "none",
           "qty": 4
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc"
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "1mm"
         }
       ],
       "supports": 4,

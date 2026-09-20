@@ -9,7 +9,14 @@
       "thickness": 16,
       "grain": "plain",
       "price": 575,
-      "picture": ""
+      "picture": "",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#ffffff"
     },
     {
       "id": "BROOKHILL",
@@ -18,7 +25,14 @@
       "thickness": 16,
       "grain": "grain",
       "price": 999,
-      "picture": ""
+      "picture": "",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#d2b36a"
     },
     {
       "id": "BACK",
@@ -27,7 +41,14 @@
       "thickness": 3,
       "grain": "plain",
       "price": 310,
-      "picture": ""
+      "picture": "",
+      "has_edging": false,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": ""
     },
     {
       "id": "GREY",
@@ -36,7 +57,14 @@
       "thickness": 16,
       "grain": "plain",
       "price": 1100,
-      "picture": ""
+      "picture": "",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#504f4e"
     }
   ]
 }
