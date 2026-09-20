@@ -134,6 +134,8 @@
   .tape .leaf select{flex:1;min-width:0}
   .tape .leaf b{min-width:96px;font-variant-numeric:tabular-nums}
   .tape .leaf b.over{color:var(--crit)}
+  /* a board with no edging at all: grey, because that is a setting, not a fault */
+  .tape .leaf b.off{color:var(--muted);font-weight:400}
   .tape .note{display:block;margin-top:2px;line-height:1.3}
   /* nine columns in a side panel (the settings column is 560 wide for them):
      let the numbers and board ids have the room, not the labels */
@@ -822,8 +824,19 @@ $("editor").addEventListener("input", (e) => {
   if (sup !== undefined) {
     const rows = supportRows();
     const sk = e.target.dataset.sk;
-    if (sk === "qty") rows[+sup].qty = Math.max(parseInt(e.target.value, 10) || 0, 0);
-    else { rows[+sup].edge = e.target.value; renderSupports(); }
+    const row = rows[+sup];
+    if (sk === "qty") row.qty = Math.max(parseInt(e.target.value, 10) || 0, 0);
+    else if (sk === "board") {
+      row.board = e.target.value;
+      // the board no longer offers what this row asked for: drop the kind rather
+      // than order an edging that board does not have
+      if (row.kind && !boardOffers(row.board, row.kind)) row.kind = "";
+      renderSupports();
+    } else if (sk === "kind") {
+      row.kind = e.target.value;
+      if (!row.board) row.board = c.carcass_board || "";
+      renderSupports();
+    } else { row.edge = e.target.value; renderSupports(); }
     schedule();
     return;
   }
@@ -1002,7 +1015,11 @@ function renderDoors() {
       <select data-dboard="${i}" title="what this leaf is cut from">
         <option value=""${chosen ? "" : " selected"}>exterior board (${
           esc(c.exterior_board || "—")})</option>
-        ${keys.map((k) => `<option value="${esc(k)}"${k === chosen ? " selected" : ""}>${
+        ${chosen && boardIsThin(chosen)
+          ? `<option value="${esc(chosen)}" selected>${esc(chosen)} (3 mm — too thin for a door)</option>`
+          : ""}
+        ${keys.filter((k) => !boardIsThin(k)).map((k) =>
+          `<option value="${esc(k)}"${k === chosen ? " selected" : ""}>${
           esc(k)}</option>`).join("")}
       </select>
     </div>`);
@@ -1077,10 +1094,15 @@ function renderDrawers() {
   // cabinet-wide choice an older job file may still carry).
   const boxDefault = c.drawer_carcass_board || c.carcass_board || "";
   const faceDefault = c.drawer_face_board || c.exterior_board || "";
+  // A drawer box and a drawer face are both built from a sheet, so the 3 mm
+  // backing is not offered. One already stored stays, flagged.
   const boardCell = (i, dk, v, follows, what) => `<td><select data-d="${i}"
       data-dk="${dk}" title="${esc(what)} — blank follows Structure (${esc(follows || "—")})">
       <option value=""${v ? "" : " selected"}>(${esc(follows || "—")})</option>
-      ${keys.map((k) => `<option value="${esc(k)}"${k === v ? " selected" : ""}>${
+      ${v && boardIsThin(v)
+        ? `<option value="${esc(v)}" selected>${esc(v)} (3 mm — too thin)</option>` : ""}
+      ${keys.filter((k) => !boardIsThin(k)).map((k) =>
+        `<option value="${esc(k)}"${k === v ? " selected" : ""}>${
         esc(k)}</option>`).join("")}</select></td>`;
 
   const rows = c.drawers.map((d, i) => {
@@ -1212,32 +1234,72 @@ function renderSupports() {
   // the engine's own answer for each kind of row — never worked out here
   const tapeOf = (e) => ((g && g.support_edging) || {})[e] || "";
 
-  const body = rows.map((r, i) => `<tr>
+  const keys = (S.res && S.res.boards) || [];
+  const allKinds = S.def.edging_kinds || ["pvc", "1mm", "2mm"];
+  const pre = S.def.edging_prefix || {};
+
+  // A row is edged in a board and one of the kinds THAT board offers on the
+  // Boards tab — there is no edging name stated here. A row that still carries
+  // only the old `edge` is shown at what it resolves to, and keeps it until it
+  // is edited.
+  const boardCellFor = (r, i) => {
+    const eff = r.eff_board || r.board || c.carcass_board || "";
+    const lost = eff && keys.indexOf(eff) < 0;
+    return `<td><select data-sup="${i}" data-sk="board">
+      ${lost ? `<option value="${esc(eff)}" selected>${esc(eff)} (not selected)</option>` : ""}
+      ${keys.map((k) => `<option value="${esc(k)}"${k === eff ? " selected" : ""}>${
+        esc(k)}</option>`).join("")}</select></td>`;
+  };
+  const kindCellFor = (r, i) => {
+    const eff = r.eff_board || r.board || c.carcass_board || "";
+    const kind = r.eff_kind !== undefined ? r.eff_kind : (r.kind || "");
+    const offered = allKinds.filter((k) => boardOffers(eff, k));
+    const lost = kind && offered.indexOf(kind) < 0;
+    return `<td><select data-sup="${i}" data-sk="kind">
+      <option value=""${kind ? "" : " selected"}>not edged</option>
+      ${lost ? `<option value="${esc(kind)}" selected>${esc(pre[kind] || kind)} (not offered)</option>` : ""}
+      ${offered.map((k) => `<option value="${esc(k)}"${k === kind ? " selected" : ""}>${
+        esc(pre[k] || k)}</option>`).join("")}</select></td>`;
+  };
+
+  const body = rows.map((r, i) => {
+    const name = r.name !== undefined ? r.name : tapeOf(r.edge);
+    const eff = r.eff_board || r.board || c.carcass_board || "";
+    const kind = r.eff_kind !== undefined ? r.eff_kind : (r.kind || "");
+    const wanted = kind && eff && !boardOffers(eff, kind);
+    return `<tr>
       <td class="n">${i + 1}</td>
-      <td><select data-sup="${i}" data-sk="edge">${edges.map((e) =>
-        `<option value="${esc(e)}"${e === r.edge ? " selected" : ""}>${
-          esc(SUPPORT_LABEL[e] || e)}</option>`).join("")}</select></td>
+      ${boardCellFor(r, i)}
+      ${kindCellFor(r, i)}
       <td><input type="number" step="1" min="0" data-sup="${i}" data-sk="qty"
            value="${r.qty}"></td>
-      <td class="note">${esc(tapeOf(r.edge) || "—")}</td>
+      <td class="note"${wanted ? ` style="color:var(--crit)"` : ""}>${
+        esc(name || (wanted
+          ? `${pre[kind] || kind} not offered by ${eff}`
+          : "not edged"))}${r.legacy ? ` <span class="note">(as quoted)</span>` : ""}</td>
       <td><button data-suprm="${i}" title="Remove this row">x</button></td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
 
   const total = rows.reduce((a, r) => a + (r.qty || 0), 0);
+  const anyLegacy = rows.some((r) => r.legacy);
   box.innerHTML = `<table class="rows">
-    <colgroup><col style="width:20px"><col style="width:120px"><col style="width:56px">
-      <col><col style="width:26px"></colgroup>
-    <thead><tr><th class="n">#</th><th>Supports</th><th>Qty</th><th>Edging</th><th></th>
+    <colgroup><col style="width:20px"><col style="width:96px"><col style="width:86px">
+      <col style="width:52px"><col><col style="width:26px"></colgroup>
+    <thead><tr><th class="n">#</th><th>Board</th><th>Edging</th><th>Qty</th>
+      <th>Ordered as</th><th></th>
     </tr></thead><tbody>${body ||
-      `<tr><td colspan="5" class="note">No supports.</td></tr>`}</tbody></table>
+      `<tr><td colspan="6" class="note">No supports.</td></tr>`}</tbody></table>
     <div class="dtot"><span>total <b>${total}</b> support${total === 1 ? "" : "s"}</span>
       ${migrated ? `<span class="note">migrated from the old
         ${c.supports}/${c.edged_supports}/${c.white_supports} numbers — edit to keep
         it as rows</span>` : ""}</div>
     <div class="presets"><button id="supadd">+ Support row</button></div>
-    <p class="hint">Front-edged supports face the front, so they take the exterior
-      board chosen in Structure — <b>${esc(c.exterior_board || "—")}</b> — as
-      <b>${esc(edges_in_force.carcass_edge || "—")}</b>.</p>`;
+    <p class="hint">A support row is edged in a board and one of the kinds that
+      board offers on the <b>Boards</b> tab — nothing here states an edging name.
+      ${anyLegacy ? `A row marked <b>(as quoted)</b> was written before this control
+      and is still edged exactly as that job was quoted; changing it here makes it
+      the cabinet's own.` : ""}</p>`;
 }
 
 // Any edit to the rows writes them out in full, so the migrated reading becomes
@@ -1247,7 +1309,12 @@ function supportRows() {
   const c = S.job.cabinets[S.sel];
   if (!(c.support_rows && c.support_rows.length)) {
     const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
-    c.support_rows = ((g && g.supports) || []).map((r) => ({edge: r.edge, qty: r.qty}));
+    // Touching a migrated cabinet writes its rows out at exactly what they were
+    // resolving to, board and kind included — so the first edit cannot silently
+    // move what the other rows are edged in.
+    c.support_rows = ((g && g.supports) || []).map((r) => ({
+      edge: r.edge, qty: r.qty,
+      board: r.eff_board || "", kind: r.eff_kind || ""}));
   }
   return c.support_rows;
 }
@@ -1262,47 +1329,110 @@ function supportRows() {
    name can never reach a real order as a tape (D6 / W10). The name shown beside
    the two dropdowns is always the engine's answer, never one built here.      */
 
+// Whether a board is the 3 mm backing sheet. The answer is the engine's, carried
+// on the material record — the browser does not decide what counts as thin.
+function boardIsThin(key) {
+  return !!(((S.res && S.res.materials) || {})[key] || {}).thin;
+}
+
 // A board the cabinet must name. Offers the project's boards and nothing else —
 // the library is chosen from on the Boards tab.
-function boardSel(c, key, label, hint) {
+//
+// `want` filters by what the board physically can be: "thick" for anything built
+// from a sheet (carcass, exterior, door leaf, drawer face, drawer box), "thin"
+// for the backing. A stored value that fails the rule is never dropped — it is
+// still shown, flagged, and the validator reports it.
+function boardSel(c, key, label, hint, want) {
   const mats = (S.res && S.res.materials) || {};
-  const keys = (S.res && S.res.boards) || Object.keys(mats);
+  const all = (S.res && S.res.boards) || Object.keys(mats);
+  const keys = !want ? all
+    : all.filter((k) => want === "thin" ? boardIsThin(k) : !boardIsThin(k));
   const row = (k) => `<option value="${esc(k)}"${k === c[key] ? " selected" : ""}>${
     esc(k)} — ${esc((mats[k] || {}).board || k)}${
     (mats[k] || {}).thickness && mats[k].thickness !== 16
       ? " · " + mats[k].thickness + "mm" : ""}</option>`;
+  const stored = c[key];
+  const missing = keys.indexOf(stored) < 0;
+  const why = !missing ? ""
+    : all.indexOf(stored) < 0 ? " (not selected)"
+    : want === "thin" ? " (not a 3 mm sheet)" : " (3 mm — too thin for this)";
   return `<div class="f wide">
       <label>${esc(label)}</label>
       <select data-k="${key}" data-t="text">${
-        keys.indexOf(c[key]) < 0
-          ? `<option value="${esc(c[key])}" selected>${esc(c[key] || "—")} (not selected)</option>`
-          : ""}${keys.map(row).join("")}</select>
-      <span class="note">${esc(hint)}</span></div>`;
+        missing
+          ? `<option value="${esc(stored)}" selected>${esc(stored || "—")}${why}</option>`
+          : ""}${keys.map(row).join("")}${
+        !keys.length && !missing
+          ? `<option value="" selected>— no ${want === "thin" ? "3 mm" : "16 mm"} board in this project —</option>`
+          : ""}</select>
+      <span class="note">${esc(hint)}${missing && all.indexOf(stored) >= 0
+        ? ` <b style="color:var(--crit)">Kept as stored; the validator reports it.</b>` : ""}</span></div>`;
 }
 
 
+// What a board in this project offers. The answer is the Boards record's, read
+// back off /api/compute — the browser never decides what a board can be edged in.
+function boardOffers(key, kind) {
+  const m = ((S.res && S.res.materials) || {})[key] || {};
+  const offered = m.edging_kinds || [];
+  return offered.indexOf(kind) >= 0;
+}
+
+function anyBoardOffers(kind) {
+  return ((S.res && S.res.boards) || []).some((k) => boardOffers(k, kind));
+}
+
 // One edging control: how thick, and what colour. 'which' is "door" or "drawer".
-function edgingHTML(c, which) {
+// Both dropdowns are filtered by the Boards tab: a kind no board offers is not
+// listed, and the colour list holds only boards that offer the chosen kind. A
+// stored choice that is no longer offered is never silently changed — it stays
+// shown, flagged, and the validator blocks the export.
+function edgingHTML(c, which, opts) {
   const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
   const e = (g && g.edging && g.edging[which]) || {};
   const mats = (S.res && S.res.materials) || {};
   const keys = (S.res && S.res.boards) || [];
-  const kinds = S.def.exterior_tapes || ["1mm", "2mm"];
+  const all = (opts && opts.kinds) || S.def.exterior_tapes || ["1mm", "2mm"];
   const kind = c[which + "_edge_kind"] || e.kind || "2mm";
   const board = c[which + "_edge_board"] || e.board || c.exterior_board;
   const override = g && g.edge_override;
+  const pre = S.def.edging_prefix || {};
+
+  // Nothing in the project can be edged at all: say what to do, rather than
+  // offering two dropdowns that cannot produce a name.
+  if (!all.some(anyBoardOffers)) {
+    return `<div class="tape"><label>Edging</label>
+      <span class="note">No board in this project has edging — tick
+      <b>Has Edging</b> on a board in the Boards tab.</span></div>`;
+  }
+
+  const kinds = all.filter(anyBoardOffers);
+  const kindLost = kinds.indexOf(kind) < 0;
+  const colourKeys = keys.filter((k) => boardOffers(k, kind));
+  const boardLost = colourKeys.indexOf(board) < 0;
+
   return `<div class="tape">
       <label>Edging</label>
       <div class="leaf">
-        <select data-edge="${which}" data-ek="kind" title="how thick">${kinds.map((k) =>
+        <select data-edge="${which}" data-ek="kind" title="how thick">${
+          kindLost ? `<option value="${esc(kind)}" selected>${esc(kind)} (not offered)</option>` : ""
+          }${kinds.map((k) =>
           `<option value="${esc(k)}"${k === kind ? " selected" : ""}>${esc(k)}</option>`
           ).join("")}</select>
-        <select data-edge="${which}" data-ek="board" title="what colour">${keys.map((k) =>
+        <select data-edge="${which}" data-ek="board" title="what colour">${
+          boardLost ? `<option value="${esc(board)}" selected>${esc(board || "—")} (not offered)</option>` : ""
+          }${colourKeys.map((k) =>
           `<option value="${esc(k)}"${k === board ? " selected" : ""}>${esc(k)} — ${
             esc((mats[k] || {}).board || k)}</option>`).join("")}</select>
-        <b data-edgename="${which}" class="${e.name ? "" : "over"}">${
-          esc(e.name || "none mapped")}</b>
+        <b data-edgename="${which}" class="${e.name ? "" : (kindLost || boardLost ? "over" : "off")}">${
+          esc(e.name || (kindLost || boardLost
+            ? `${pre[kind] || kind} not offered by ${board || "that board"}`
+            : "no edging"))}</b>
       </div>
+      ${(kindLost || boardLost) ? `<span class="note" style="color:var(--crit)">
+        This cabinet still asks for an edging its board no longer offers. It is kept
+        exactly as it was stored — tick it on the board in the Boards tab, or choose
+        another here. The export is blocked until one of those is done.</span>` : ""}
       ${override ? `<span class="note">This job file names the edging outright as
         <b>${esc(override)}</b>, and that still wins over the two choices above.
         <button data-clearedge="1">Clear it</button></span>` : ""}
@@ -1334,15 +1464,16 @@ function renderStructure() {
 
   box.innerHTML = `<div class="grid">
       ${boardSel(c, "exterior_board", "Exterior board",
-                 "doors, drawer faces and anything else that shows")}
+                 "doors, drawer faces and anything else that shows", "thick")}
       ${usesBack
         ? boardSel(c, "back_board", "Backing board",
-                   "the back panel, and a drawer base grooved out of the same sheet")
+                   "the back panel, and a drawer base grooved out of the same sheet",
+                   "thin")
         : `<div class="f wide"><label>Backing board</label>
              <p class="off">Nothing on this cabinet is cut from it — no back, and no
              drawer on a grooved base.</p></div>`}
       ${boardSel(c, "carcass_board", "Carcass board",
-                 "sides, top, bottom, supports and shelves")}
+                 "sides, top, bottom, supports and shelves", "thick")}
       <div class="f wide"><label>Back fixing</label>
         <select data-k="back" data-t="sel:backs">${backs.map((b) =>
           `<option value="${esc(b)}"${b === c.back ? " selected" : ""}>${
@@ -1376,13 +1507,24 @@ function refreshEdging() {
   const c = S.sel !== null && S.job.cabinets[S.sel];
   const g = c && S.res && S.res.geometry && S.res.geometry[String(c.number)];
   if (!g || !g.edging) return;
+  // "no edging" is grey and is not a fault — it is what a board with Has Edging
+  // off is supposed to say. Red is kept for a kind the board does not offer,
+  // which the validator is blocking the export over.
+  const c2 = c || {};
   document.querySelectorAll("#editor [data-edgename]").forEach((b) => {
-    const e = g.edging[b.dataset.edgename] || {};
-    b.textContent = e.name || "none mapped";
-    b.className = e.name ? "" : "over";
+    const which = b.dataset.edgename;
+    const e = g.edging[which] || {};
+    if (e.name) { b.textContent = e.name; b.className = ""; return; }
+    const kind = c2[which + "_edge_kind"] || e.kind || "";
+    const board = c2[which + "_edge_board"] || e.board || c2.exterior_board || "";
+    const wanted = kind && board && !boardOffers(board, kind);
+    b.textContent = wanted
+      ? `${(S.def.edging_prefix || {})[kind] || kind} not offered by ${board}`
+      : "no edging";
+    b.className = wanted ? "over" : "off";
   });
   const boxEdge = document.querySelector("#editor [data-boxedge]");
-  if (boxEdge) boxEdge.textContent = (g.edging.drawer_box || {}).name || "none mapped";
+  if (boxEdge) boxEdge.textContent = (g.edging.drawer_box || {}).name || "no edging";
 }
 
 /* ---------- the board library ----------------------------------------------
@@ -1427,14 +1569,18 @@ function drawBoards() {
            style="width:auto" title="use this board in this project"></td>
       <td>${b.picture
             ? `<img src="${esc(b.picture)}" alt="" class="swatch">`
-            : `<span class="swatch none"></span>`}</td>
+            : b.colour
+              ? `<span class="swatch" style="background:${esc(b.colour)}"
+                       title="${esc(b.colour)}"></span>`
+              : `<span class="swatch none" title="no colour set"></span>`}</td>
       <td><b>${esc(b.name)}</b><div class="note">id ${esc(b.id)}</div></td>
       <td class="n">${thick}</td>
       <td>${esc(GRAIN_LABEL[b.grain] || b.grain)}</td>
       <td class="n">R&nbsp;${(b.price || 0).toLocaleString("en-ZA",
           {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-      <td class="note">${esc(b.tapes.pvc || "—")}<br>${esc(b.tapes["1mm"] || "—")}
-          <br>${esc(b.tapes["2mm"] || "—")}</td>
+      <td class="note">${!(b.offered || []).length
+            ? "—"
+            : (b.offered || []).map((k) => esc(b.tapes[k])).join("<br>")}</td>
       <td class="note">${used}</td>
       <td>
         <button data-bedit="${esc(b.id)}">Edit</button>
@@ -1520,14 +1666,49 @@ function drawBoardEditor() {
               esc(GRAIN_LABEL[g] || g)}</option>`).join("")}</select></div>
         <div class="f"><label>Last price (per board)</label>
           <input type="number" step="0.01" id="bf-price" value="${b.price || 0}"></div>
-        <div class="f"><label>Edging name</label>
-          <input id="bf-tape" value="${esc(b.tape || "")}"
-                 placeholder="blank = use the name">
-          <span class="note" id="bf-tapes"></span></div>
-        <div class="f wide"><label>Picture (optional)</label>
+        <div class="f"><label>Colour</label>
+          <div class="leaf">
+            <input type="color" id="bf-colourpick" style="width:44px;padding:2px"
+                   value="${esc(b.colour || S.def.no_colour || "#d9d6cf")}"
+                   title="what this board looks like in the drawings">
+            <input id="bf-colour" value="${esc(b.colour || "")}"
+                   placeholder="#rrggbb — blank for no colour set">
+            <button id="bf-colourclear" title="no colour set">Clear</button>
+          </div>
+          <span class="note" id="bf-colournote"></span></div>
+        <div class="f wide" style="grid-column:2/-1"><label>Picture (optional)</label>
           <input id="bf-picture" value="${esc(b.picture || "")}"
                  placeholder="a file path or a data: URI — optional"></div>
       </div>
+
+      <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="bf-hasedging" style="width:auto;cursor:pointer"
+                 ${b.has_edging === false ? "" : "checked"}>
+          <b>Has Edging</b></label>
+        <p class="note" style="margin:4px 0 8px;max-width:78ch">Untick for a board that
+          is never edged — the 3 mm backing sheet. Nothing about edging is then shown
+          or ordered for it anywhere. What is ticked here is kept, so re-ticking
+          restores it.</p>
+      </div>
+      <div id="bf-edgingblock">
+        <div class="grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="f wide"><label>Edging kinds offered</label>
+            <div class="leaf">${(S.def.edging_kinds || ["pvc", "1mm", "2mm"]).map((k) =>
+              `<label style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;cursor:pointer">
+                 <input type="checkbox" data-bfkind="${esc(k)}"
+                 style="width:auto;cursor:pointer" ${((b.edging_kinds || []).indexOf(k) >= 0)
+                   ? "checked" : ""}>${esc((S.def.edging_prefix || {})[k] || k)}</label>`
+              ).join("")}</div>
+            <span class="note">Only the ticked kinds can be chosen anywhere in the
+              app for this board.</span></div>
+          <div class="f"><label>Edging name</label>
+            <input id="bf-tape" value="${esc(b.tape || "")}"
+                   placeholder="e.g. WHITE">
+            <span class="note" id="bf-tapes"></span></div>
+        </div>
+      </div>
+      <p class="note" id="bf-why" style="margin:6px 0 0;color:var(--crit)"></p>
       <div class="presets">
         <button id="bf-save" class="primary">Save to the library</button>
         <button id="bf-cancel">Cancel</button>
@@ -1542,13 +1723,52 @@ function drawBoardEditor() {
         the Cabinets tab does come along, and is named before anything is written.
         Nothing else saved here reaches a job at all.</p>
     </div></div>`;
-  const tapes = () => {
-    const tok = ($("bf-tape").value || $("bf-name").value || "").trim();
-    $("bf-tapes").textContent = tok
-      ? `PVC ${tok} · 1mm ${tok} · 2mm ${tok}` : "no name — no edging can be generated";
+  // The preview and the inline message are the save rules said out loud, so the
+  // form answers before the server has to. Only the ticked kinds are listed —
+  // a board that offers 2mm only must not show a PVC name it will never order.
+  const kindBoxes = () => Array.from(box.querySelectorAll("[data-bfkind]"));
+  const refreshEdgingForm = () => {
+    const on = $("bf-hasedging").checked;
+    $("bf-edgingblock").style.display = on ? "" : "none";
+    const ticked = kindBoxes().filter((x) => x.checked).map((x) => x.dataset.bfkind);
+    const tok = ($("bf-tape").value || "").trim();
+    const pre = S.def.edging_prefix || {pvc: "PVC", "1mm": "1mm", "2mm": "2mm"};
+    $("bf-tapes").textContent = !on ? ""
+      : !tok ? "no edging name yet"
+      : ticked.length ? ticked.map((k) => `${pre[k] || k} ${tok}`).join(" · ")
+      : "nothing ticked";
+    $("bf-why").textContent = !on ? ""
+      : !tok ? "Has Edging is ticked, so this board needs an edging name — the name "
+             + "the edging is ordered under, e.g. WHITE."
+      : !ticked.length ? "Has Edging is ticked, so tick at least one of PVC, 1mm, "
+             + "2mm — or untick Has Edging."
+      : "";
   };
-  ["bf-tape", "bf-name"].forEach((id) => $(id).addEventListener("input", tapes));
-  tapes();
+  const refreshColour = () => {
+    const raw = ($("bf-colour").value || "").trim();
+    const ok = /^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(raw);
+    if (ok) $("bf-colourpick").value = raw.length <= 4
+      ? "#" + raw.replace("#", "").split("").map((c) => c + c).join("")
+      : (raw[0] === "#" ? raw : "#" + raw);
+    $("bf-colournote").textContent = !raw
+      ? "no colour set — drawn neutral, and the legend says so"
+      : ok ? "" : "not a hex colour like #b4835a";
+    $("bf-colournote").style.color = (!raw || ok) ? "" : "var(--crit)";
+  };
+  ["bf-tape", "bf-name"].forEach((id) => $(id).addEventListener("input", refreshEdgingForm));
+  $("bf-hasedging").addEventListener("change", refreshEdgingForm);
+  kindBoxes().forEach((x) => x.addEventListener("change", refreshEdgingForm));
+  $("bf-colour").addEventListener("input", refreshColour);
+  $("bf-colourpick").addEventListener("input", () => {
+    $("bf-colour").value = $("bf-colourpick").value;
+    refreshColour();
+  });
+  $("bf-colourclear").addEventListener("click", () => {
+    $("bf-colour").value = "";
+    refreshColour();
+  });
+  refreshEdgingForm();
+  refreshColour();
 }
 
 function drawSwapPicker() {
@@ -1566,9 +1786,17 @@ function drawSwapPicker() {
     <h2>Swap ${esc(sw.from)} across this project</h2>
     <div class="body">
       <div class="f wide"><label>Swap it for</label>
-        <select id="sw-to">${others.map((b) =>
-          `<option value="${esc(b.id)}"${b.id === sw.to ? " selected" : ""}>${
-            esc(b.id)} — ${esc(b.name)}</option>`).join("")}</select></div>
+        <div class="leaf">
+          <span class="swatch${others.find((b) => b.id === sw.to) &&
+            others.find((b) => b.id === sw.to).colour ? "" : " none"}" id="sw-swatch"
+            style="${(others.find((b) => b.id === sw.to) || {}).colour
+              ? "background:" + esc((others.find((b) => b.id === sw.to) || {}).colour)
+              : ""}"></span>
+          <select id="sw-to">${others.map((b) =>
+            `<option value="${esc(b.id)}"${b.id === sw.to ? " selected" : ""}>${
+              esc(b.id)} — ${esc(b.name)}${b.colour ? "" : " (no colour set)"}</option>`
+            ).join("")}</select>
+        </div></div>
       <div class="presets">
         <button id="sw-go" class="primary" data-from="${esc(sw.from)}">Show me what changes</button>
         <button id="sw-cancel">Cancel</button>
@@ -1578,6 +1806,13 @@ function drawSwapPicker() {
         panels, and what it does to the board count and the cost. No designation
         changes — a panel keeps its name and changes what it is cut from.</p>
     </div></div>`;
+  const sel = $("sw-to");
+  if (sel) sel.addEventListener("change", () => {
+    const b = others.find((x) => x.id === sel.value) || {};
+    const sw2 = $("sw-swatch");
+    sw2.className = "swatch" + (b.colour ? "" : " none");
+    sw2.style.background = b.colour || "";
+  });
 }
 
 $("boards").addEventListener("click", async (e) => {
@@ -1591,8 +1826,12 @@ $("boards").addEventListener("click", async (e) => {
   }
   if (e.target.id === "bnew") {
     S.libSwap = null;
+    // A new board starts with Has Edging OFF and nothing ticked: the record-level
+    // "all three" default is only how data written before the tickbox reads, not
+    // a guess about a board somebody is adding now.
     S.libEdit = {id: "", name: "", tape: "", thickness: 16, grain: "plain",
-                 price: 0, picture: ""};
+                 price: 0, picture: "", has_edging: false, edging_kinds: [],
+                 colour: ""};
     drawBoardPanel();
     return;
   }
@@ -1645,7 +1884,31 @@ $("boards").addEventListener("click", async (e) => {
     grain: $("bf-grain").value,
     price: parseFloat($("bf-price").value) || 0,
     picture: $("bf-picture").value.trim(),
+    has_edging: $("bf-hasedging").checked,
+    // Kept whether or not Has Edging is on: unticking stops anything reading
+    // them, it does not throw them away (the house pattern).
+    edging_kinds: Array.from(document.querySelectorAll("[data-bfkind]"))
+      .filter((x) => x.checked).map((x) => x.dataset.bfkind),
+    colour: $("bf-colour").value.trim(),
   };
+
+  // The same three rules the server enforces, said here first so the answer is
+  // under the field rather than in a toast after a round trip.
+  if (board.has_edging && !board.tape) {
+    toast("Has Edging is ticked, so the board needs an edging name — the name the " +
+          "edging is ordered under, e.g. WHITE", true);
+    return;
+  }
+  if (board.has_edging && !board.edging_kinds.length) {
+    toast("Has Edging is ticked, so tick at least one of PVC, 1mm, 2mm — or untick " +
+          "Has Edging", true);
+    return;
+  }
+  if (board.colour && !/^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(board.colour)) {
+    toast("The colour must be a hex value like #b4835a, or left empty for no " +
+          "colour set", true);
+    return;
+  }
 
   if (from && board.id && board.id !== from) {
     const cabs = S.job.cabinets.filter((c) =>

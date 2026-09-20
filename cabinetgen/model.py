@@ -133,11 +133,52 @@ def material_token(materials: dict, key: str) -> str:
     return str(rec.get("tape") or rec.get("name") or rec.get("board") or "").strip()
 
 
+ALL_KINDS = tuple(TAPE_PREFIX)                     # ('pvc', '1mm', '2mm')
+NO_COLOUR = "#d9d6cf"      # a board nobody has coloured yet: neutral, not a finish
+
+
+def material_offers(materials: dict, key: str) -> tuple:
+    """The edging kinds this board offers, in the order PVC, 1mm, 2mm.
+
+    Empty when the board has no edging ("Has Edging" unticked in the library).
+    A record with neither key — every job written before the tickbox — offers
+    all three, which is what it was quoted with, so nothing already priced moves.
+    """
+    rec = material_record(materials, key)
+    if rec.get("has_edging") is False:
+        return ()
+    kinds = rec.get("edging_kinds")
+    if kinds is None:
+        return ALL_KINDS
+    return tuple(k for k in ALL_KINDS if k in kinds)
+
+
+def material_has_edging(materials: dict, key: str) -> bool:
+    return bool(material_offers(materials, key))
+
+
+def material_colour(materials: dict, key: str) -> str:
+    """The board's on-screen colour, '#rrggbb'. Read from the job's copy of the
+    library record and from nowhere else; a board with none is neutral."""
+    return str(material_record(materials, key).get("colour") or "") or NO_COLOUR
+
+
+def is_thin(materials: dict, key: str) -> bool:
+    """A sheet too thin to build a carcass, a door or a drawer from — the 3 mm
+    backing. The threshold is the one `export_plaza.cut_rate` already sorts by
+    (the masonite saw takes the 3 mm, the beam saw the rest), so the dropdowns
+    and the costing agree about what a thin board is."""
+    return material_thickness(materials, key) <= 3
+
+
 def tape_for(materials: dict, key: str, thickness: str) -> str:
-    """`PVC WOOD`, `2mm WOOD` ... generated, never mapped. '' when the board has
-    nothing to generate from, which the validator names rather than guessing."""
+    """`PVC WOOD`, `2mm WOOD` ... generated, never mapped. '' when the board does
+    not offer that edging, or has nothing to generate a name from — either way the
+    validator names it rather than guessing."""
     token = material_token(materials, key)
-    return f"{TAPE_PREFIX[thickness]} {token}" if token else ""
+    if not token or thickness not in material_offers(materials, key):
+        return ""
+    return f"{TAPE_PREFIX[thickness]} {token}"
 
 
 def material_price(materials: dict, key: str) -> float:
@@ -233,16 +274,46 @@ class Support:
     which is what the three-number model got wrong: `edged + white` could exceed
     `supports` and the plain count went negative in silence.
     """
-    edge: str = "front"    # 'front' (carcass tape) | 'white' (PVC WHITE) | 'none'
+    edge: str = "front"    # legacy: 'front' | 'white' | 'none'. See `board`/`kind`.
     qty: int = 1
+    # What this row is edged in, said outright (20 September 2026): any board the
+    # project has selected, and any edging kind THAT board offers on the Boards
+    # tab. Both blank means the row predates the control and is read from `edge`,
+    # so every job written before it is edged exactly as it was quoted.
+    board: str = ""        # '' = derive from `edge`
+    kind: str = ""         # '' = derive from `edge`; otherwise 'pvc' | '1mm' | '2mm'
 
 
 SUPPORT_EDGES = ("none", "front", "white")
 
-# A white-edged support is edged white, whatever the boards are (18 September
-# 2026). It used to take the drawer-box tape, which follows the carcass board, so
-# on a grey carcass a support labelled "White-edged" went out as PVC Grey.
+# What a legacy "white-edged" support row means, and nothing else.
+#
+# Edging is no longer stated anywhere but the Boards record (20 September 2026):
+# a support row names a board and one of the kinds that board offers. This
+# constant is not read for any row that does — it is how a row written before the
+# control is resolved, so a job quoted with it is edged exactly as it was quoted.
+# `white_edge_board` looks for a real board to mean it first; this is the answer
+# when the project has none, which the validator then names.
 WHITE_EDGE = "PVC WHITE"
+WHITE_TOKEN = "WHITE"      # the token a legacy 'white' row was always asking for
+
+
+def white_edge_board(materials: dict, prefer: str = "") -> str:
+    """The board a legacy 'white-edged' support row resolves to.
+
+    The first board in the project that offers PVC under the token WHITE — which
+    for every job written so far is the white melamine the row already meant, so
+    nothing quoted moves. '' when the project has no such board, and then the
+    caller falls back to WHITE_EDGE and the validator says why.
+    """
+    keys = list(materials or {})
+    if prefer and prefer in keys:
+        keys = [prefer] + [k for k in keys if k != prefer]
+    for key in keys:
+        if ("pvc" in material_offers(materials, key)
+                and material_token(materials, key).strip().upper() == WHITE_TOKEN):
+            return key
+    return ""
 
 
 @dataclass
@@ -501,16 +572,52 @@ class Cabinet:
             return self.drawer_box_edge
         return tape_for(materials, self.drawer_carcass, "pvc")
 
-    def support_tape(self, materials: dict, edge: str) -> str:
-        """The edging on one row of supports: front-edged ones face the front and
-        take the carcass edging (PVC in the exterior colour); white-edged ones
-        are white; the rest are not edged. The cut list and the editor both ask
-        here, so the name beside a row is the name on the order."""
-        if edge == "front":
-            return self.carcass_tape(materials)
-        if edge == "white":
-            return WHITE_EDGE
+    def support_row_board(self, row: "Support") -> str:
+        """Which board a support row is edged in the colour of.
+
+        Its own choice when it has one. Otherwise the legacy meaning of `edge`:
+        a front-edged row faces the front and takes the exterior board, a
+        white-edged one takes whichever board is the white one.
+        """
+        if row.board:
+            return row.board
+        if row.edge == "front":
+            return self.exterior_board
         return ""
+
+    def support_row_kind(self, row: "Support") -> str:
+        """Which edging kind a support row asks for. '' means none."""
+        if row.kind:
+            return row.kind
+        return "pvc" if row.edge in ("front", "white") else ""
+
+    def support_row_tape(self, materials: dict, row: "Support") -> str:
+        """The edging on one row of supports, read from the Boards record.
+
+        A row that names a board and a kind is that board's name for that kind,
+        and nothing else — '' if the board no longer offers it, which the
+        validator reports rather than substituting something.
+
+        A row that names neither predates the control and keeps exactly what it
+        was quoted with: front-edged takes the carcass edging (PVC in the
+        exterior colour), white-edged resolves to the project's white board, and
+        falls back to the constant only when the project has no such board.
+        """
+        if row.board or row.kind:
+            kind = self.support_row_kind(row)
+            board = self.support_row_board(row) or self.carcass_board
+            return tape_for(materials, board, kind) if kind else ""
+        if row.edge == "front":
+            return self.carcass_tape(materials)
+        if row.edge == "white":
+            board = white_edge_board(materials)
+            return tape_for(materials, board, "pvc") if board else WHITE_EDGE
+        return ""
+
+    def support_tape(self, materials: dict, edge: str) -> str:
+        """The edging a legacy row of the given kind gets. Kept for the callers
+        that ask by `edge` rather than by row."""
+        return self.support_row_tape(materials, Support(edge=edge, qty=1))
 
     def drawer_box_tape_of(self, materials: dict, d: "Drawer") -> str:
         """PVC in one drawer's own box board colour — the same rule as

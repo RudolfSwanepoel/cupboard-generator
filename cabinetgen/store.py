@@ -23,7 +23,12 @@ def panel_from_dict(d: dict) -> Panel:
 def cabinet_to_dict(c: Cabinet) -> dict:
     d = asdict(c)
     d["drawers"] = [asdict(x) for x in c.drawers]
-    d["support_rows"] = [asdict(x) for x in c.support_rows]
+    # `board` and `kind` are written only when a row actually names them, so a
+    # job saved before the control round-trips byte for byte and is still read
+    # from `edge` — the same discipline as every other field added here.
+    d["support_rows"] = [{k: v for k, v in asdict(x).items()
+                          if v != "" or k not in ("board", "kind")}
+                         for x in c.support_rows]
     d["bespoke"] = [panel_to_dict(x) for x in c.bespoke]
     return d
 

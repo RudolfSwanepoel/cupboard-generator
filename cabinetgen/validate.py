@@ -9,8 +9,9 @@ from typing import List
 
 from .engine import front_stack_check, generate_cabinet
 from .export_plaza import effective_price
-from .model import (TAPE_PREFIX, Cabinet, Job, Panel, grain_of, material_board,
-                    material_thickness, tape_for)
+from .model import (TAPE_PREFIX, Cabinet, Job, Panel, grain_of, is_thin,
+                    material_board, material_offers, material_thickness,
+                    material_token, tape_for)
 from .room import (above_ceiling, blocked_openings, cab_corner_outline,
                    clashes as room_clashes, closure_error, corner_offset,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
@@ -20,6 +21,9 @@ from .standard import Standard, STANDARD
 
 CRITICAL = "critical"
 WARNING = "warning"
+
+# Tags an issue that says a cabinet needs an edging its board does not offer.
+EDGING_REF = "EDGING"
 
 # Above this many boards on one project, say so. A guideline about cost and
 # complexity — every extra board is another part sheet and another offcut pile —
@@ -53,13 +57,18 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     out += _front_stacks(job.cabinets, std)
     out += _shelf_clears_back(job.cabinets, panels, std)
     out += _labels_unique(panels)
-    out += _edge_materials(job, panels)
+    # asked first, so a panel whose edging is missing for a reason already named
+    # against its cabinet is not reported a second time, panel by panel
+    tape_issues = _boards_and_tapes(job)
+    out += _edge_materials(job, panels,
+                           {i.where for i in tape_issues if i.ref == EDGING_REF})
     out += _grain_on_boards(job, panels)
     out += _zero_quantities(panels)
     out += _drawer_boxes(job.cabinets)
     out += _project_boards(job)
-    out += _boards_and_tapes(job)
+    out += tape_issues
     out += _carcass_thickness(job, std)
+    out += _thin_boards(job)
     out += _board_prices(job, panels)
     out += _supports(job.cabinets)
     out += _room(job, std)
@@ -160,7 +169,7 @@ def _labels_unique(panels):
             for lab, v in sizes.items() if len(v) > 1]
 
 
-def _edge_materials(job, panels):
+def _edge_materials(job, panels, covered=frozenset()):
     """D6 / W10 — 'SOLID' is a board, not a tape; '2mm WOOD' and '2mm PVC Wood'
     are the same thing.
 
@@ -179,7 +188,8 @@ def _edge_materials(job, panels):
         if p.edge_material not in allowed:
             out.append(Issue(WARNING, p.label,
                              f"edge material {p.edge_material!r} is not in the lookup", "W10"))
-        if (p.edge_l or p.edge_w) and not p.edge_material:
+        if ((p.edge_l or p.edge_w) and not p.edge_material
+                and str(p.cabinet) not in covered):
             out.append(Issue(CRITICAL, p.label, "edges specified but no edge material"))
     return out
 
@@ -342,9 +352,25 @@ def _boards_and_tapes(job: Job):
         for field, override, board, thickness, bands in wants:
             if override is not None:
                 continue                   # this cabinet was told what to use
-            if board in (mats or {}) and not tape_for(mats, board, thickness):
+            if board not in (mats or {}) or tape_for(mats, board, thickness):
+                continue
+            name = material_board(mats, board)
+            if thickness not in material_offers(mats, board):
+                # The board says it has no such edging. That is a decision made
+                # on the Boards tab, so the cut list cannot quietly go out
+                # without the tape, or with a name the board never offered.
+                offered = [TAPE_PREFIX[k] for k in material_offers(mats, board)]
+                has = (f"only offers {', '.join(offered)}" if offered
+                       else "has no edging (Has Edging is off)")
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"{bands} need {TAPE_PREFIX[thickness]} edging in "
+                                 f"{name!r}, which {has}. Tick "
+                                 f"{TAPE_PREFIX[thickness]} on that board in the "
+                                 f"Boards tab, or choose another board here",
+                                 EDGING_REF))
+            elif not material_token(mats, board):
                 out.append(Issue(WARNING, str(c.number),
-                                 f"{material_board(mats, board)!r} has no name to build "
+                                 f"{name!r} has no name to build "
                                  f"edging from, so {field} cannot be generated for "
                                  f"{bands} — give the board an edging name in the "
                                  f"library, or override the edging on this cabinet"))
@@ -355,6 +381,45 @@ def _boards_and_tapes(job: Job):
 
         # The drawer box is a chosen board now, not a hardcoded MEL, so there is
         # nothing left to query — the box and its edging agree by construction.
+    return out
+
+
+def _thin_boards(job: Job):
+    """A 3 mm sheet where a sheet has to be built from, or a thick board on a back.
+
+    The editor does not offer either, but a stored choice is never silently
+    changed — an old job, a board that was thinned in the library, or a hand-edited
+    file can all carry one, and a 3 mm door is a real defect that would otherwise
+    be cut. Named here so the flag in the editor has something behind it.
+    """
+    out = []
+    for c in job.cabinets:
+        if c.template == "none":
+            continue                       # its panels are specified by hand
+        wants = [(c.carcass_board, "carcass board"), (c.exterior_board, "exterior board")]
+        for i, b in enumerate(c.door_boards or []):
+            if b:
+                wants.append((b, f"door leaf {i + 1} board"))
+        for i, d in enumerate(c.drawer_list or []):
+            if d.box_board:
+                wants.append((d.box_board, f"drawer {i + 1} box board"))
+            if d.face_board:
+                wants.append((d.face_board, f"drawer {i + 1} face board"))
+        for board, what in wants:
+            if board and board in (job.materials or {}) and is_thin(job.materials, board):
+                out.append(Issue(WARNING, str(c.number),
+                                 f"{what} {material_board(job.materials, board)!r} is "
+                                 f"{material_thickness(job.materials, board)} mm — that "
+                                 f"is a backing sheet, not something to build from. "
+                                 f"Choose a board of full thickness here"))
+        if (c.needs_back_board and c.back_board
+                and c.back_board in (job.materials or {})
+                and not is_thin(job.materials, c.back_board)):
+            out.append(Issue(WARNING, str(c.number),
+                             f"backing board {material_board(job.materials, c.back_board)!r} "
+                             f"is {material_thickness(job.materials, c.back_board)} mm — "
+                             f"the back is grooved for a 3 mm sheet. Choose the backing "
+                             f"board, or change the back fixing"))
     return out
 
 

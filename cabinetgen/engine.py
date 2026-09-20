@@ -62,7 +62,7 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     # reading the three legacy numbers on a job that predates the rows. Nothing
     # here subtracts anything from anything.
     for row in cab.support_list:
-        tape = cab.support_tape(mats, row.edge)
+        tape = cab.support_row_tape(mats, row)
         P.append(Panel(n, "04", "Support", carc, Wi, SUPPORT_W, row.qty,
                        edge_l=1 if tape else 0, edge_material=tape,
                        grain=carc_grain))

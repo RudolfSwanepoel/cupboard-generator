@@ -20,11 +20,25 @@ FUSION CHIP" on an order as an edging name. One token, three thicknesses,
 still generated and never mapped per thickness. A board that leaves the token
 blank generates off its name, which is right for a board whose name is already
 the short one.
+
+A board also says whether it has edging at all ("Has Edging") and, if it does,
+which of the three it offers. A board that offers none — the 3 mm backing sheet
+— generates no tape name, is not offered as an edging colour, and puts nothing
+about edging on any drawing. Unticking keeps the token and the kinds in the file
+(the same discipline as every other tickbox here), so re-ticking restores them.
+
+The colour is what the board looks like on screen: one hex value, picked here
+and nowhere else. Picture, grain and thickness are fields of this record too —
+the drawings read every board attribute from the library's copy in the job and
+never invent one.
 """
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field, fields
 from typing import Dict, List, Optional
+
+from .model import NO_COLOUR      # a board nobody has coloured: neutral, not a finish
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LIBRARY = os.path.join(ROOT, "boards.json")
@@ -37,6 +51,29 @@ GRAINS = ("plain", "grain")
 TAPE_KINDS = ("pvc", "1mm", "2mm")
 TAPE_PREFIX = {"pvc": "PVC", "1mm": "1mm", "2mm": "2mm"}
 
+_HEX = re.compile(r"^#?([0-9a-fA-F]{6})$")
+_HEX3 = re.compile(r"^#?([0-9a-fA-F]{3})$")
+
+
+def clean_colour(raw) -> str:
+    """'#rrggbb' in lower case, or '' for anything that is not one. '#rgb' is
+    expanded rather than dropped, because that is a colour somebody meant."""
+    s = str(raw or "").strip()
+    m = _HEX.match(s)
+    if m:
+        return "#" + m.group(1).lower()
+    m = _HEX3.match(s)
+    if m:
+        return "#" + "".join(c * 2 for c in m.group(1).lower())
+    return ""
+
+
+def clean_kinds(raw) -> List[str]:
+    """The ticked edging kinds, in the canonical order, without repeats and
+    without anything that is not one of the three."""
+    have = {str(k).strip().lower() for k in (raw or [])}
+    return [k for k in TAPE_KINDS if k in have]
+
 
 @dataclass
 class Board:
@@ -47,16 +84,42 @@ class Board:
     grain: str = "plain"         # 'grain' locks every panel cut from it
     price: float = 0.0           # last price per board
     picture: str = ""            # optional; a path or a data URI
+    # "Has Edging", and which of PVC / 1mm / 2mm it offers. A record written
+    # before these existed has neither key and reads as edged with all three,
+    # which is what every job quoted before them was quoted with. Unticking keeps
+    # the kinds and the token: nothing is forgotten, only ignored.
+    has_edging: bool = True
+    edging_kinds: List[str] = field(default_factory=lambda: list(TAPE_KINDS))
+    colour: str = ""             # '#rrggbb'; what it looks like on screen
 
     @property
     def token(self) -> str:
         """What the tape names are built from."""
         return (self.tape or self.name).strip()
 
+    @property
+    def offered(self) -> List[str]:
+        """The edging kinds this board actually offers: none when it has no edging."""
+        return list(self.edging_kinds) if self.has_edging else []
+
+    @property
+    def shown_colour(self) -> str:
+        """What to draw it in. A board nobody has coloured is neutral, and the
+        legend says so — an unset colour is never guessed at."""
+        return self.colour or NO_COLOUR
+
+    @property
+    def is_thin(self) -> bool:
+        """The 3 mm backing sheet: no carcass, door, face or drawer box."""
+        return self.thickness <= 3
+
     def tape_name(self, kind: str) -> str:
-        """`PVC WOOD`, `2mm WOOD` ... or '' when there is nothing to build from."""
+        """`PVC WOOD`, `2mm WOOD` ... or '' when the board does not offer that
+        edging or there is nothing to build a name from."""
         token = self.token
-        return f"{TAPE_PREFIX[kind]} {token}" if token else ""
+        if not token or kind not in self.offered:
+            return ""
+        return f"{TAPE_PREFIX[kind]} {token}"
 
     @property
     def grain_flag(self) -> int:
@@ -67,10 +130,22 @@ def board_from_dict(d: dict) -> Board:
     known = {f.name for f in fields(Board)}
     d = {k: v for k, v in (d or {}).items() if k in known}
     d.setdefault("id", d.get("name", ""))
+    # A record with neither key keeps the dataclass defaults — edged, all three —
+    # which is the legacy rule. Only a key that is actually present is sanitised.
+    if "has_edging" in d:
+        d["has_edging"] = bool(d["has_edging"])
+    if "edging_kinds" in d:
+        d["edging_kinds"] = clean_kinds(d["edging_kinds"])
+    if "colour" in d:
+        d["colour"] = clean_colour(d["colour"])
     return Board(**d)
 
 
-def load(path: str = LIBRARY) -> List[Board]:
+def load(path: Optional[str] = None) -> List[Board]:
+    # Resolved at call time, not bound as a default at import: a default would
+    # capture LIBRARY once, so a check that redirects the library to a fixture
+    # would still read — and worse, save over — the real boards.json.
+    path = path or LIBRARY
     if not os.path.exists(path):
         return []
     with open(path, encoding="utf-8") as fh:
@@ -78,7 +153,8 @@ def load(path: str = LIBRARY) -> List[Board]:
     return [board_from_dict(b) for b in raw.get("boards", [])]
 
 
-def save(boards: List[Board], path: str = LIBRARY):
+def save(boards: List[Board], path: Optional[str] = None):
+    path = path or LIBRARY        # call time, for the reason in load()
     payload = {
         "version": 1,
         "note": ("The board library. Shared across every project and committed to "
@@ -126,7 +202,9 @@ def to_material(board: Board) -> dict:
     """
     return {"board": board.name, "name": board.name, "tape": board.token,
             "thickness": board.thickness, "grain": board.grain,
-            "price": board.price, "picture": board.picture}
+            "price": board.price, "picture": board.picture,
+            "has_edging": board.has_edging,
+            "edging_kinds": list(board.edging_kinds), "colour": board.colour}
 
 
 # --- which jobs use which board ---------------------------------------------

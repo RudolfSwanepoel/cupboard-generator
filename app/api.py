@@ -19,8 +19,9 @@ from cabinetgen.engine import generate_job
 from cabinetgen.export_plaza import (effective_price, estimate_cost, summarise,
                                      write_csvs)
 from cabinetgen.model import (BOARD_ALIASES, CODES, EXTERIOR_TAPES, MATERIALS,
-                              SUPPORT_EDGES,
-                              hinge_side, material_board, material_price,
+                              NO_COLOUR, SUPPORT_EDGES,
+                              hinge_side, is_thin, material_board, material_colour,
+                              material_has_edging, material_offers, material_price,
                               material_record, material_thickness, tape_for)
 from cabinetgen.render import elevation_svg, plan_svg, wall_elevation_svg
 from cabinetgen.room import (LAYERS, add_wall, clashes as room_clashes, closure_error,
@@ -102,6 +103,9 @@ def defaults(payload):
         "support_edges": list(SUPPORT_EDGES),
         "exterior_tapes": list(EXTERIOR_TAPES),
         "thicknesses": list(B.THICKNESSES),
+        "edging_kinds": list(B.TAPE_KINDS),
+        "edging_prefix": dict(B.TAPE_PREFIX),
+        "no_colour": NO_COLOUR,
         "grains": list(B.GRAINS),
         "board_guideline": BOARD_GUIDELINE,
         "opening_kinds": ["door", "window", "arch"],
@@ -167,8 +171,17 @@ def _geometry_info(job, cab, std):
             "tape_overrides": {"carcass_edge": cab.carcass_edge,
                                "door_edge": cab.door_edge,
                                "drawer_box_edge": cab.drawer_box_edge},
-            "supports": [{"edge": r.edge, "qty": r.qty} for r in cab.support_list],
-            # the edging each kind of support row gets, off the engine
+            # Each row as it will be cut: what it is edged in, and the name that
+            # produces. Both are the engine's answer — the editor shows them, it
+            # does not work them out.
+            "supports": [{"edge": r.edge, "qty": r.qty,
+                          "board": r.board, "kind": r.kind,
+                          "eff_board": cab.support_row_board(r) or cab.carcass_board,
+                          "eff_kind": cab.support_row_kind(r),
+                          "name": cab.support_row_tape(job.materials, r),
+                          "legacy": not (r.board or r.kind)}
+                         for r in cab.support_list],
+            # the edging each legacy kind of support row gets, off the engine
             "support_edging": {e: cab.support_tape(job.materials, e)
                                for e in SUPPORT_EDGES},
             "support_total": cab.support_total,
@@ -194,6 +207,15 @@ def _board_payload(job, key):
             "pvc": tape_for(job.materials, key, "pvc"),
             "1mm": tape_for(job.materials, key, "1mm"),
             "2mm": tape_for(job.materials, key, "2mm"),
+            # what the board offers, how it looks, and whether it is a sheet you
+            # can build from — read off the job's copy of the library record, so
+            # the dropdowns filter and the drawings colour from the one place a
+            # board is described
+            "has_edging": material_has_edging(job.materials, key),
+            "edging_kinds": list(material_offers(job.materials, key)),
+            "colour": material_colour(job.materials, key),
+            "colour_set": bool(material_record(job.materials, key).get("colour")),
+            "thin": is_thin(job.materials, key),
             "selected": key in job.board_ids}
 
 
@@ -221,6 +243,8 @@ def board_list(payload):
     return {"ok": True,
             "boards": [dict(asdict(b), token=b.token,
                             tapes={k: b.tape_name(k) for k in B.TAPE_KINDS},
+                            offered=b.offered, shown_colour=b.shown_colour,
+                            thin=b.is_thin,
                             used_by=used_by(usage, b.id))
                        for b in lib],
             "unreadable": usage.unreadable,
@@ -310,7 +334,26 @@ def board_save(payload):
                          f"library — give this one an id of its own"}
 
     d["id"], d["name"] = board_id, name
+    if "colour" in d and str(d.get("colour") or "").strip() and not B.clean_colour(d.get("colour")):
+        return {"ok": False, "error": "the colour must be a hex value like #b4835a, "
+                                      "or left empty for no colour set"}
     board = B.board_from_dict(d)
+    # A board that says it has edging has to say what it is called and what it
+    # offers: the edging name is the only thing the tape names are built from,
+    # and a board with edging that offers nothing is a contradiction, not a choice.
+    #
+    # Asked of the Edging Name field itself, not of `board.token`. The token falls
+    # back to the board's long name when the field is blank, so a check on the
+    # token can never fire — and falling back is exactly what must not happen
+    # here: it is what puts "PVC BROOKHILL FUSION CHIP" on an order as an edging
+    # name. Ticking Has Edging is the point at which that name has to be said.
+    if board.has_edging and not str(d.get("tape") or "").strip():
+        return {"ok": False, "error": "Has Edging is ticked, so the board needs an "
+                                      "edging name — the name the edging is ordered "
+                                      "under, e.g. WHITE"}
+    if board.has_edging and not board.edging_kinds:
+        return {"ok": False, "error": "Has Edging is ticked, so tick at least one of "
+                                      "PVC, 1mm, 2mm — or untick Has Edging"}
     if old_id and old_id in existing:
         lib = [board if b.id == old_id else b for b in lib]     # in place, order kept
     elif board_id in existing:
@@ -336,7 +379,8 @@ def board_save(payload):
 
 # What the library decides for a board in the project on screen. Price is not on
 # the list: a job keeps the price it was quoted at ("Price capture").
-LIVE_FIELDS = ("name", "board", "tape", "thickness", "grain", "picture")
+LIVE_FIELDS = ("name", "board", "tape", "thickness", "grain", "picture",
+               "has_edging", "edging_kinds", "colour")
 
 
 def refresh_from_library(job, lib=None, only=None) -> list:
