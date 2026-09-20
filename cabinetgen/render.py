@@ -258,8 +258,8 @@ def tape_legend(job: Job) -> list:
     for label, field in roles:
         seen = {}
         for c in job.cabinets:
-            if c.template == "none":
-                continue
+            if c.is_panel or c.template == "none":
+                continue    # both name their own edging, panel by panel
             tape = c.tapes(job.materials)[field]
             if tape:
                 seen.setdefault(tape, []).append(c.number)
@@ -281,7 +281,14 @@ def _tape_note(job: Job, x, y, width) -> list:
 
 
 def elevation_svg(job: Job, max_width: int = 1100) -> str:
-    cabs = [c for c in job.cabinets]
+    """The Run: the cabinet list drawn side by side.
+
+    Panels are not in it, deliberately. A panel is not part of a cupboard run —
+    it has no place in a line of carcasses — and keeping it out is also what
+    keeps `wall_elevation_svg` with no room equal to this drawing, which
+    tools/check_elevation.py asserts.
+    """
+    cabs = [c for c in job.cabinets if not c.is_panel]
     if not cabs:
         return ('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60">'
                 f'<text x="10" y="34" font-size="13" fill="{MUTED}" '

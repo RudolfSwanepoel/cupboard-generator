@@ -301,6 +301,47 @@ real-panel model doubles as an assembly check and costs almost nothing extra.
 That last point is the one that matters most for bespoke work: it ties the
 picture to the order, so a panel cannot be admired in 3D and wrong on the list.
 
+## Independent panels — Part D, built 20 September 2026
+
+A panel is a part that is cut, numbered, costed and nested on its own and
+belongs to no carcass. Several make a bulkhead — a front, an underside and an
+end cap each side — each its own numbered item.
+
+**Model.** A `Cabinet` with `kind="panel"` carrying a `PanelSpec`: a board, an
+orientation, two finished extents `a` and `b`, which extent the grain runs
+along, an edging kind and colour board, and how many long and short edges are
+banded. `template` is NOT used to say panel and is never rewritten when a kind
+changes — there would be nothing to restore it from, and October cabinets 3 and
+5 are `template="standard"` carrying hand-specified extras. `PanelSpec.anchor`
+is reserved and nothing reads it: a panel stays where it is put.
+
+**Geometry.** `room.panel_geometry`, reached through `room.geometry(cab, std,
+materials)` with `source="panel"`. The third extent is always the board's own
+thickness, which is why a panel never states one and why geometry needs the
+job's materials for a panel and for nothing else:
+
+| Orientation | along the wall | out from the wall | up |
+|---|---|---|---|
+| `upright` — facing the room | a | thickness | b |
+| `flat` — horizontal | a | b | thickness |
+| `end` — upright, side-on | thickness | a | b |
+
+**What a panel takes no part in, and this is the load-bearing half.**
+`room.placed` skips panels explicitly, so gaps, runs, plinth, tip-up, door
+swings and overlaps are exactly what they were. A panel stands on no legs, so
+`carcass_z` is its own z. It is not in the Run drawing — which is also what
+keeps `wall_elevation_svg` with no room equal to `elevation_svg` — nor in the
+edging legend, nor in the structure, door, drawer, support or carcass-thickness
+checks.
+
+**Placement is Part E and is not built.** A panel has no placement, is not in
+the Placements table, is not drawn in the plan or the wall elevations, and an
+unplaced panel is deliberately not a warning: a panel cut and not put anywhere
+is normal. `Placement.y` — the out-from-the-wall offset a bulkhead needs — is
+Part E and does not exist yet.
+
+`jobs/Test_Panels.json` is the fixture; `tools/check_panels.py` is the check.
+
 ## Phasing
 
 Each phase ends with `regen_check.py` and `check_examples.py` clean.

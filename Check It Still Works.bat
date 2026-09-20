@@ -19,6 +19,8 @@ python tools\check_swap.py
 echo.
 python tools\check_colour.py
 echo.
+python tools\check_panels.py
+echo.
 echo ---------------------------------------------
 echo You want to see: 22 cabinets reproduce exactly
 echo             and: 0 wrong

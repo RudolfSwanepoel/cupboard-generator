@@ -6,12 +6,60 @@ except panel codes and the 100 mm support width, which is a fixed detail.
 from dataclasses import replace
 from typing import List
 
-from .model import MATERIALS, Cabinet, Job, Panel, grain_of, resolve_board
+from .model import (MATERIALS, PANEL_CODE, Cabinet, Job, Panel, grain_of,
+                    resolve_board, tape_for)
 from .room import (gaps, plinth_butt_wall, plinth_choice_for, plinth_deduction,
                    plinth_lengths, runs)
 from .standard import Standard, STANDARD
 
 SUPPORT_W = 100          # a support spans the internal width at this height
+
+
+def panel_of(cab: Cabinet, materials: dict = None) -> Panel:
+    """One independent panel, as the cut list carries it.
+
+    Derived, never typed. What the operator types is the board, the orientation,
+    two finished extents and how many long and short edges are banded; the cut
+    list line falls out of that and the Boards record.
+
+    Which extent becomes `Length` is the grain question, and only that:
+
+    * a GRAINED board locks the panel, and `Length` IS the grain direction, so
+      the extent the grain runs along is the length whether it is the longer of
+      the two or not;
+    * a PLAIN board has no direction, so the longer extent is the length and the
+      nester is free to turn it.
+
+    `edge_l` counts the edges whose run is `length` and `edge_w` those whose run
+    is `width` (Standard.edging_m), which is NOT the same question as long and
+    short: a grained panel cut across its length has its long edges running the
+    width. So the two are mapped rather than assumed equal.
+
+    Edging is the Boards record's answer and nothing else. A board with no
+    edging, or one that does not offer the kind asked for, gives no name - and
+    then nothing is banded either, so the panel does not go out asking for an
+    edging that does not exist. The validator names it (`_panels`).
+    """
+    mats = MATERIALS if materials is None else materials
+    spec = cab.panel_spec
+    board = resolve_board(mats, spec.board)
+    grain = grain_of(mats, board)
+    a, b = int(spec.a or 0), int(spec.b or 0)
+    if grain:
+        length, width = (a, b) if spec.grain_along == "a" else (b, a)
+    else:
+        length, width = max(a, b), min(a, b)
+
+    long_edges, short_edges = int(spec.edge_long or 0), int(spec.edge_short or 0)
+    edge_l, edge_w = ((long_edges, short_edges) if length >= width
+                      else (short_edges, long_edges))
+    tape = tape_for(mats, spec.edge_board or board, spec.edge_kind) \
+        if spec.edge_kind else ""
+    if not tape:
+        edge_l = edge_w = 0
+    return Panel(cab.number, PANEL_CODE, "Panel", board, length, width, 1,
+                 edge_l=edge_l, edge_w=edge_w, edge_material=tape,
+                 grain=grain, note=cab.note)
 
 
 def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
@@ -27,6 +75,8 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     mats = MATERIALS if materials is None else materials
     # the job's own panels, exactly as defined — only a board id the job knows
     # by its other name is read as that name (see model.resolve_board)
+    if cab.is_panel:
+        return [panel_of(cab, mats)]
     bespoke = resolved(cab.bespoke, mats)
     if cab.template == "none":
         return bespoke

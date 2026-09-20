@@ -9,9 +9,9 @@ from typing import List
 
 from .engine import front_stack_check, generate_cabinet
 from .export_plaza import effective_price
-from .model import (TAPE_PREFIX, WHITE_TOKEN, Cabinet, Job, Panel, grain_of,
-                    is_thin, material_board, material_offers, material_thickness,
-                    material_token, tape_for)
+from .model import (PANEL_ORIENTATIONS, TAPE_PREFIX, WHITE_TOKEN, Cabinet, Job,
+                    Panel, grain_of, is_thin, material_board, material_offers,
+                    material_thickness, material_token, tape_for)
 from .room import (above_ceiling, blocked_openings, cab_corner_outline,
                    clashes as room_clashes, closure_error, corner_offset,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
@@ -65,6 +65,7 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     out += _grain_on_boards(job, panels)
     out += _zero_quantities(panels)
     out += _drawer_boxes(job.cabinets)
+    out += _panels(job)
     out += _project_boards(job)
     out += tape_issues
     out += _carcass_thickness(job, std)
@@ -115,6 +116,8 @@ def _cabinet_structure(cabinets, std):
     """D1 — cabinets 45 and 49 went to Plazaboard with no side panels."""
     out = []
     for c in cabinets:
+        if c.is_panel:
+            continue                       # not a box: see _panels
         if c.door_count and c.width <= 0:
             out.append(Issue(CRITICAL, str(c.number), "door on a cabinet with no width"))
         if c.drawer_list:
@@ -134,6 +137,8 @@ def _front_stacks(cabinets, std):
     """W5 / D2 — cabinet 30's faces left 75 mm of open gap."""
     out = []
     for c in cabinets:
+        if c.is_panel:
+            continue                       # no front to stack
         res = front_stack_check(c, std)
         if res is None:
             continue
@@ -246,6 +251,11 @@ def _drawer_boxes(cabinets):
     """
     out = []
     for c in cabinets:
+        # A cabinet switched to Panel keeps its drawer stack in the job file and
+        # builds nothing from it — the house pattern — so it must not be
+        # reported on either.
+        if c.is_panel:
+            continue
         for i, d in enumerate(c.drawer_list, start=1):
             if d.face_height <= 0:
                 out.append(Issue(CRITICAL, str(c.number),
@@ -257,6 +267,54 @@ def _drawer_boxes(cabinets):
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"drawer {i}: box {d.box_height} is not shorter than "
                                  f"its face {d.face_height}"))
+    return out
+
+
+def _panels(job: Job):
+    """An independent panel: a board, a size that can be cut, and edging the
+    board actually offers.
+
+    Deliberately short. What a panel shares with everything else on the cut list
+    is already checked where it always was, and repeating it here would be two
+    messages for one problem: a panel too big for a sheet is `_panel_fits_board`,
+    a board the project never selected is `_board_prices`, an unreadable edging
+    name is `_edge_materials`. What is left is what only a panel can get wrong.
+
+    An UNPLACED panel is not a fault. A panel cut and not put anywhere is
+    normal — it is a part on an order, not a cupboard missing from a room.
+    """
+    out = []
+    mats = job.materials
+    for c in job.cabinets:
+        if not c.is_panel:
+            continue
+        spec = c.panel_spec
+        where = str(c.number)
+        if not spec.board:
+            out.append(Issue(CRITICAL, where,
+                             "panel with no board — pick what it is cut from in "
+                             "Panel design"))
+        if spec.orientation not in PANEL_ORIENTATIONS:
+            out.append(Issue(CRITICAL, where,
+                             f"panel orientation {spec.orientation!r} is not one of "
+                             f"{', '.join(PANEL_ORIENTATIONS)} — it cannot be drawn "
+                             f"or placed until it is one of them"))
+        for name, v in (("a", spec.a), ("b", spec.b)):
+            if int(v or 0) <= 0:
+                out.append(Issue(CRITICAL, where,
+                                 f"panel size {name} is {int(v or 0)} — both extents "
+                                 f"have to be a real finished size"))
+        # Edging asked for that the board does not sell. Same shape and the same
+        # tag as A9: it blocks, and it says what to tick.
+        banded = int(spec.edge_long or 0) + int(spec.edge_short or 0)
+        colour = spec.edge_board or spec.board
+        if spec.edge_kind and banded and not tape_for(mats, colour, spec.edge_kind):
+            out.append(Issue(CRITICAL, where,
+                             f"panel is edged {TAPE_PREFIX.get(spec.edge_kind, spec.edge_kind)} "
+                             f"in {colour or 'no board'}, which does not offer it — tick "
+                             f"that kind on {colour or 'the board'} in the Boards tab, or "
+                             f"choose another edging",
+                             EDGING_REF))
     return out
 
 
@@ -321,8 +379,8 @@ def _boards_and_tapes(job: Job):
     mats = job.materials
     out = []
     for c in job.cabinets:
-        if c.template == "none":
-            continue                       # its panels name their own materials
+        if c.is_panel or c.template == "none":
+            continue    # bespoke names its own materials; a panel is _panels'
         # The back board is only asked for when something is actually cut from it
         # — a back, or a drawer on a grooved 3 mm base. A cabinet with no back and
         # no board bases never touches it, so it is not nagged about one.
@@ -428,8 +486,8 @@ def _thin_boards(job: Job):
     """
     out = []
     for c in job.cabinets:
-        if c.template == "none":
-            continue                       # its panels are specified by hand
+        if c.is_panel or c.template == "none":
+            continue    # bespoke is specified by hand; a panel may be any thickness
         wants = [(c.carcass_board, "carcass board"), (c.exterior_board, "exterior board")]
         for i, b in enumerate(c.door_boards or []):
             if b:
@@ -469,7 +527,9 @@ def _carcass_thickness(job: Job, std):
     """
     out = []
     for c in job.cabinets:
-        if c.template == "none":
+        # A panel is one board, whatever thickness it is — the 16 mm arithmetic
+        # this names is carcass arithmetic, and a panel does none of it.
+        if c.is_panel or c.template == "none":
             continue                       # its panels are specified by hand
         for board, what in ((c.carcass_board, "carcass board"),
                             (c.exterior_board, "exterior board")):
@@ -497,8 +557,8 @@ def _support_edging(job: Job):
     mats = job.materials
     out = []
     for c in job.cabinets:
-        if c.template == "none":
-            continue
+        if c.is_panel or c.template == "none":
+            continue                       # neither cuts a support
         for i, row in enumerate(c.support_list, start=1):
             kind = c.support_row_kind(row)
             if not kind or c.support_row_tape(mats, row):
@@ -534,6 +594,8 @@ def _supports(cabinets):
     """
     out = []
     for c in cabinets:
+        if c.is_panel:
+            continue                       # cuts no supports
         if not c.legacy_supports_negative:
             continue
         out.append(Issue(WARNING, str(c.number),
@@ -597,6 +659,8 @@ def _room(job: Job, std):
             out.append(Issue(CRITICAL, str(p.cabinet),
                              "placement for a cabinet that does not exist"))
             continue
+        if by_number[p.cabinet].is_panel:
+            continue        # panels take no part in the room checks yet (Part E)
         if p.wall not in lengths:
             out.append(Issue(CRITICAL, str(p.cabinet),
                              f"placed on wall {p.wall!r}, which the room does not have"))

@@ -37,7 +37,8 @@ sys.path.insert(0, ROOT)
 from cabinetgen import boards as B                                            # noqa: E402
 from cabinetgen.export_plaza import (RATES, YIELD, board_yield,              # noqa: E402
                                      cut_rate, effective_price)
-from cabinetgen.model import Cabinet, Drawer, Job, Panel, Support             # noqa: E402
+from cabinetgen.model import (Cabinet, Drawer, Job, Panel, PanelSpec,         # noqa: E402
+                              Support)
 from cabinetgen.store import cabinet_to_dict                                  # noqa: E402
 
 NL = chr(10)
@@ -74,6 +75,14 @@ def loaded_cabinet():
     cab.bespoke = [Panel(cabinet=1, code="01", role="Side", material="SENT_BESPOKE",
                          length=100, width=100)]
     seen["SENT_BESPOKE"] = "bespoke[0].material"
+    # A panel names two boards of its own, and by reflection again: a board
+    # field added to PanelSpec and not to _board_slots fails here too.
+    cab.panel = PanelSpec()
+    for f in fields(PanelSpec):
+        if f.name == "board" or f.name.endswith("_board"):
+            token = "SENT_PANEL_" + f.name.upper()
+            setattr(cab.panel, f.name, token)
+            seen[token] = "panel." + f.name
     return cab, seen
 
 
@@ -83,6 +92,10 @@ def main():
     cab, seen = loaded_cabinet()
 
     print("\nevery board field on the dataclass is found by reflection")
+    check("the PanelSpec board fields",
+          sorted(f.name for f in fields(PanelSpec)
+                 if f.name == "board" or f.name.endswith("_board")),
+          ["board", "edge_board"])
     declared = sorted(f.name for f in fields(Cabinet) if f.name.endswith("_board"))
     check("the _board fields", declared,
           ["back_board", "carcass_board", "door_edge_board", "drawer_carcass_board",
@@ -99,6 +112,10 @@ def main():
     check("drawer 1's face is named", labels.get("SENT_DFACE"), "drawer 1 face board")
     check("the support row's board is named", labels.get("SENT_SUPROW"),
           "support row 1 edging board")
+    check("the panel's own board is named", labels.get("SENT_PANEL_BOARD"),
+          "panel board")
+    check("and the board its edging colour comes from",
+          labels.get("SENT_PANEL_EDGE_BOARD"), "panel edging board")
     check("no label is blank", sorted({bool(v) for v in labels.values()}), [True])
 
     print("\na blank slot is 'follow Structure', not a name")

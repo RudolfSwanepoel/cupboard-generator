@@ -16,11 +16,12 @@ from cabinetgen import boards as B
 from cabinetgen import nest as N
 from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
                                 opening_for, remainder, split_pair, stack)
-from cabinetgen.engine import generate_job
+from cabinetgen.engine import generate_job, panel_of
 from cabinetgen.export_plaza import (effective_price, estimate_cost, summarise,
                                      write_csvs)
 from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
-                              MATERIALS, NO_COLOUR, SUPPORT_EDGES,
+                              MATERIALS, NO_COLOUR, PANEL_CODE,
+                              PANEL_ORIENTATIONS, PanelSpec, SUPPORT_EDGES,
                               grain_of, hinge_side, is_thin, material_board,
                               material_colour, material_has_edging,
                               material_offers, material_price,
@@ -53,7 +54,14 @@ def _job(payload):
     Fresh every request on purpose: engine.suffix_labels rewrites panel codes in
     place, so a reused Job would grow a second suffix on every compute.
     """
-    return job_from_dict(payload.get("job") or {})
+    job = job_from_dict(payload.get("job") or {})
+    for cab in job.cabinets:
+        # An item whose kind is Panel has a panel record, decided here and not
+        # in the browser. Nothing else about the cabinet is touched: switching
+        # kind keeps every field, so switching back brings the cupboard with it.
+        if cab.is_panel and cab.panel is None:
+            cab.panel = PanelSpec()
+    return job
 
 
 def _panel_row(p, std):
@@ -92,7 +100,28 @@ def defaults(payload):
         "runner_lengths": list(STANDARD.runner_lengths),
         "codes": CODES,
         "edge_materials": sorted(x for x in ALLOWED_EDGE if x),
-        "kinds": ["tall", "upper", "base"],
+        "kinds": ["tall", "upper", "base", "panel"],
+        # The three orientations, each said in the words the editor shows and
+        # with the two typed extents named for that orientation. The browser
+        # labels its fields from this rather than holding its own copy.
+        "panel_orientations": [
+            {"key": "upright", "name": "Upright, facing the room",
+             "a": "Width along the wall", "b": "Height",
+             "a_short": "width", "b_short": "height",
+             "hint": "a panel standing up and facing into the room, like a door "
+                     "leaf or a bulkhead front"},
+            {"key": "flat", "name": "Flat (horizontal)",
+             "a": "Width along the wall", "b": "Depth out from the wall",
+             "a_short": "width", "b_short": "depth",
+             "hint": "a panel lying flat, like the underside of a bulkhead or a "
+                     "shelf standing on its own"},
+            {"key": "end", "name": "Upright, side-on to the wall",
+             "a": "Depth out from the wall", "b": "Height",
+             "a_short": "depth", "b_short": "height",
+             "hint": "a panel standing up but turned side-on, like the end cap "
+                     "that closes a bulkhead"},
+        ],
+        "panel_code": PANEL_CODE,
         "corner_styles": ["", "mitre", "ell"],
         "hinge_sides": ["L", "R"],
         "face_modes": ["share", "fixed"],
@@ -116,8 +145,34 @@ def defaults(payload):
     }
 
 
+def _panel_info(job, cab):
+    """The panel record, and the cut-list line it produces.
+
+    The line is `engine.panel_of`'s, not one the browser assembles: what it says
+    is what will be cut, down to the edging name and which way the grain locks.
+    """
+    spec = cab.panel_spec
+    p = panel_of(cab, job.materials)
+    along = "a" if spec.grain_along == "a" else "b"
+    return {
+        "board": spec.board, "orientation": spec.orientation,
+        "a": spec.a, "b": spec.b, "grain_along": along,
+        "edge_kind": spec.edge_kind, "edge_board": spec.edge_board,
+        "edge_long": spec.edge_long, "edge_short": spec.edge_short,
+        # what the engine makes of it
+        "line": {"label": p.label, "code": p.code, "role": p.role,
+                 "material": p.material, "length": p.length, "width": p.width,
+                 "qty": p.qty, "grain": p.grain, "edge_l": p.edge_l,
+                 "edge_w": p.edge_w, "edge_material": p.edge_material},
+        # which typed extent became the cut list's Length, said in the editor's
+        # own words, so the browser never works the grain rule out for itself
+        "length_is": along if p.grain else ("a" if spec.a >= spec.b else "b"),
+        "thickness": material_thickness(job.materials, spec.board),
+    }
+
+
 def _geometry_info(job, cab, std):
-    g = geometry(cab, std)
+    g = geometry(cab, std, job.materials)
     # One leaf per door panel that was actually cut, so a bespoke or corner unit
     # gets a hinge control too — cab.doors is 0 on those. The side is the engine's
     # own answer, the same one the plan swings from and the elevation draws.
@@ -201,7 +256,11 @@ def _geometry_info(job, cab, std):
                            for i in range(n)],
             "opening": opening_for(cab.height,
                                    (cab.door_height or (cab.height - std.door_height_gap))
-                                   if cab.door_count else 0, std)}
+                                   if cab.door_count else 0, std),
+            # An independent panel: what it is, and the line it cuts. Absent on
+            # everything else, which is how the editor knows what to show.
+            "is_panel": cab.is_panel,
+            "panel": _panel_info(job, cab) if cab.is_panel else None}
 
 
 def _board_payload(job, key):
@@ -688,6 +747,10 @@ def _room_info(job):
     unplaced = []
     places = {}
     for cab in job.cabinets:
+        # Placing a panel is Part E. Until then a panel is not counted as
+        # unplaced either — a panel cut and not put anywhere is normal.
+        if cab.is_panel:
+            continue
         p = placement_for(job, cab.number)
         if p is None:
             unplaced.append(cab.number)

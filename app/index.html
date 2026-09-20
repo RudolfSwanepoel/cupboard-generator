@@ -131,6 +131,13 @@
   .swatch.none{background:repeating-linear-gradient(45deg,var(--carc),var(--carc) 4px,
                var(--panel) 4px,var(--panel) 8px)}
   header .grow,.matline .grow{flex:1}
+  .orients{display:flex;gap:6px;flex-wrap:wrap}
+  .orient{display:flex;align-items:center;gap:6px;padding:5px 8px;
+          border:1px solid var(--rule);border-radius:6px;cursor:pointer;
+          font-size:11px;line-height:1.15;max-width:170px}
+  .orient.on{border-color:var(--ink);background:rgba(0,0,0,.04)}
+  .orient input{margin:0}
+  .orient svg{flex:0 0 auto;color:var(--ink)}
   .tape{margin-top:8px}
   .tape>label{font-size:11px;color:var(--muted);display:block}
   .tape .leaf{margin-top:2px}
@@ -516,9 +523,15 @@ function frontsText(c) {
 function renderList() {
   const rows = S.job.cabinets.map((c, i) => {
     const shelves = (c.shelves || 0) + (c.fixed_shelves || 0);
+    // A panel's declared width, height and depth are labels: its real size is
+    // its board and its two typed extents, so the table shows the engine's
+    // figures for one. A cupboard still shows what it is being built to.
+    const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+    const isP = !!(g && g.is_panel);
     return `<tr data-i="${i}" class="${i === S.sel ? "sel" : ""}">
       <td class="n">${c.number}</td>
-      <td class="n">${c.width}</td><td class="n">${c.height}</td><td class="n">${c.depth}</td>
+      <td class="n">${isP ? g.width : c.width}</td><td class="n">${
+        isP ? g.height : c.height}</td><td class="n">${isP ? g.depth : c.depth}</td>
       <td>${esc(c.kind)}</td>
       <td>${esc(frontsText(c))}</td>
       <td class="n">${shelves || ""}</td>
@@ -539,17 +552,27 @@ function renderList() {
   renderEditor();
 }
 
+// Copy the item at `i`, with the next free number from the engine. Everything
+// comes with it EXCEPT its placement: a placement names a cabinet by number, so
+// a copy has none and is put where it goes. That is what a bulkhead wants —
+// four panels of the same description in four different places — and it is
+// what the cabinet table's Dup has always done.
+async function dupCabinet(i) {
+  const src = S.job.cabinets[i];
+  if (!src) return;
+  const copy = JSON.parse(JSON.stringify(src));
+  const r = await post("/api/next-number", {job: S.job});
+  copy.number = r.number;
+  (copy.bespoke || []).forEach((p) => { p.cabinet = copy.number; });
+  S.job.cabinets.splice(i + 1, 0, copy);
+  S.sel = i + 1;
+  schedule(); renderList();
+}
+
 $("cabtable").addEventListener("click", async (e) => {
   const dup = e.target.closest("[data-dup]");
   if (dup) {
-    const i = +dup.dataset.dup;
-    const copy = JSON.parse(JSON.stringify(S.job.cabinets[i]));
-    const r = await post("/api/next-number", {job: S.job});
-    copy.number = r.number;
-    copy.bespoke.forEach((p) => { p.cabinet = copy.number; });
-    S.job.cabinets.splice(i + 1, 0, copy);
-    S.sel = i + 1;
-    schedule(); renderList();
+    await dupCabinet(+dup.dataset.dup);
     return;
   }
   const del = e.target.closest("[data-del]");
@@ -617,26 +640,51 @@ $("add").addEventListener("click", async () => {
    Everything a section needs is in that section. The boards are chosen once, in
    Structure; Doors and Drawers each choose their own material and their own
    edging and say nothing about anyone else's. */
+// Whether the selected item is an independent panel rather than a cupboard.
+// The engine's answer where there is one; until the next compute lands, the
+// kind that was just picked. It is a question about which controls to show,
+// not about a dimension — every size a panel has still comes from the engine.
+function isPanelCab(c) {
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  if (g && g.is_panel !== undefined) return !!g.is_panel;
+  return c.kind === "panel";
+}
+
+const notPanel = (c) => !isPanelCab(c);
+
 const SECTIONS = [
   {key: "size", name: "Size", fields: [
     ["width", "Width", "int"], ["height", "Height", "int"],
     ["depth", "Depth", "int"], ["kind", "Kind", "sel:kinds"],
     ["number", "Number", "int"], ["note", "Note", "text"]]},
 
-  {key: "outline", name: "Outline",
+  // A panel is one part, so it has one section: what it is cut from, which way
+  // up it stands, its two finished sizes and its edging. The cupboard sections
+  // below are hidden for it — hidden, not emptied: everything they hold stays
+  // in the job file, so picking a cupboard kind again brings it all back.
+  {key: "panel", name: "Panel design", slot: "panelbox", when: isPanelCab,
+   hint: "An independent panel. It is not part of any cupboard, it is numbered " +
+         "in the same series as the cabinets, and the sizes here are finished " +
+         "cut sizes. Several of them make a bulkhead \u2014 a front, an underside " +
+         "and an end cap each side \u2014 each its own numbered item.",
+   fields: []},
+
+  {key: "outline", name: "Outline", when: notPanel,
    hint: "Actual plan shape, x along the wall, y out from the wall. " +
          "All geometry checks read this, not the declared width/depth.",
    fields: [["footprint", "Footprint outline", "poly"]]},
 
-  {key: "structure", name: "Structure", slot: "structurebox", fields: []},
+  {key: "structure", name: "Structure", slot: "structurebox", when: notPanel,
+   fields: []},
 
-  {key: "doors", name: "Doors", slot: "doorbox",
+  {key: "doors", name: "Doors", slot: "doorbox", when: notPanel,
    toggle: "has_doors", tick: "Has doors", fields: []},
 
-  {key: "drawers", name: "Drawers", slot: "drawerbox",
+  {key: "drawers", name: "Drawers", slot: "drawerbox", when: notPanel,
    toggle: "has_drawers", tick: "Has drawers", fields: []},
 
   {key: "corner", name: "Corner Unit", toggle: "corner_unit", tick: "Corner unit",
+   when: notPanel,
    fields: [
     ["corner_style", "Style", "sel:corner_styles"],
     ["arm_a", "Arm A (along wall A)", "opt"],
@@ -644,7 +692,7 @@ const SECTIONS = [
     ["face_a", "Face A (open face, wall-A side)", "opt"],
     ["face_b", "Face B (open face, wall-B side)", "opt"]]},
 
-  {key: "supports", name: "Supports", slot: "supportbox",
+  {key: "supports", name: "Supports", slot: "supportbox", when: notPanel,
    hint: "A support is a cross rail spanning the internal width, tying the two " +
          "sides together. One row per kind; the total is the sum of the rows. " +
          "A front-edged one takes the carcass edging, which is PVC in the " +
@@ -808,7 +856,8 @@ function alike(a, b) {
 
 function controlKey(el) {
   const d = el.dataset || {};
-  return ["sup", "sk", "d", "dk", "k", "dboard", "edge", "ek", "leaf", "tick", "t"]
+  return ["sup", "sk", "d", "dk", "k", "dboard", "edge", "ek", "leaf", "tick",
+          "t", "pk", "po"]
     .map((a) => (d[a] === undefined ? "" : d[a])).concat(el.type || "").join("|");
 }
 
@@ -885,7 +934,8 @@ function renderEditor() {
   }
 
   const c = S.job.cabinets[S.sel];
-  const sets = SECTIONS.map((sec) => sectionHTML(c, sec)).join("");
+  const sets = SECTIONS.filter((sec) => !sec.when || sec.when(c))
+    .map((sec) => sectionHTML(c, sec)).join("");
 
   const bespoke = c.template === "none"
     ? `<div class="bespoke"><b>Bespoke cabinet.</b> The template generates nothing;
@@ -908,6 +958,7 @@ function renderEditor() {
   renderDoors();
   renderDrawers();
   renderSupports();
+  renderPanel();
   refreshGeometryReadout();
   refreshSwing();
   refreshEdging();
@@ -929,6 +980,25 @@ $("editor").addEventListener("focusout", () => {
 $("editor").addEventListener("input", (e) => {
   const c = S.job.cabinets[S.sel];
   if (!c) return;
+
+  // a panel field. The record is one object, so it is written into rather than
+  // onto the cabinet, and every figure the editor SHOWS still comes back from
+  // the engine on the next compute.
+  const pk = e.target.dataset.pk;
+  if (pk !== undefined) {
+    const p = panelOf(c);
+    const v = e.target.value;
+    if (pk === "a" || pk === "b" || pk === "edge_long" || pk === "edge_short") {
+      p[pk] = parseInt(v, 10) || 0;
+    } else {
+      p[pk] = v;
+      // A kind the new colour board does not offer is not quietly kept: the
+      // board is what offers edging, so the colour follows the board it is on.
+      if (pk === "edge_kind" && !v) p.edge_board = "";
+    }
+    schedule();
+    return;
+  }
 
   // which board one door leaf is cut from; "" hands it back to the exterior board
   const dboard = e.target.dataset.dboard;
@@ -962,6 +1032,32 @@ $("editor").addEventListener("input", (e) => {
   }
 
   const k = e.target.dataset.k;
+  if (k === "kind" && e.target.value === "panel" && !isPanelCab(c)) {
+    // Turning a cupboard into a panel hides every cupboard section at once, so
+    // it is said out loud first. Nothing is emptied - the same bargain as the
+    // tickboxes - and picking a cupboard kind again brings it all back, which
+    // is why this asks only in this direction.
+    const has = [];
+    if ((c.doors || 0) > 0 && c.has_doors !== false) has.push(`${c.doors} door(s)`);
+    if ((c.drawers || []).length && c.has_drawers !== false) {
+      has.push(`${c.drawers.length} drawer face(s)`);
+    }
+    if ((c.support_rows || []).length) has.push(`${c.support_rows.length} support row(s)`);
+    if ((c.shelves || 0) + (c.fixed_shelves || 0)) {
+      has.push(`${(c.shelves || 0) + (c.fixed_shelves || 0)} shelves`);
+    }
+    if ((c.bespoke || []).length) has.push(`${c.bespoke.length} hand-specified panel(s)`);
+    if (has.length) {
+      const ok = window.confirm(
+        `Cabinet ${c.number} becomes a single panel.\n\n` +
+        `It is built from its Panel design only, so these stop being cut:\n\n` +
+        `    ${has.join("\n    ")}\n\n` +
+        `Nothing is thrown away \u2014 every one of them stays in the job file exactly ` +
+        `as it is, and picking a cupboard kind again brings it all back unchanged. ` +
+        `The number does not change.\n\nMake it a panel?`);
+      if (!ok) { e.target.value = c.kind; return; }
+    }
+  }
   if (k) {
     // The number is applied when the field is finished with, not per keystroke:
     // everything that names the cabinet by number has to move with it, and typing
@@ -1121,6 +1217,13 @@ $("editor").addEventListener("change", async (e) => {
 });
 
 $("editor").addEventListener("click", (e) => {
+  // Duplicate, from the Panel design section. The same path the cabinet table's
+  // Dup takes: the next free number from the engine, everything copied but the
+  // placement - a panel is put where it is put, so a copy is not.
+  if (e.target.closest("#paneldup")) {
+    dupCabinet(S.sel);
+    return;
+  }
   if (e.target.closest("[data-clearedge]")) {
     const c = S.job.cabinets[S.sel];
     c.door_edge = null;
@@ -1700,6 +1803,188 @@ function edgingHTML(c, which, opts) {
         <b>${esc(override)}</b>, and that still wins over the two choices above.
         <button data-clearedge="1">Clear it</button></span>` : ""}
     </div>`;
+}
+
+/* ---------- Panel design ---------------------------------------------------
+   An independent panel: one part, cut and numbered on its own, not part of any
+   cupboard. What is typed here is a board, which way up the panel stands, its
+   two FINISHED extents and its edging; everything else about it - which extent
+   becomes the cut list's Length, whether the grain locks it, what the edging is
+   called - is the engine's answer, read back. The preview line at the bottom is
+   engine.panel_of's own, not one assembled here.                            */
+
+// The empty record, exactly as cabinetgen.model.PanelSpec defaults it. The
+// server makes one too, on the next compute; this is only so the controls have
+// something to write into before that lands.
+function blankPanel() {
+  return {board: "", orientation: "upright", a: 0, b: 0, grain_along: "b",
+          edge_kind: "", edge_board: "", edge_long: 0, edge_short: 0};
+}
+
+function panelOf(c) {
+  if (!c.panel) c.panel = blankPanel();
+  return c.panel;
+}
+
+// A small picture of the panel standing the way the option means, against a
+// stretch of wall. Drawn rather than described because "upright, side-on" is
+// two words that mean nothing until you see it.
+const ORIENT_ICON = {
+  upright: `<svg viewBox="0 0 34 26" width="34" height="26" aria-hidden="true">
+      <path d="M2 4 H32" stroke="currentColor" stroke-width="1.5" opacity=".45"/>
+      <rect x="8" y="6" width="18" height="16" fill="currentColor" opacity=".8"/>
+    </svg>`,
+  flat: `<svg viewBox="0 0 34 26" width="34" height="26" aria-hidden="true">
+      <path d="M2 4 H32" stroke="currentColor" stroke-width="1.5" opacity=".45"/>
+      <rect x="8" y="12" width="18" height="4" fill="currentColor" opacity=".8"/>
+    </svg>`,
+  end: `<svg viewBox="0 0 34 26" width="34" height="26" aria-hidden="true">
+      <path d="M2 4 H32" stroke="currentColor" stroke-width="1.5" opacity=".45"/>
+      <rect x="15" y="6" width="4" height="16" fill="currentColor" opacity=".8"/>
+    </svg>`,
+};
+
+function renderPanel() {
+  const box = slot($("panelbox"));
+  if (!box) return;
+  const c = S.job.cabinets[S.sel];
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const info = (g && g.panel) || null;
+  const p = panelOf(c);
+  const keys = (S.res && S.res.boards) || [];
+  const mats = (S.res && S.res.materials) || {};
+  const orients = S.def.panel_orientations || [];
+  const here = orients.find((o) => o.key === p.orientation) || orients[0] || {};
+  const allKinds = S.def.edging_kinds || ["pvc", "1mm", "2mm"];
+  const pre = S.def.edging_prefix || {};
+
+  if (!keys.length) {
+    box.innerHTML = `<p class="off">This project has no boards yet. Tick one into
+      it on the <b>Boards</b> tab before choosing what this panel is cut from.</p>`;
+    return;
+  }
+
+  // A panel may be any thickness - a 3 mm back panel cut to size is a perfectly
+  // good panel - so unlike every carcass dropdown this one filters nothing.
+  const lost = p.board && keys.indexOf(p.board) < 0;
+  const boardSelHTML = `<div class="f wide"><label>Board</label>
+      <select data-pk="board">
+        <option value=""${p.board ? "" : " selected"}>— pick a board —</option>
+        ${lost ? `<option value="${esc(p.board)}" selected>${esc(p.board)} (not selected)</option>` : ""}
+        ${keys.map((k) => `<option value="${esc(k)}"${k === p.board ? " selected" : ""}>${
+          esc(k)} — ${esc((mats[k] || {}).board || k)}${
+          (mats[k] || {}).thickness ? " · " + mats[k].thickness + "mm" : ""}</option>`).join("")}
+      </select>
+      <span class="note">any thickness — a panel is one board, not a carcass</span></div>`;
+
+  const orientHTML = `<div class="f wide"><label>Orientation</label>
+      <div class="orients">${orients.map((o) => `<label class="orient${
+        o.key === p.orientation ? " on" : ""}" title="${esc(o.hint)}">
+        <input type="radio" name="porient" data-pk="orientation" data-po="${esc(o.key)}"
+               value="${esc(o.key)}"${o.key === p.orientation ? " checked" : ""}>
+        ${ORIENT_ICON[o.key] || ""}<span>${esc(o.name)}</span></label>`).join("")}</div>
+      <span class="note">${esc(here.hint || "")}</span></div>`;
+
+  const grained = !!((mats[p.board] || {}).grain === "grain");
+  const grainHTML = grained
+    ? `<div class="f wide"><label>Grain runs along</label>
+         <select data-pk="grain_along">
+           <option value="a"${p.grain_along === "a" ? " selected" : ""}>${
+             esc(here.a || "a")}</option>
+           <option value="b"${p.grain_along === "a" ? "" : " selected"}>${
+             esc(here.b || "b")}</option>
+         </select>
+         <span class="note">The cut list's <b>Length</b> IS the grain direction, so
+           this is what decides which size is the length — and the panel is locked,
+           the nester cannot turn it.</span></div>`
+    : `<div class="f wide"><label>Grain runs along</label>
+         <p class="off">${p.board
+           ? esc(p.board) + " is a plain board — it has no direction, so the nester is free to turn this panel."
+           : "Pick a board first."}</p></div>`;
+
+  // Edging: the kinds THIS board offers, and a colour from the boards that
+  // offer the chosen kind. Nothing here states an edging name.
+  const offered = allKinds.filter((k) => boardOffers(p.board, k));
+  const colour = p.edge_board || p.board;
+  const kindLost = p.edge_kind && offered.indexOf(p.edge_kind) < 0;
+  const colourKeys = p.edge_kind ? keys.filter((k) => boardOffers(k, p.edge_kind)) : keys.slice();
+  const colourLost = p.edge_kind && colour && colourKeys.indexOf(colour) < 0;
+  const bandSel = (which, v) => `<select data-pk="edge_${which}">${
+    [0, 1, 2].map((n) => `<option value="${n}"${n === (+v || 0) ? " selected" : ""}>${n}</option>`).join("")
+    }</select>`;
+
+  const edgeHTML = (!offered.length && !p.edge_kind)
+    ? `<div class="tape"><label>Edging</label><span class="note">${p.board
+        ? "<b>" + esc(p.board) + "</b> has no edging on the Boards tab, so there is none to put on this panel."
+        : "Pick a board first."}</span></div>`
+    : `<div class="tape">
+        <label>Edging</label>
+        <div class="leaf">
+          <select data-pk="edge_kind" title="how thick, or none">
+            <option value=""${p.edge_kind ? "" : " selected"}>not edged</option>
+            ${kindLost ? `<option value="${esc(p.edge_kind)}" selected>${
+              esc(pre[p.edge_kind] || p.edge_kind)} (not offered)</option>` : ""}
+            ${offered.map((k) => `<option value="${esc(k)}"${
+              k === p.edge_kind ? " selected" : ""}>${esc(pre[k] || k)}</option>`).join("")}
+          </select>
+          <select data-pk="edge_board" title="what colour" ${p.edge_kind ? "" : "disabled"}>
+            <option value=""${p.edge_board ? "" : " selected"}>(${esc(p.board || "—")})</option>
+            ${colourLost ? `<option value="${esc(colour)}" selected>${
+              esc(colour)} (not offered)</option>` : ""}
+            ${colourKeys.map((k) => `<option value="${esc(k)}"${
+              k === p.edge_board ? " selected" : ""}>${esc(k)}</option>`).join("")}
+          </select>
+          <b data-paneledge="1" class="${(info && info.line.edge_material) ? "" : "off"}">${
+            esc((info && info.line.edge_material) || "no edging")}</b>
+        </div>
+        <div class="grid">
+          <div class="f"><label>Long edges banded</label>${bandSel("long", p.edge_long)}
+            <span class="note">the two longer edges</span></div>
+          <div class="f"><label>Short edges banded</label>${bandSel("short", p.edge_short)}
+            <span class="note">the two shorter edges</span></div>
+        </div>
+        ${(kindLost || colourLost) ? `<span class="note" style="color:var(--crit)">
+          This panel asks for an edging its board does not offer. It is kept exactly
+          as stored — tick that kind on the board in the Boards tab, or choose another
+          here. The export is blocked until one of those is done.</span>` : ""}
+      </div>`;
+
+  // The cut-list line, as the engine makes it. Not assembled here.
+  const line = info && info.line;
+  const banded = [];
+  if (line && line.edge_material) {
+    if (+p.edge_long) banded.push(`${p.edge_long} long`);
+    if (+p.edge_short) banded.push(`${p.edge_short} short`);
+  }
+  const preview = !line ? "…"
+    : [`<b>${esc(line.label)}</b>`,
+       esc(line.material || "no board"),
+       `${line.length} × ${line.width}`,
+       line.grain
+         ? `grain along the ${esc(info.length_is === "a"
+             ? (here.a_short || "a") : (here.b_short || "b"))}, locked`
+         : "no grain — free to turn",
+       line.edge_material
+         ? `${esc(line.edge_material)} on ${banded.join(" + ")} edge${
+             (+p.edge_long + +p.edge_short) === 1 ? "" : "s"}`
+         : "no edging",
+      ].join("  ·  ");
+
+  box.innerHTML = `<div class="grid">
+      ${boardSelHTML}
+      ${orientHTML}
+      <div class="f"><label>${esc(here.a || "Size a")}</label>
+        <input type="number" step="1" min="0" data-pk="a" value="${+p.a || 0}"></div>
+      <div class="f"><label>${esc(here.b || "Size b")}</label>
+        <input type="number" step="1" min="0" data-pk="b" value="${+p.b || 0}"></div>
+      ${grainHTML}
+    </div>
+    ${edgeHTML}
+    <p class="hint">Cut list line: <span class="mono" data-panelline="1">${preview}</span></p>
+    <div class="presets"><button id="paneldup">Duplicate this panel</button></div>
+    <p class="hint">A bulkhead is several panels — a front, an underside and an end
+      cap each side. <b>Duplicate</b> gives the next free number and copies everything
+      but the placement, so the set can be typed once and adjusted.</p>`;
 }
 
 /* ---------- Structure ------------------------------------------------------

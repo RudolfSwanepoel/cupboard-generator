@@ -321,6 +321,57 @@ def white_edge_board(materials: dict, prefer: str = "") -> str:
     return ""
 
 
+# The cut-list code an independent panel takes. Ruled 20 September 2026 (Q2):
+# code 08, the existing Exposed Panel, with the role "Panel". Plazaboard's CSV
+# writes the Component column from `Panel.label` alone - the digits, e.g. 1508 -
+# so a new code would have to be signed off with them exactly as 10 and 11 still
+# have to be, and it would say nothing on the order that 08 does not. The role
+# is what tells the two apart in the app's own cut list. One constant, so a code
+# they do sign off later is one edit.
+PANEL_CODE = "08"
+
+PANEL_ORIENTATIONS = ("upright", "flat", "end")
+
+
+@dataclass
+class PanelSpec:
+    """An independent panel: one part, cut and numbered on its own.
+
+    Not part of any cupboard. Rudolf builds bulkheads out of several of them -
+    a front upright, an underside flat, an end cap each side - and each is its
+    own numbered item on the cut list, so they are described here rather than
+    hung off a cabinet.
+
+    `a` and `b` are the two typed extents, and which physical direction each one
+    is depends on the orientation (the editor labels them per orientation):
+
+        upright   a = along the wall,   b = height        (facing the room)
+        flat      a = along the wall,   b = out from wall (horizontal)
+        end       a = out from the wall, b = height       (upright, side-on)
+
+    These are FINISHED CUT SIZES - what Plazaboard cuts, not a rough size.
+    The third extent is the board's own thickness, which is why a panel never
+    states one.
+
+    `grain_along` names which of the two the grain runs along, and only means
+    anything on a grained board: the cut list's `Length` IS the grain direction,
+    so it is what decides which extent becomes the length and locks the nester.
+    """
+    board: str = ""
+    orientation: str = "upright"       # 'upright' | 'flat' | 'end'
+    a: int = 0
+    b: int = 0
+    grain_along: str = "b"             # 'a' | 'b' - only read on a grained board
+    edge_kind: str = ""                # '' = no edging asked for
+    edge_board: str = ""               # '' = the panel's own board
+    edge_long: int = 0                 # how many of the two LONG edges are banded
+    edge_short: int = 0                # how many of the two SHORT edges are banded
+    # RESERVED, and nothing reads it. Ruled 20 September 2026: a panel stays
+    # where it is put and does not follow a cabinet. The field is the seam for
+    # the day that changes, and is written to the job file only when set.
+    anchor: Optional[str] = None
+
+
 @dataclass
 class Cabinet:
     number: int
@@ -328,9 +379,21 @@ class Cabinet:
     height: int
     depth: int
 
-    kind: str = "tall"           # 'tall' | 'upper' | 'base'  ('base' has no top panel)
+    # 'tall' | 'upper' | 'base' ('base' has no top panel) | 'panel' (not a
+    # cupboard at all: an independent panel, see `is_panel` and PanelSpec)
+    kind: str = "tall"
     back: str = "four"           # 'four' | 'three' | 'none'
-    template: str = "standard"   # 'standard' | 'none' (bespoke only — generate nothing)
+    # 'standard' | 'none' (bespoke only — generate nothing)
+    # A panel is NOT a template: see `is_panel`, which reads `kind`. This field
+    # is never rewritten when an item's kind changes, so switching to Panel and
+    # back leaves a bespoke cabinet bespoke and a standard one standard.
+    #
+    # A panel is a Cabinet so that it reuses the numbering, the save and load,
+    # the cabinet table, the placement record and the one generate_job loop —
+    # which is where the cost, the nesting and the CSV come from for free. What
+    # it costs is that every place assuming "a cabinet is a box with doors" has
+    # to say what it does about panels; `is_panel` is what they ask.
+    template: str = "standard"
 
     # Supports, as rows: a kind and a quantity each, summing to the total. Empty
     # means "read the three legacy numbers below", which is how every job written
@@ -439,6 +502,11 @@ class Cabinet:
     bespoke: List[Panel] = field(default_factory=list)   # hand-specified extras
     note: str = ""
 
+    # The panel record, when this item is a panel rather than a cupboard. None
+    # on every cabinet, and written to the job file only when it is not — so a
+    # job with no panels reads and writes exactly as it did before they existed.
+    panel: Optional[PanelSpec] = None
+
     # Plan outline, any shape, in the cabinet's own frame: x along the wall from
     # its left edge, y out from the wall face. Empty means "the rectangle its
     # panels make", which is right for every template cabinet. A corner unit's is
@@ -463,6 +531,33 @@ class Cabinet:
     corner_unit: Optional[bool] = None
 
     # ---- what is actually live, once the tickboxes have had their say ------
+
+    @property
+    def is_panel(self) -> bool:
+        """Whether this item is an independent panel rather than a cupboard.
+
+        Read off `kind`, and off nothing else. The design note proposed carrying
+        it on `template` as well; it cannot be, safely. Switching an item's kind
+        back from Panel would then have to put `template` back to what it was,
+        and there is nothing to put it back from: October cabinets 3 and 5 are
+        `template="standard"` carrying hand-specified extras, so "it has bespoke
+        panels, therefore it was bespoke" is wrong, and being wrong there
+        rewrites a real cut list.
+
+        Off `kind` alone, nothing is lost. Switch to Panel and back and every
+        field is exactly where it was, `template` included, which is the same
+        bargain the two tickboxes strike.
+
+        Declared width/height/depth on a panel are labels only; its real size is
+        its panel record, read through `room.geometry`.
+        """
+        return self.kind == "panel"
+
+    @property
+    def panel_spec(self) -> "PanelSpec":
+        """The panel record, or an empty one. A panel with nothing typed into it
+        yet is a zero-sized panel the validator names, not a crash."""
+        return self.panel or PanelSpec()
 
     @property
     def corner_on(self) -> bool:
@@ -538,6 +633,13 @@ class Cabinet:
             slots.append((f"support row {i + 1} edging board",
                           lambda r=r: r.board or "",
                           lambda v, r=r: setattr(r, "board", v), False))
+        if self.panel is not None:
+            slots.append(("panel board",
+                          lambda: self.panel.board or "",
+                          lambda v: setattr(self.panel, "board", v), False))
+            slots.append(("panel edging board",
+                          lambda: self.panel.edge_board or "",
+                          lambda v: setattr(self.panel, "edge_board", v), False))
         for p in (self.bespoke or []):
             slots.append((f"bespoke panel {p.label}",
                           lambda p=p: p.material or "",

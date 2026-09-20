@@ -3,7 +3,7 @@ import json
 from dataclasses import asdict, fields
 
 from .model import (Cabinet, Drawer, GapChoice, Job, Obstruction, Opening, Panel,
-                    Placement, PlinthChoice, Room, Support, Wall)
+                    PanelSpec, Placement, PlinthChoice, Room, Support, Wall)
 
 
 def _only_known(cls, d: dict) -> dict:
@@ -30,6 +30,14 @@ def cabinet_to_dict(c: Cabinet) -> dict:
                           if v != "" or k not in ("board", "kind", "cut_board")}
                          for x in c.support_rows]
     d["bespoke"] = [panel_to_dict(x) for x in c.bespoke]
+    # Only written when this item actually is a panel, and `anchor` only when it
+    # is set — so a job with no panels is byte-identical to one written before
+    # they existed. The same discipline as `room` and `placements` above.
+    if c.panel is None:
+        d.pop("panel", None)
+    else:
+        d["panel"] = {k: v for k, v in asdict(c.panel).items()
+                      if k != "anchor" or v is not None}
     return d
 
 
@@ -51,6 +59,8 @@ def cabinet_from_dict(d: dict) -> Cabinet:
     d["support_rows"] = [Support(**_only_known(Support, x))
                          for x in d.get("support_rows", [])]
     d["bespoke"] = [panel_from_dict(x) for x in d.get("bespoke", [])]
+    d["panel"] = (PanelSpec(**_only_known(PanelSpec, d["panel"]))
+                  if isinstance(d.get("panel"), dict) else None)
     known = {f.name for f in fields(Cabinet)}
     return Cabinet(**{k: v for k, v in d.items() if k in known})
 

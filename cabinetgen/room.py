@@ -21,7 +21,7 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from .model import Room, Wall, hinge_side
+from .model import MATERIALS, Room, Wall, hinge_side, material_thickness
 from .standard import STANDARD, Standard
 
 Point = Tuple[float, float]
@@ -186,7 +186,7 @@ class CabinetGeometry:
     panel_width: Optional[int]         # top, bottom or rail length plus two sides; None if none
     door_widths: List[int]             # one per door, from the door panels
     runner: Optional[int]              # drawer side length, if it has drawers
-    source: str                        # 'outline' | 'panels' | 'declared'
+    source: str                        # 'panel' | 'corner' | 'outline' | 'panels' | 'declared'
 
     @property
     def width(self) -> int:
@@ -276,16 +276,54 @@ def cab_corner_outline(cab) -> Optional[List[Tuple[int, int]]]:
     return corner_outline(cab.corner_style, cab.arm_a, cab.arm_b, cab.face_a, cab.face_b)
 
 
-def geometry(cab, std: Standard = STANDARD) -> CabinetGeometry:
-    """One code path for every cabinet, template or bespoke.
+def panel_geometry(cab, std: Standard = STANDARD,
+                   materials: dict = None) -> CabinetGeometry:
+    """An independent panel's real size and shape, off its panel record.
 
-    The outline comes from the corner parameters if the cabinet is a resolved
-    corner unit, otherwise the cabinet's own entered outline, otherwise the
-    rectangle its panels make. `source` says which — 'declared' only when the
-    panels could not even give a width, which the validator reports.
+    The two typed extents are two of the three; the third is the board's own
+    thickness, which is why a panel never states one. Which physical direction
+    each extent is depends on the orientation:
+
+        upright   along the wall = a,  out from the wall = t,  up = b
+        flat      along the wall = a,  out from the wall = b,  up = t
+        end       along the wall = t,  out from the wall = a,  up = b
+
+    A board the project does not carry has no thickness to read, and the
+    validator names it; rather than a zero-depth footprint, the carcass board
+    thickness stands in until it does.
+    """
+    spec = cab.panel_spec
+    mats = MATERIALS if materials is None else materials
+    t = material_thickness(mats, spec.board) or std.board_t
+    a, b = int(spec.a or 0), int(spec.b or 0)
+    if spec.orientation == "flat":
+        width, depth, height = a, b, t
+    elif spec.orientation == "end":
+        width, depth, height = t, a, b
+    else:                                      # upright, facing the room
+        width, depth, height = a, t, b
+    return CabinetGeometry(cab.number, rect_outline(width, depth), height,
+                           depth, width, [], None, "panel")
+
+
+def geometry(cab, std: Standard = STANDARD, materials: dict = None) -> CabinetGeometry:
+    """One code path for every cabinet, template, bespoke or panel.
+
+    The outline comes from the panel record if the item is a panel, then the
+    corner parameters if the cabinet is a resolved corner unit, otherwise the
+    cabinet's own entered outline, otherwise the rectangle its panels make.
+    `source` says which — 'declared' only when the panels could not even give a
+    width, which the validator reports.
+
+    `materials` is only read for a panel, whose depth is its board's thickness.
+    Nothing else here depends on it: the engine reads the boards for tapes and
+    grain, never for a size, so every caller that leaves it out gets exactly the
+    answer it always got.
     """
     from .engine import generate_cabinet      # engine imports this module; import at call time only
-    panels = generate_cabinet(cab, std)
+    if cab.is_panel:
+        return panel_geometry(cab, std, materials)
+    panels = generate_cabinet(cab, std, materials)
     sides = [p for p in panels if p.role == "Side"]
     carcass = [p for p in panels if p.role in CARCASS_ROLES]
     height = max((p.length for p in sides), default=0) or \
@@ -489,6 +527,12 @@ def placed(job):
     """
     out = []
     for cab in job.cabinets:
+        # Cabinets only, explicitly. Gaps, runs, plinth, tip-up, door swing and
+        # overlaps all come through here, and an independent panel takes part in
+        # none of them — a panel is not a carcass standing on the floor and must
+        # not close a gap or carry a plinth board.
+        if cab.is_panel:
+            continue
         p = placement_for(job, cab.number)
         if p is None:
             continue
@@ -1168,7 +1212,12 @@ def stands_on_legs(cab, p) -> bool:
 
     Placement.z of 0 and not a hung unit. There is no standing case without legs,
     so this is the one question every height check asks.
+
+    A panel is never on legs: it is a part, put where it is put, so its z is its
+    underside exactly as typed.
     """
+    if cab.is_panel:
+        return False
     return p.z == 0 and layer_of(cab, p) != "wall"
 
 

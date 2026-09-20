@@ -36,6 +36,7 @@ python tools/check_library.py
 python tools/check_single_source.py
 python tools/check_swap.py
 python tools/check_colour.py
+python tools/check_panels.py
 ```
 
 The first rebuilds the October 2025 wardrobe from cabinet definitions and
@@ -43,8 +44,8 @@ compares it with the cut list actually sent to Plazaboard. The second checks
 every worked example in a docstring still evaluates to what it claims. The rest
 pin the room geometry, the filler arithmetic, the plinth, the placement checks
 behind dragging, the fronts, the board library, the edging a board offers, the
-one list of which cabinet fields hold a board, and the board colours the
-drawings are filled with.
+one list of which cabinet fields hold a board, the board colours the drawings
+are filled with, and independent panels.
 
 And the wider net, which catches a change that leaves the benchmark numbers
 alone and moves something else:

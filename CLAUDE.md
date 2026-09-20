@@ -29,6 +29,7 @@ python tools/check_library.py
 python tools/check_single_source.py
 python tools/check_swap.py
 python tools/check_colour.py
+python tools/check_panels.py
 python tools/snapshot.py --compare baseline.json
 ```
 
@@ -65,14 +66,21 @@ board; a swap moves every panel; the editors refresh themselves; deleting a
 project moves its files to `jobs/_deleted/`; grain is shown in the swap step
 and on the cut list.
 
-**Next: Part D (independent panels), then E (placing them), then F (3D).**
-Nothing of D, E or F is built.
+**Part D (independent panels) is built and checked** — D1 to D9 of the brief.
+See **Panels** below. **Next: E (placing them), then F (3D).** Nothing of E or
+F is built: a panel is cut, costed and nested, and it is not yet put anywhere.
+
+Also done since Part C, and not in the brief: the editor stops rebuilding its
+controls on every compute (see **The UI**).
 
 Open questions from the brief that Rudolf has not ruled: **Q1** line endings
 and git hygiene (the working tree is CRLF, HEAD is LF; edit without changing a
-file's existing endings and review with `--ignore-space-at-eol`), **Q2** the
-panel cut-list code, **Q3** carcass-front edging when the exterior board offers
-no PVC, **Q5** `WHITE_EDGE`. **Q4 is ruled: drawer-face grain runs vertical, up
+file's existing endings and review with `--ignore-space-at-eol`), **Q5**
+`WHITE_EDGE`. **Q2 is ruled: a panel takes code 08 with the role "Panel"**
+(20 September 2026) — Plazaboard's CSV writes the Component column from
+`Panel.label` alone, so a new code would need their sign-off and would say
+nothing on the order that 08 does not. **Q3 is ruled: carcass-front edging the
+exterior board does not offer is a CRITICAL.** **Q4 is ruled: drawer-face grain runs vertical, up
 the face height, exactly as the cut list has it. Never question it.** The
 proposed hard rules H5 and H6 are not in this file yet because they are his to
 accept; Part C was built as though they hold.
@@ -140,6 +148,7 @@ run_app.py                 starts the local server, opens the window
 app/api.py                 request handlers. Thin — they call cabinetgen.
 app/index.html             the whole UI. Vanilla JS, no build step.
 jobs/                      job definitions. wardrobe_oct2025.py is the fixture.
+                           Test_Panels.json is the panel fixture.
 tools/regen_check.py       the regression check above
 tools/check_examples.py    verifies the worked examples in docstrings are true
 tools/check_room.py        room geometry: closure, corners, to_world
@@ -151,6 +160,7 @@ tools/check_edging.py      Has Edging, the kinds a board offers, its colour
 tools/check_single_source.py  the one list of which cabinet fields hold a board
 tools/check_swap.py        a swap moves every use of a board, and says what it does
 tools/check_colour.py      board colour in the drawings, and the ink that reads on it
+tools/check_panels.py      independent panels: the line they cut, and what they stay out of
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
 docs/ROOM-LAYOUT-SPEC.md  the room / plan / 3D build spec and its phasing
@@ -385,17 +395,40 @@ the project board that yields `PVC WHITE`** via `white_edge_board`, and **none
 stays none**. The October job and both Test files are byte-identical through it —
 `snapshot.py --compare` proves it, and `check_edging.py` pins each case.
 
-### The editor rebuilds itself, and nothing reaches disk unasked
+### The editor paints itself, and nothing reaches disk unasked
 
 **Every dependent surface refreshes on every compute** (20 September 2026).
 `renderEditor` used to leave the DOM alone when the selection had not changed and
 update a fixed list of readouts, which is how "Ordered as" went stale — and it
 was never only that: every dropdown whose OPTIONS depend on the boards kept
 whatever the library said when the section was last built, so changing a board's
-edging and coming back still offered the old kinds. Structure, Doors, Drawers and
-Supports are rebuilt each time, wrapped in `withFocusKept`, which records the
-focused control by its data attributes and puts the caret back afterwards — the
-caret being the thing the skip was protecting.
+edging and coming back still offered the old kinds.
+
+**So it is rebuilt every time — and PAINTED, not replaced** (20 September 2026).
+Rebuilding it with `innerHTML` threw away 49 of the editor's 59 controls on every
+compute: measured on Test.json cabinet 4, every control in Structure, Drawers and
+Supports was a new object afterwards and a focused `<select>` was no longer in
+the document at all. A native dropdown belongs to the node it was opened on, so
+that closed it — the twitch — and took the caret, the hover and the scroll with
+it. Worse, it never stopped: `renderDrawers` calls `solveStack`, which wrote the
+engine's heights back and scheduled another compute unconditionally, so a drawer
+cabinet sitting untouched on screen computed about three times a second for ever
+and lit the unsaved-changes marker on a job nobody had edited.
+
+`paint(box, html)` applies the new HTML to the DOM that is already there: a node
+that has not changed is left alone, a changed value is written into the control
+in place, and only a control that has genuinely changed shape — or gone — is
+replaced. Two rules make it safe. **A focused control is never touched**, not its
+options and not its value (focus is what an open dropdown is, and what is being
+typed into); it catches up when focus leaves it. And **a slot div belongs to its
+own render function** — `sectionHTML` emits it empty and `data-slot` keeps the
+paint out of it. `solveStack` now schedules a compute only when a height actually
+moved. Nothing in the editor attaches a listener to a control — they are all
+delegated on `#editor` — so reusing a node cannot stack a second handler on it.
+
+The flags that used to force a full rebuild (`S.selRendered = -2` on a board
+change, a tickbox, a renumber, a drag) are gone: all they could do now is destroy
+the control being used.
 
 **Save is the only thing that writes** (ruled 20 September 2026). A saved job is
 the price capture, so an experiment must not be able to move one by itself. The
@@ -614,6 +647,92 @@ Not on the list and worth saying so: pot hole positions are `std.hinge_positions
 and carry no thickness at all, and fillers and scribes are gap arithmetic
 (`scribe_allowance`, `taper_threshold`) with no board thickness in them either.
 
+## Panels
+
+**An independent panel is a part, not a cupboard.** It is cut, numbered, costed
+and nested like everything else, and it belongs to no carcass. Several of them
+make a bulkhead — a front, an underside and an end cap each side — and each is
+its own numbered item, which is why they are numbered in the same series as the
+cabinets rather than listed apart.
+
+**A panel is a `Cabinet` with `kind="panel"` and a `PanelSpec`.** That buys the
+numbering (`store.next_number`), the save and load, the cabinet table, the
+`Placement` record and the one `generate_job` loop — which is where the cost,
+the nesting and the CSV come from for nothing. What it costs is that every place
+assuming "a cabinet is a box with doors" has to say what it does about a panel.
+`tools/check_panels.py` is where they are held to it.
+
+**`kind` is the only thing that says panel, and `template` is never rewritten.**
+The brief proposed carrying it on `template` as well. It cannot be: switching an
+item back from Panel would then have to put `template` where it was, and there
+is nothing to put it back from — October cabinets 3 and 5 are
+`template="standard"` carrying hand-specified extras, so "it has bespoke panels,
+therefore it was bespoke" is wrong, and being wrong there rewrites a real cut
+list. Off `kind` alone a round trip loses nothing: switch to Panel and back and
+every field is where it was, template included. Same bargain as the tickboxes.
+
+**Code 08, role "Panel"** (`model.PANEL_CODE`, ruled 20 September 2026, Q2).
+Plazaboard's CSV writes the Component column from `Panel.label` — the digits,
+`1508` — and never from `CODES[code]` or `Panel.role`, so a new code would need
+their sign-off exactly as 10 and 11 still do, and would say nothing on the order
+that 08 does not. The role is what tells a panel from an exposed end in the
+app's own cut list. One constant, so a code they do sign off later is one edit.
+
+**What is typed, and what is derived.** The operator types a board, an
+orientation, two FINISHED extents and how many long and short edges are banded.
+Everything else is `engine.panel_of`'s: which extent becomes the cut list's
+`Length`, whether the panel locks, and what its edging is called. The editor's
+preview line is that answer read back, not one the browser assembles.
+
+**`Length` IS the grain direction, so it is not simply the longer side.** On a
+grained board the extent the grain runs along becomes the length whether it is
+longer or not, and `grain=1` locks it. On a plain board the longer extent is the
+length and the nester may turn it. Which means **long and short edges are not
+`edge_l` and `edge_w`**: a panel cut across its grain has its long edges running
+the width, so the two are mapped rather than assumed equal. Pinned in
+`check_panels.py`, both ways round.
+
+**Three orientations, and the third extent is always the board's thickness** —
+which is why a panel never states one, and why `room.geometry` needs the job's
+materials to answer for it (`geometry(cab, std, materials)`; nothing else reads
+that argument, because the engine reads the boards for tapes and grain and never
+for a size).
+
+| Orientation | along the wall | out from the wall | up |
+|---|---|---|---|
+| `upright` — facing the room | a | thickness | b |
+| `flat` — horizontal | a | b | thickness |
+| `end` — upright, side-on | thickness | a | b |
+
+**Declared width, height and depth on a panel are labels and nothing else.** The
+cabinet table shows `room.geometry`'s figures for one, not the declared ones.
+
+**A panel is not a carcass.** `room.placed` skips it explicitly, so gaps, runs,
+plinth, tip-up, door swing and overlaps are exactly what they were; it stands on
+no legs (`stands_on_legs` is false, so `carcass_z` is its own z); it is not in
+the Run drawing, which is also what keeps `wall_elevation_svg` with no room
+equal to `elevation_svg`; and it is not in the edging legend, the structure,
+door, drawer, support or carcass-thickness checks. A cabinet switched to Panel
+keeps its drawer stack and its support rows in the job file and is reported on
+for neither.
+
+**`validate._panels` is deliberately short.** What a panel shares with
+everything else on the cut list is already checked where it always was — too big
+for a sheet is `_panel_fits_board`, a board the project never selected is
+`_board_prices` — and repeating it would be two messages for one problem. What
+is left is a missing board, a size of zero, an orientation the model does not
+know, and an edging the board does not offer (CRITICAL, tagged `EDGING`, the
+same shape as Part A's). **An unplaced panel is not a fault**: a panel cut and
+not put anywhere is normal.
+
+**A panel is always qty 1.** Identical panels are a **Duplicate** — the next
+free number, everything copied except the placement, from the cabinet table's
+Dup or the button in Panel design.
+
+`PanelSpec.anchor` is reserved and nothing reads it. It is written to the job
+file only when set. Ruled 20 September 2026: a panel stays where it is put and
+does not follow a cabinet; the field is the seam for the day that changes.
+
 ## Supports
 
 **A support is a cross rail spanning the internal width** (`W - 32` x 100, code
@@ -670,7 +789,10 @@ is a column of its own**, starting level with the top of the drawing.
 
 The cabinet editor is seven sections, each a bold heading over its own coloured
 block: **Size · Outline · Structure · Doors · Drawers · Corner Unit ·
-Supports**. Doors, Drawers and Corner Unit are tickbox sections — unticking keeps
+Supports**. An item whose **Kind** is Panel shows **Size · Panel design** and
+none of the cupboard sections — hidden, never emptied, so picking a cupboard
+kind again brings all of it back (see **Panels**). Turning a configured cupboard
+into a panel says what stops being cut before it does. Doors, Drawers and Corner Unit are tickbox sections — unticking keeps
 everything in the job file and builds nothing from it, and says which cut-list
 lines would go before it does.
 
