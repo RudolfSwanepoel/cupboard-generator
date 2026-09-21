@@ -991,6 +991,20 @@ finds** — both axes, corrected 21 September 2026. The engine hands them over
 sorted and the docstrings always said "nearest"; the code took the first, which
 only started to matter when an opening's datums landed among the neighbours'.
 
+**And the reason names the nearest neighbour along the wall, not whichever sorts
+first alphabetically** (21 September 2026). Several cabinets on the floor put
+their undersides on one line, so a whole row of candidates share a height and
+differ only in which one they name — panel 8 read `bottoms level with 1` with
+cabinet 7 the one touching it. They are all true; the nearest is the one worth
+saying, and in the list without `spans` it is the only one that survives the
+de-duplication. `room._gap_along` is the one rule: how far apart two stretches
+of one wall are, 0 where they touch or overlap, and 0 for a wall-wide datum,
+which is never far from anything. `z_snap_points` sorts on `(z, that gap, the
+reason)`. **The browser tie-breaks the same way at the LIVE position**, because
+the engine can only sort for where the drag started and a drag crosses the wall;
+it is choosing between candidates the engine named, and works out no height of
+its own.
+
 **A vertical move is checked exactly like a sideways one.** `room.overlaps`
 reads `_z_span`, which reads `carcass_z`, so dropping a wall unit down into the
 base run below it is the same critical as sliding it sideways into a neighbour

@@ -2869,7 +2869,19 @@ function moveElevDrag(d, e) {
   // really stands, not at 0 — compared at 0 it could never be reached from a
   // standing start, and a sideways drag with a little wobble hung the unit.
   const legs = carcassZ({z: 0}, EDRAG.model);
-  let zPick = null, zBest = tol + 1;
+  // Several cabinets on the floor put their undersides on one line, so a whole
+  // row of candidates can share a height and differ only in which one they name.
+  // The nearest along the wall is the one worth saying — the engine sorts them
+  // that way for the position the drag STARTED at, and this keeps it true as the
+  // item moves (21 September 2026). It chooses between candidates the engine
+  // named; it works out no height of its own.
+  const away = (sn) => {
+    const a = sn.x0 !== null && sn.x0 !== undefined ? [sn.x0, sn.x1]
+            : (sn.not_x0 !== null && sn.not_x0 !== undefined
+               ? [sn.not_x0, sn.not_x1] : null);
+    return a === null ? 0 : Math.max(0, a[0] - (x + w), x - a[1]);
+  };
+  let zPick = null, zBest = tol + 1, zAway = 0;
   for (const sn of wall.z_snaps) {
     // a height that belongs to another cabinet only applies where this one is
     // actually over or under it — the engine hands over the stretch, this only
@@ -2882,7 +2894,10 @@ function moveElevDrag(d, e) {
         !(sn.not_x0 >= x + w || sn.not_x1 <= x)) continue;
     const at = sn.z === 0 ? legs : sn.z;
     const off = Math.abs(at - z);
-    if (off < zBest) { zBest = off; zPick = sn; }
+    const gap = away(sn);
+    if (off < zBest || (off === zBest && gap < zAway)) {
+      zBest = off; zAway = gap; zPick = sn;
+    }
   }
   const snapped = zPick !== null;
   if (zPick) { z = zPick.z; whyZ = zPick.why; }

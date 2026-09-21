@@ -843,6 +843,17 @@ def snap_points(job, number: int, wall_id: str, std: Standard = STANDARD):
     return keep
 
 
+def _gap_along(mine, span) -> int:
+    """How far apart two stretches of one wall are, 0 where they touch or overlap.
+
+    `span` of None is a datum that runs the whole wall — the floor, the ceiling,
+    an opening's sill or head — which is never "far" from anything.
+    """
+    if span is None:
+        return 0
+    return max(0, span[0] - mine[1], mine[0] - span[1])
+
+
 def _hangs_clear(z: int, cab, std: Standard = STANDARD) -> bool:
     """Whether `z` is a height this item could really come to rest at.
 
@@ -968,8 +979,27 @@ def z_snap_points(job, number: int, wall_id: str, std: Standard = STANDARD,
     # and a ceiling too low for the cabinet is the ceiling check's to report, not
     # something to answer by offering nowhere to put it.
     limit = rm.ceiling - g.height if rm.ceiling else None
+
+    def near(row):
+        """How far along the wall the neighbour this candidate came from is.
+
+        Several cabinets standing on the floor put their undersides on the same
+        line, so a whole row of candidates can share one z and differ only in
+        which one they name. Sorted on the reason alone that was answered
+        alphabetically — `Test.json`'s panel 8 read "bottoms level with 1" with
+        cabinet 7 the one touching it. Every one of them is true; the nearest is
+        the one worth saying, and in the list without `spans` it is the only one
+        that survives the de-duplication below (21 September 2026).
+
+        A stack row carries its neighbour's stretch in x0/x1, a level line in
+        not_x0/not_x1, and a wall-wide datum carries neither.
+        """
+        _z, _why, a, b, na, nb = row
+        span = (a, b) if a is not None else ((na, nb) if na is not None else None)
+        return _gap_along((x0, x1), span)
+
     seen, keep = set(), []
-    for z, why, a, b, na, nb in sorted(out, key=lambda r: (r[0], r[1])):
+    for z, why, a, b, na, nb in sorted(out, key=lambda r: (r[0], near(r), r[1])):
         z = int(z)
         key = (z, a, b, na, nb) if spans else z
         if z < 0 or key in seen or (limit is not None and z > limit and z != 0):

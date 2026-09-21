@@ -56,13 +56,13 @@
       "colour": ""
     },
     "GREY": {
-      "board": "Grey",
-      "name": "Grey",
+      "board": "STORMGREY",
+      "name": "STORMGREY",
       "tape": "Grey",
       "thickness": 16,
       "grain": "plain",
       "price": 1100,
-      "picture": "",
+      "picture": "\"C:\\Dev\\CupboardApp\\Pictures\\Storm Grey.jpg\"",
       "has_edging": true,
       "edging_kinds": [
         "pvc",
@@ -255,7 +255,7 @@
       ],
       "has_doors": null,
       "door_boards": [
-        "BROOKHILL"
+        "GREY"
       ],
       "drawers": [],
       "has_drawers": null,
@@ -265,7 +265,7 @@
       "back_board": "BACK",
       "exterior_tape": "2mm",
       "door_edge_kind": null,
-      "door_edge_board": "BROOKHILL",
+      "door_edge_board": "GREY",
       "drawer_edge_kind": null,
       "drawer_edge_board": null,
       "drawer_carcass_board": null,

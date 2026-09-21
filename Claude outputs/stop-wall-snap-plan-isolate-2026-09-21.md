@@ -105,8 +105,9 @@ so they cannot drift.
 **Verified in the app** (`Test.json` and a probe job with a 1200 window, sill
 900 / head 2100):
 
-- panel 8 now snaps to 100 mm, `bottoms level with 1` — the position it could
-  not be dragged back to;
+- panel 8 now snaps to 100 mm — the position it could not be dragged back to
+  (it read `bottoms level with 1` at this point; the sort-key fix below makes it
+  name cabinet 7, the one touching it);
 - cabinet 5 reaches all four kinds: ceiling 1500, `tops level with 1` 1400,
   `on top of 2` 880, plinth top 100;
 - cabinet 4 reaches all four window datums: 120 `below the window`, 900
@@ -220,14 +221,78 @@ Line endings untouched throughout — every file edited was CRLF and stayed CRLF
   meant to solve — getting at something out of reach — without a second way to
   place things. Noted in `CLAUDE.md`'s open items.
 
-## Worth a look, not done
+## Ruled and built the same day: the reason names the nearest neighbour
 
-When several neighbours share a height, the reason names whichever sorts first
-alphabetically rather than the nearest one along the wall — panel 8 reads
-`bottoms level with 1` when cabinet 7 is the unit touching it. Every one of them
-really is at that height, so the message is honest, just not the friendliest. It
-is a one-line sort-key change, but it also decides which reason survives the
-de-duplication in non-span mode, so it is Rudolf's call rather than a tidy-up.
+Raised as a follow-up above and ruled straight away. Several cabinets on the
+floor put their undersides on one line, so a whole row of candidates share a
+height and differ only in which one they name. Sorted on the reason alone that
+was answered alphabetically — panel 8 read `bottoms level with 1` with cabinet 7
+the one touching it — and without `spans` it also decided which single reason
+survived the de-duplication.
+
+It is stated in the two places that need it, as one rule:
+
+- **`room._gap_along(mine, span)`** — how far apart two stretches of one wall
+  are, 0 where they touch or overlap, and 0 for a wall-wide datum (the floor,
+  the ceiling, an opening's sill or head), which is never far from anything.
+  `z_snap_points` sorts on `(z, that gap, the reason)`, so the nearest is first
+  among equals and is the one the de-duplication keeps.
+- **The browser tie-breaks the same way at the LIVE position.** The engine can
+  only sort for where the drag started, and a drag crosses the wall. Among
+  candidates at the same distance in z, the one whose stretch is nearest to
+  where the item is now wins. It chooses between candidates the engine named and
+  works out no height of its own — the same bargain the rest of the drag makes.
+
+Verified in the app. Panel 8 now reads `bottoms level with 7`, and dragged along
+wall A the reason follows it:
+
+```
+2800 (right of 7)  bottoms level with 7
+2450 (right of 6)  bottoms level with 6
+1884 (left of 6)   bottoms level with 6
+1452               bottoms level with 4
+ 970               bottoms level with 3
+ 600 (right of 1)  bottoms level with 1
+ 296               bottoms level with 2
+   0 (wall start)  bottoms level with 2
+```
+
+The last two are the two rules working together: standing over cabinet 1, a
+level line does not apply at all — level bottoms would put one inside the other
+— so the nearest it can line up with is 2.
+
+## The baseline was never stale; `Test.json` was
+
+Recorded here because the stop above got it the wrong way round. `baseline.json`
+already held cabinet 5's door as GREY; `jobs/Test.json` had drifted to
+BROOKHILL. Rudolf settled the cabinet as grey throughout and saved, which put
+the file back to what the baseline recorded — at that point `--compare` was
+clean with no `--allow` flags and a regenerated baseline was byte for byte the
+same file (md5 `52e53c19d893f3163df5bff08e0acc35`).
+
+Then the **GREY board was renamed Grey → STORMGREY** in the Boards tab and
+`Test.json` was saved again, which carries the new name into the job's captured
+copy. That is `api.LIVE_FIELDS` working as designed: a board's description is
+edited in the library and the project on screen uses it. The legend prints that
+name, so three of Test's four drawings re-hashed — `elev`, `plan` and `wallA`.
+Nothing else moved: no panel, no issue, no summary, no total. Proved by putting
+only the display name back in a scratch copy, at which point all four hashes
+match the old baseline exactly; the picture path plays no part.
+
+Ruled by Rudolf: regenerate over it. The baseline is now md5
+`a3c7179aa6c68ed123eb2d9c14ff9f2d` and `--compare` is clean again with no
+`--allow` flags. **`baseline.json` is not in this commit and never is** —
+`.gitignore` line 15 keeps it per-machine, generated off a known-good tree and
+never shared. `jobs/Test.json` and `boards.json` are the files that moved, and
+they go together: the job's copy says STORMGREY, and `refresh_from_library`
+would pull `Grey` back over it on the next open if the library were left behind.
+
+**One thing to look at, not touched:** that board's picture is stored as
+`"\"C:\Dev\CupboardApp\Pictures\Storm Grey.jpg\""` — an absolute path
+with literal quote characters inside the string, which looks like a
+"Copy as path" paste. It is machine-specific and the quotes are part of the
+value, and `Pictures/` is untracked, so the other machine will not resolve it.
+A colour changes no cut, so nothing warns about it.
 
 ## Environment note
 

@@ -29,7 +29,8 @@ import json                                                                 # no
 
 from cabinetgen.engine import generate_job                                  # noqa: E402
 from cabinetgen.model import Cabinet, Drawer, Job, Opening, Panel, Placement  # noqa: E402
-from cabinetgen.room import (clashes, convex_overlap, corner_outline,       # noqa: E402
+from cabinetgen.room import (_gap_along, clashes, convex_overlap,          # noqa: E402
+                             corner_outline,
                              corner_shadow, gaps as room_gaps, geometry,
                              overlaps, polygons_overlap, pullout_envelope,
                              rectangular, runs as room_runs, snap_points,
@@ -503,6 +504,47 @@ def main() -> int:
            if 0 < s["z"] <= std.leg_height], [])
     check("...and the floor itself is still there, unconditionally",
           [s["why"] for s in z_snap_points(jb, 4, "A", std)][0], "on the floor")
+    print("\ndragging in the elevation: the reason names the NEAREST neighbour")
+    # Every carcass on the floor puts its underside on one line, so a whole row of
+    # candidates share a height and differ only in which cabinet they name. Sorted
+    # on the reason alone that was answered alphabetically, and `Test.json`'s
+    # panel 8 read "bottoms level with 1" with cabinet 7 the one touching it. They
+    # are all true; the nearest is the one worth saying, and without `spans` it is
+    # the only one that survives the de-duplication (21 September 2026).
+    row = [cab(n, 600) for n in (1, 2, 3, 4)]
+    hung = cab(5, 400)
+    hung.kind, hung.height, hung.depth = "upper", 700, 330
+    jn = job(row + [hung], [Placement(1, "A", 0), Placement(2, "A", 600),
+                            Placement(3, "A", 1200), Placement(4, "A", 1800),
+                            Placement(5, "A", 2600, z=1500)])
+    jn.room.ceiling = 2700
+    check("four cabinets on the floor put four candidates on one line",
+          [(s["z"], s["why"]) for s in z_snap_points(jn, 5, "A", std, spans=True)
+           if s["z"] == std.leg_height],
+          [(std.leg_height, f"bottoms level with {n}") for n in (4, 3, 2, 1)])
+    check("nearest first — 4 is the one it is beside, 1 is two metres away",
+          [s["why"] for s in z_snap_points(jn, 5, "A", std)
+           if s["z"] == std.leg_height], ["bottoms level with 4"])
+    # And it is really about distance, not about the number: move the same hung
+    # unit to the other end and the answer follows it, not the alphabet. It lands
+    # OVER cabinet 1 there, where a level line does not apply at all — level
+    # bottoms would put one inside the other — so the nearest it can line up with
+    # is 2, which is the two rules working together.
+    jn.placements[4] = Placement(5, "A", 0, z=1500)
+    check("moved to the other end, the same drag names the other neighbour",
+          [s["why"] for s in z_snap_points(jn, 5, "A", std)
+           if s["z"] == std.leg_height], ["bottoms level with 2"])
+    check("asked at a position it has not reached yet, it answers for THERE",
+          [s["why"] for s in z_snap_points(jn, 5, "A", std, at_x=2600)
+           if s["z"] == std.leg_height], ["bottoms level with 4"])
+    check("a wall-wide datum is never far from anything — the floor, the "
+          "ceiling and an opening carry no stretch to be far along",
+          _gap_along((0, 600), None), 0)
+    check("and a stretch that touches is not far either",
+          (_gap_along((600, 1200), (0, 600)), _gap_along((600, 1200), (1200, 1800)),
+           _gap_along((600, 1200), (0, 900)), _gap_along((600, 1200), (1800, 2400))),
+          (0, 0, 0, 600))
+
     check("asked at a position it has not reached yet, the top is a candidate",
           [s["why"] for s in z_snap_points(jz, 2, "A", std, at_x=3000)],
           ["on the floor", "on top of 1", "tight to the ceiling"])

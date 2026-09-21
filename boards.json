@@ -52,12 +52,12 @@
     },
     {
       "id": "GREY",
-      "name": "Grey",
+      "name": "STORMGREY",
       "tape": "Grey",
       "thickness": 16,
       "grain": "plain",
       "price": 1100,
-      "picture": "",
+      "picture": "\"C:\\Dev\\CupboardApp\\Pictures\\Storm Grey.jpg\"",
       "has_edging": true,
       "edging_kinds": [
         "pvc",
