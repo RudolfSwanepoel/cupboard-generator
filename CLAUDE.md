@@ -905,10 +905,10 @@ A panel still stays where it is put and does not follow a cabinet.
 
 ## Zoom
 
-**The wall elevation and the plan zoom on the scroll wheel** (E9, 21 September
-2026), with `−` / `100%` / `+` beside each drawing; the percentage is the way
-back. Zoom only — panning is the box's own scrollbars, and nothing was asked for
-beyond that.
+**The wall elevation and the plan zoom on Ctrl+scroll and on a trackpad pinch**
+(E9, 21 September 2026), with `−` / `100%` / `+` beside each drawing; the
+percentage is the way back. Zoom only — panning is the box's own scrollbars, and
+nothing was asked for beyond that.
 
 **The drawing is scaled by setting the SVG element's CSS size, and the viewBox is
 left alone.** That is the whole trick: every conversion from a pointer to
@@ -918,9 +918,15 @@ against the same viewBox, so it is exact at any zoom level without one line of
 that arithmetic changing. Measured on the real app: a cabinet and a panel both
 move the right number of millimetres at 64 %, 100 % and 156 %.
 
-**A wheel over a drawing zooms it rather than scrolling the page.** That is what
-was asked for, and it is worth knowing before you reach for the wheel to scroll
-past the plan.
+**A PLAIN wheel is left alone.** It first zoomed on every wheel event, which
+hijacked ordinary scrolling: a two-finger trackpad scroll arrives as a wheel
+event too, so scrolling past the plan zoomed it. The handler returns without
+calling `preventDefault` unless `e.ctrlKey` is set (corrected 21 September 2026).
+
+**One check covers both gestures, and that is deliberate.** A trackpad PINCH is
+reported as a wheel event with `ctrlKey` true — how Chrome, Firefox and Safari
+all report it — so pinch and an explicit Ctrl+scroll on a mouse come down the
+same path. There is no separate pinch detection, and none is wanted.
 
 ## Supports
 
