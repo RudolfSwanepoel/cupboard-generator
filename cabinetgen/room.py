@@ -352,10 +352,17 @@ def geometry(cab, std: Standard = STANDARD, materials: dict = None) -> CabinetGe
                            door_widths, runner, source)
 
 
-def cabinet_footprint(rm: Room, placement, cab, std: Standard = STANDARD) -> List[Tuple[int, int]]:
-    """A cabinet's outline in world plan coordinates, wherever it stands."""
-    return [to_world(rm, placement.wall, placement.x + lx, ly)[:2]
-            for lx, ly in geometry(cab, std).footprint]
+def cabinet_footprint(rm: Room, placement, cab, std: Standard = STANDARD,
+                      materials: dict = None) -> List[Tuple[int, int]]:
+    """A cabinet's or a panel's outline in world plan coordinates.
+
+    `Placement.y` is the standoff from the wall face. It is 0 on every carcass —
+    a cabinet is against the wall it is placed on — and is what puts a bulkhead
+    underside out over the units below it, which is where y is actually visible.
+    """
+    off = int(getattr(placement, "y", 0) or 0)
+    return [to_world(rm, placement.wall, placement.x + lx, off + ly)[:2]
+            for lx, ly in geometry(cab, std, materials).footprint]
 
 
 def corner_shadow(rm: Room, cab, p, std: Standard = STANDARD):
@@ -540,6 +547,30 @@ def placed(job):
     return out
 
 
+def placed_panels(job):
+    """(panel, placement) for every independent panel that has a place in the room.
+
+    The panel-only twin of `placed()`, which stays cabinet-only. They are two
+    lists rather than one on purpose: a panel is a part, not a carcass, so it
+    must never reach gaps, runs, plinth, tip-up or door swing — but it is very
+    much something to draw, to snap against and to report a clash with, and
+    those callers come here.
+
+    No layer: `room.LAYERS` is the three cabinet layers and `layer_of` is not
+    asked about a panel. Panels are their own toggle in the plan, and in the
+    wall elevation they are simply drawn.
+    """
+    out = []
+    for cab in job.cabinets:
+        if not cab.is_panel:
+            continue
+        p = placement_for(job, cab.number)
+        if p is None:
+            continue           # a panel cut and not put anywhere is normal
+        out.append((cab, p))
+    return out
+
+
 def return_profiles(job, wall_id: str, std: Standard = STANDARD) -> List[dict]:
     """The cabinets on the walls either side, as this wall's elevation sees them.
 
@@ -674,8 +705,9 @@ def overlaps(job, std: Standard = STANDARD) -> List[Overlap]:
     for cab, p, lay in placed(job):
         if p.wall not in wall_ids:
             continue        # not a real wall; _room() reports that on its own
-        g = geometry(cab, std)
-        items.append((cab, p, g, lay, cabinet_footprint(rm, p, cab, std), _z_span(cab, p, g, std)))
+        g = geometry(cab, std, job.materials)
+        items.append((cab, p, g, lay, cabinet_footprint(rm, p, cab, std, job.materials),
+                      _z_span(cab, p, g, std)))
     out = []
     for i, (a, pa, ga, la, fa, za) in enumerate(items):
         for b, pb, gb, _lb, fb, zb in items[i + 1:]:
@@ -693,8 +725,81 @@ def overlaps(job, std: Standard = STANDARD) -> List[Overlap]:
     return out
 
 
+def _on_wall(job, wall_id: str, std: Standard, exclude: int = None):
+    """Everything already standing on one wall, carcass or panel alike:
+    `(item, placement, geometry, layer, z_span)`, the layer being `"panel"` for
+    a panel, which has none of the three cabinet layers.
+
+    `placed()` and `placed_panels()` are deliberately two lists — a panel must
+    never reach gaps, runs, plinth or tip-up. This is the one place they are
+    read together, because coming to rest against something does not care what
+    kind of thing it is: a bulkhead front lands on the cabinet tops below it,
+    and the second panel of a bulkhead butts against the first.
+
+    The boards are read for the geometry, because a panel's third extent is its
+    board's own thickness. Nothing a cabinet answers changes for it.
+    """
+    mats = job.materials
+    out = []
+    for cab, p, lay in placed(job):
+        if p.wall != wall_id or cab.number == exclude:
+            continue
+        g = geometry(cab, std, mats)
+        out.append((cab, p, g, lay, _z_span(cab, p, g, std)))
+    for cab, p in placed_panels(job):
+        if p.wall != wall_id or cab.number == exclude:
+            continue
+        g = geometry(cab, std, mats)
+        out.append((cab, p, g, "panel", _z_span(cab, p, g, std)))
+    return out
+
+
+def free_x(job, number: int, wall_id: str, std: Standard = STANDARD) -> int:
+    """Where a newly-placed item goes so it lands clear of what is already there.
+
+    Giving a cabinet or a panel a wall used to put it at 0 mm whatever else was
+    on that wall, which dropped it straight on top of the first thing there and
+    out of sight underneath it. The candidates are the ones a drag already
+    reads — the wall start, and the right-hand edge of everything already
+    placed — and the first that leaves this item clear of all of them wins.
+    Worked out here, never in the browser.
+
+    An item that fits nowhere on the wall comes to rest against the end of the
+    run, clamped to the wall. That is an honest overlap the validator will name,
+    which is better than a position nothing worked out.
+    """
+    rm = job.room
+    if rm is None:
+        return 0
+    cab = next((c for c in job.cabinets if c.number == number), None)
+    if cab is None:
+        return 0
+    try:
+        w = _wall(rm, wall_id)
+    except ValueError:
+        return 0
+    width = geometry(cab, std, job.materials).width
+    max_x = max(w.length - width, 0)
+    taken = []
+    for other, op, og, other_lay, _oz in _on_wall(job, wall_id, std, exclude=number):
+        # Nothing is placed yet, so there is no height to compare against: the
+        # same fallback `snap_points` makes, which is the run it will land in.
+        # A panel has no run and is kept clear of everything on the wall.
+        if not cab.is_panel and other_lay != "panel" and            run_key(other_lay) != run_key(layer_of(cab)):
+            continue
+        taken.append((op.x, op.x + og.width))
+    if not taken:
+        return 0
+    for x in sorted({0} | {b for _a, b in taken}):
+        if x > max_x:
+            break
+        if all(x >= b or x + width <= a for a, b in taken):
+            return int(x)
+    return int(min(max(b for _a, b in taken), max_x))
+
+
 def snap_points(job, number: int, wall_id: str, std: Standard = STANDARD):
-    """Where a cabinet may come to rest on a wall, and why.
+    """Where a cabinet or a panel may come to rest on a wall, and why.
 
     The engine decides every candidate. A drag in the browser only picks the
     nearest of these — it never works one out for itself.
@@ -711,22 +816,19 @@ def snap_points(job, number: int, wall_id: str, std: Standard = STANDARD):
         return []
 
     here = placement_for(job, number)
-    g = geometry(cab, std)
+    g = geometry(cab, std, job.materials)
     width = g.width
     mine = _z_span(cab, here, g, std) if here else None
     out = [(0, "wall start"), (max(w.length - width, 0), "wall end")]
 
-    for other, op, other_lay in placed(job):
-        if other.number == number or op.wall != wall_id:
-            continue
-        og = geometry(other, std)
+    for other, op, og, other_lay, oz in _on_wall(job, wall_id, std, exclude=number):
         if mine is None:
-            if run_key(other_lay) != run_key(layer_of(cab)):
+            # not placed yet, so no height to compare: the run it will land in.
+            # A panel has no run, and butts against whatever is there.
+            if not cab.is_panel and other_lay != "panel" and                run_key(other_lay) != run_key(layer_of(cab)):
                 continue
-        else:
-            oz = _z_span(other, op, og, std)
-            if mine[0] >= oz[1] or oz[0] >= mine[1]:
-                continue                           # nothing to butt against up there
+        elif mine[0] >= oz[1] or oz[0] >= mine[1]:
+            continue                               # nothing to butt against up there
         out.append((op.x + og.width, f"right of {other.number}"))
         out.append((op.x - width, f"left of {other.number}"))
     for op in w.openings:
@@ -777,7 +879,7 @@ def z_snap_points(job, number: int, wall_id: str, std: Standard = STANDARD,
         return []
 
     here = placement_for(job, number)
-    g = geometry(cab, std)
+    g = geometry(cab, std, job.materials)
     x0 = at_x if at_x is not None else (here.x if here is not None else 0)
     x1 = x0 + g.width
     # (z, why, applies over x0..x1, applies everywhere except over nx0..nx1)
@@ -786,10 +888,7 @@ def z_snap_points(job, number: int, wall_id: str, std: Standard = STANDARD,
         out.append((max(rm.ceiling - g.height, 0), "tight to the ceiling",
                     None, None, None, None))
 
-    for other, op, _lay in placed(job):
-        if other.number == number or op.wall != wall_id:
-            continue
-        og = geometry(other, std)
+    for other, op, og, _lay, _oz in _on_wall(job, wall_id, std, exclude=number):
         ox0, ox1 = op.x, op.x + og.width
         over = not (ox0 >= x1 or ox1 <= x0)    # above or below it, at this position
         oz = carcass_z(other, op, std)
@@ -1034,6 +1133,72 @@ def clashes(job, std: Standard = STANDARD) -> List[Clash]:
             seen.add(key)
             keep.append(c)
     return keep
+
+
+@dataclass
+class PanelClash:
+    """An independent panel standing in something else's space."""
+    panel: int
+    against: str           # what it stands in, in words
+    wall: str
+
+
+def panel_clashes(job, std: Standard = STANDARD) -> List[PanelClash]:
+    """Panels that stand in something else's space. A WARNING, never a critical.
+
+    Two carcasses sharing a stretch of wall is a critical because the cut list
+    built on it is wrong. A panel is a different kind of thing: a bulkhead front
+    is MEANT to sit flush on the cabinet tops and hard against the ceiling, and
+    exactly how far it laps a carcass is a judgement about how the job is built,
+    not an arithmetic error. So this reports and does not block.
+
+    The tests are the ones already here and nothing new: `polygons_overlap` on
+    the plan outlines — which treats touching as clear, so a panel resting on a
+    run is not a clash — and `_z_span` on the heights, so a bulkhead above a
+    base run does not read as standing in it. An opening uses the same
+    across-and-level test `blocked_openings` makes for a carcass.
+    """
+    rm = job.room
+    if rm is None:
+        return []
+    mats = job.materials
+    walls = {w.id: w for w in rm.walls}
+    mine = []
+    for cab, p in placed_panels(job):
+        if p.wall not in walls:
+            continue           # not a real wall; _room() reports that on its own
+        g = geometry(cab, std, mats)
+        mine.append((cab, p, g, cabinet_footprint(rm, p, cab, std, mats),
+                     _z_span(cab, p, g, std)))
+    if not mine:
+        return []
+    boxes = []
+    for cab, p, _lay in placed(job):
+        if p.wall not in walls:
+            continue
+        g = geometry(cab, std, mats)
+        boxes.append((f"cabinet {cab.number}",
+                      cabinet_footprint(rm, p, cab, std, mats),
+                      _z_span(cab, p, g, std)))
+
+    out = []
+    for i, (cab, p, g, fp, zs) in enumerate(mine):
+        against = list(boxes)
+        for other, _op, _og, ofp, ozs in mine[i + 1:]:
+            against.append((f"panel {other.number}", ofp, ozs))
+        for what, ofp, ozs in against:
+            if zs[0] >= ozs[1] or ozs[0] >= zs[1]:
+                continue                          # they pass at different heights
+            if polygons_overlap(fp, ofp):
+                out.append(PanelClash(cab.number, what, p.wall))
+        w = walls[p.wall]
+        for op in w.openings:
+            across = p.x < op.x + op.width and op.x < p.x + g.width
+            level = zs[0] < op.head and op.sill < zs[1]
+            if across and level:
+                out.append(PanelClash(cab.number, f"the {op.kind} on wall {w.id}",
+                                      p.wall))
+    return out
 
 
 @dataclass

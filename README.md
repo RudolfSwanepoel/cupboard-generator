@@ -67,8 +67,9 @@ dependencies, and neither does the UI.
 Engine, validation, nesting, Plazaboard export, costing and the UI are working.
 
 Room layout follows `docs/ROOM-LAYOUT-SPEC.md`. Phases 1 to 4 are built: walls,
-corners, coordinates and the closure check; a plan view with a Base / Wall /
-Tall layer toggle; gap detection with fillers and scribes; plinth, opt-in per
+corners, coordinates and the closure check; a plan view whose Base / Wall /
+Tall / Panels toggles each switch on and off on their own, anything not shown
+drawn ghosted rather than hidden; gap detection with fillers and scribes; plinth, opt-in per
 run, splitting at a cabinet division and butting at internal corners; and drag
 placement, where a cabinet slides along its wall, snaps to targets the engine
 supplies, re-parents when dragged to another wall, turns red if it overlaps
@@ -83,6 +84,13 @@ true positions and heights, openings with their sill and head, obstructions with
 where to find them, the chosen fillers and plinth boards, which way each door
 hangs, and dimension chains from the wall's start corner and the floor. Pick a
 wall above the elevation on the Cabinets tab; export writes one drawing per wall.
+
+Phase 5a and 5b add independent panels — a part, not a cupboard, cut and
+numbered on its own, several of which make a bulkhead. A panel is placed on a
+wall like a cabinet, with an extra Y for how far it stands off the wall face,
+and is drawn and dragged in the same views; it takes no part in gaps, runs,
+plinth or tip-up, and standing in something is a warning rather than a block.
+The wall elevation and the plan zoom on the scroll wheel.
 
 3D and CAD export follow. A job without a room behaves exactly as it always has.
 

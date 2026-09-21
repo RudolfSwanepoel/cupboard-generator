@@ -21,17 +21,20 @@ from cabinetgen.export_plaza import (effective_price, estimate_cost, summarise,
                                      write_csvs)
 from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
                               MATERIALS, NO_COLOUR, PANEL_CODE,
-                              PANEL_ORIENTATIONS, PanelSpec, SUPPORT_EDGES,
+                              PANEL_ORIENTATIONS, PanelSpec, Placement,
+                              SUPPORT_EDGES,
                               grain_of, hinge_side, is_thin, material_board,
                               material_colour, material_has_edging,
                               material_offers, material_price,
                               material_record, material_thickness, tape_for)
 from cabinetgen.render import elevation_svg, plan_svg, wall_elevation_svg
-from cabinetgen.room import (LAYERS, add_wall, clashes as room_clashes, closure_error,
-                             gaps as room_gaps, geometry, layer_of,
-                             overlaps as room_overlaps, placement_for,
-                             plinth_choice_for, plinth_lengths, rectangular,
-                             runs as room_runs, snap_points, z_snap_points)
+from cabinetgen.room import (LAYERS, add_wall, carcass_z, clashes as room_clashes,
+                             closure_error, free_x, gaps as room_gaps, geometry,
+                             layer_of, overlaps as room_overlaps,
+                             panel_clashes as room_panel_clashes, placed_panels,
+                             placement_for, plinth_choice_for, plinth_lengths,
+                             rectangular, runs as room_runs, snap_points,
+                             z_snap_points)
 from cabinetgen.standard import STANDARD
 from cabinetgen.store import (job_from_dict, job_to_dict, load, next_number,
                               room_from_dict, room_to_dict, save)
@@ -746,18 +749,26 @@ def _room_info(job):
     counts = {lay: 0 for lay in LAYERS}
     unplaced = []
     places = {}
+    panels = 0
     for cab in job.cabinets:
-        # Placing a panel is Part E. Until then a panel is not counted as
-        # unplaced either — a panel cut and not put anywhere is normal.
-        if cab.is_panel:
-            continue
         p = placement_for(job, cab.number)
+        if cab.is_panel:
+            # "panels" is a fourth toggle over the three cabinet layers, not one
+            # of them: `layer_of` is never asked about a panel. And an UNPLACED
+            # panel is not reported — a panel cut and not put anywhere is normal.
+            if p is None:
+                continue
+            panels += 1
+            places[str(cab.number)] = {"wall": p.wall, "x": p.x, "z": p.z,
+                                       "y": getattr(p, "y", 0) or 0,
+                                       "layer": "panel", "override": False}
+            continue
         if p is None:
             unplaced.append(cab.number)
             continue
         lay = layer_of(cab, p)          # derived here, never in the browser
         counts[lay] = counts.get(lay, 0) + 1
-        places[str(cab.number)] = {"wall": p.wall, "x": p.x, "z": p.z,
+        places[str(cab.number)] = {"wall": p.wall, "x": p.x, "z": p.z, "y": 0,
                                    "layer": lay, "override": bool(p.layer)}
     return {
         "name": rm.name,
@@ -766,6 +777,7 @@ def _room_info(job):
         "closure_error": closure_error(rm),
         "placed": len(job.placements),
         "layers": counts,
+        "panels": panels,
         "unplaced": unplaced,
         "placements": places,
         "gaps": [{"wall": g.wall, "layer": g.layer, "after": g.after,
@@ -779,6 +791,8 @@ def _room_info(job):
                      for o in room_overlaps(job)],
         "clashes": [{"cabinet": c.cabinet, "kind": c.kind, "against": c.against}
                     for c in room_clashes(job, job.std)],
+        "panel_clashes": [{"panel": c.panel, "against": c.against, "wall": c.wall}
+                          for c in room_panel_clashes(job, job.std)],
     }
 
 
@@ -1098,8 +1112,12 @@ def plan(payload):
     """The plan view. Separate from /api/compute so flipping a layer costs a
     redraw and not a whole re-nest."""
     job = _job(payload)
-    keep = lambda v: tuple(x for x in (v or ()) if x in LAYERS)   # noqa: E731
-    show = keep(payload.get("show")) or LAYERS
+    # "panels" is not one of room.LAYERS — those are the three cabinet layers —
+    # so it is allowed through here as the fourth toggle it is, and plan_svg is
+    # the only place the word means anything.
+    allowed = LAYERS + ("panels",)
+    keep = lambda v: tuple(x for x in (v or ()) if x in allowed)   # noqa: E731
+    show = keep(payload.get("show")) or allowed
     return {"ok": True, "svg": plan_svg(job, show=show, ghost=keep(payload.get("ghost")))}
 
 
@@ -1139,14 +1157,25 @@ def drag(payload):
     if cab is None or job.room is None:
         return {"ok": False, "error": "no such cabinet, or the job has no room"}
     here = placement_for(job, number)
-    g = geometry(cab, job.std)
+    # A panel's third extent is its board's thickness, so the boards are read:
+    # without them a dragged panel would be measured against the house records.
+    g = geometry(cab, job.std, job.materials)
     ceiling = job.room.ceiling or 0
+    # How far the underside is off the floor when Placement.z is 0. A standing
+    # carcass is up on its legs; a hung unit and a PANEL are not. The browser
+    # used to work this out from the layer, which would have lifted every panel
+    # 100 mm — it reads this figure now and derives nothing.
+    lift = carcass_z(cab, Placement(cabinet=number, wall=here.wall if here else "",
+                                    x=0, z=0), job.std)
     return {
         "ok": True,
         "cabinet": number,
+        "panel": cab.is_panel,
         "width": g.width,                           # its real extent, off the panels
         "height": g.height,
+        "depth": g.depth,
         "layer": layer_of(cab, here),
+        "leg_lift": lift,
         "tolerance": job.std.snap_tolerance,
         "ceiling": ceiling,
         # How high the underside may go. 0 is the floor, where the carcass stands
@@ -1156,6 +1185,9 @@ def drag(payload):
         "max_z": max(ceiling - g.height, 0) if ceiling else None,
         "walls": {w.id: {"length": w.length,
                          "max_x": max(w.length - g.width, 0),
+                         # where it would land if it were newly given this wall,
+                         # clear of what is already on it (E8)
+                         "free_x": free_x(job, number, w.id, job.std),
                          "snaps": snap_points(job, number, w.id, job.std),
                          # every height, each with the stretch of wall it
                          # applies over — the cabinet crosses several on the way

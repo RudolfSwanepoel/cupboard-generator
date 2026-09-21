@@ -75,18 +75,21 @@ engine derives, preview and all; Duplicate gives the next free number and copies
 everything but the placement; and `jobs/Test_Panels.json` loads, edits and saves
 back **byte-identical**. See **Panels** below.
 
-**Next: Part E (placing panels), then F (3D). Neither is started** — a panel is
-cut, costed and nested, and it is not yet put anywhere.
+**Part E (placing panels) is complete — E1 to E9, and exercised in the running
+app rather than only in Python.** A panel has a place in the room: `Placement.y`,
+`room.placed_panels`, the Placements table's Y column, panels drawn in the wall
+elevation and the plan, the drag and every snap target it needs — cabinet tops
+included, which is what a bulkhead lands on — the fat invisible hit area a 16 mm
+panel needs to be grabbable at all, the Panels layer toggle, and the clash
+WARNING. See **Placing a panel** below.
 
-**One piece of E is already done: do not build it twice.** `room.placed()` skips
-panels explicitly (E1's "keep placed() cabinet-only"), brought forward into D
-because without it a panel could close a gap, break a run or carry a plinth
-board the moment anyone gave it a placement. What E still has to build is
-`Placement.y` (serialised only when non-zero), `room.placed_panels`, the
-Placements table's Y column, drawing panels in the wall elevation and the plan,
-the drag and its snap targets — including cabinet tops, for bulkheads — the
-fat invisible hit area a 16 mm panel needs to be grabbable at all, the Panels
-layer toggle, and the clash WARNING.
+**Three things were decided beyond the brief** (21 September 2026, with Rudolf):
+the layer toggle is **multi-select** rather than one radio (E3b), a newly-placed
+cabinet or panel gets a **default position clear of what is already on that wall**
+rather than 0 mm (E8), and the wall elevation and the plan take **scroll-wheel
+zoom** (E9).
+
+**Next: Part F (3D). It is not started.**
 
 Also done since Part C, and not in the brief:
 
@@ -778,7 +781,9 @@ the Run drawing, which is also what keeps `wall_elevation_svg` with no room
 equal to `elevation_svg`; and it is not in the edging legend, the structure,
 door, drawer, support or carcass-thickness checks. A cabinet switched to Panel
 keeps its drawer stack and its support rows in the job file and is reported on
-for neither.
+for neither. Where it IS placed, drawn and snapped against is **Placing a
+panel** below — through `room.placed_panels`, which is a separate list for
+exactly this reason.
 
 **`validate._panels` is deliberately short.** What a panel shares with
 everything else on the cut list is already checked where it always was — too big
@@ -796,6 +801,119 @@ Dup or the button in Panel design.
 `PanelSpec.anchor` is reserved and nothing reads it. It is written to the job
 file only when set. Ruled 20 September 2026: a panel stays where it is put and
 does not follow a cabinet; the field is the seam for the day that changes.
+Part E did not change that — it gave a panel a place, not an owner.
+
+## Placing a panel
+
+**A panel has a place in the room, and the cabinets do not notice.** Part E, 21
+September 2026. What it added is one field, one list and one warning; everything
+else is the machinery that was already there, taught that a panel exists.
+
+**`Placement.y` is the one field a panel needs and a cabinet does not.** Out
+from the wall face to the panel's back: 0 is flush, and it is what puts a
+bulkhead underside out over the units below it, or holds an end cap behind the
+front that laps it. A carcass sits against the wall it is placed on, so its y is
+0 and stays 0 — the Placements table's Y cell is not even offered on a cabinet
+row. **It is written to the job file only when it is non-zero**, so every
+placement written before panels could be placed round-trips byte for byte.
+
+    x   left edge along the wall, from the start corner
+    y   out from the wall face to the back of the panel
+    z   the bottom edge — a panel stands on NO legs, so this is its underside
+        exactly as typed (`room.stands_on_legs` is false for it, and
+        `room.carcass_z` hands back `p.z`)
+
+**`room.placed_panels(job)` is the panel-only twin of `placed()`, which stays
+cabinet-only.** Two lists, not one, on purpose: `placed()` is what gaps, runs,
+plinth, tip-up and door swing come through, and a panel takes part in none of
+them. `room._on_wall` is the one place the two are read together, because what
+something comes to rest against does not care what kind of thing it is.
+
+**A panel is dragged by the same pipeline as a cabinet**, not a second one: it
+gets the same `g.ecabg` group with the same `data-cab`, so one press handler,
+one `/api/drag`, one set of snap rules. `snap_points` and `z_snap_points` read
+both lists, so a bulkhead front snaps to **the cabinet tops below it** as well
+as to wall ends, the floor, the ceiling, opening edges and other panels.
+
+**`/api/drag` says how far off the floor `z = 0` really is, and the browser
+stops working it out.** `leg_lift` is `room.carcass_z` asked at z 0: the leg
+height for a standing carcass, 0 for a hung unit and 0 for a panel. The browser
+used to derive that from the layer, which would have stood every panel 100 mm
+off the floor.
+
+**The boards are read for a panel's geometry, everywhere it is asked.** A
+panel's third extent is its board's thickness, so `snap_points`,
+`z_snap_points`, `api.drag`, `cabinet_footprint`, `overlaps` and the drawings
+all pass `job.materials` through to `room.geometry`. Nothing a cabinet answers
+changes — the engine reads the boards for tapes and grain and never for a size.
+
+**A 16 mm panel is a few pixels of target, so every one carries an invisible hit
+rectangle at least `render.PANEL_GRAB` (16) px across** with `pointer-events`
+on. Without it a bulkhead front cannot be picked up at all.
+
+**In the plan a panel is a thin rectangle in its own board's colour, drawn over
+the cabinets and taking no pointer events.** `y` is visible there and nowhere
+else. It is not draggable in the plan — a panel is placed by typing, and the
+plan drag knows nothing about y — and a bulkhead underside is 570 deep on plan,
+so left grabbable it would have put an undraggable sheet over every cabinet it
+caps.
+
+**Grain lines on a panel run the way the cut list cuts it, or not at all.**
+`render._panel_grain_vertical` maps the grain direction onto the drawing through
+the orientation; a grain running out from the wall has no direction face on, so
+nothing is drawn rather than a line that would say the wrong thing.
+
+**A panel clash is a WARNING, never a critical** (`room.panel_clashes`). Two
+carcasses sharing a stretch of wall is a critical because the cut list built on
+it is wrong. A panel is different: it is cut and costed wherever it is, its
+position moves no figure on the order, and a bulkhead front is *meant* to sit
+flush on the run and hard against the ceiling. Touching is clear, as everywhere
+else, so a flush bulkhead raises nothing. The tests are the ones already here —
+`polygons_overlap` on the outlines, `_z_span` on the heights, and for an opening
+the same across-and-level test `blocked_openings` makes for a carcass.
+
+**The plan's layer toggle is multi-select** (E3b, ruled 21 September 2026). Base,
+Wall, Tall and Panels each switch on and off on their own; it used to be one
+radio, so choosing a layer meant giving up every other one. Default is all four
+on, which is exactly what the old "All" drew. **Everything not shown is ghosted,
+not hidden** — the existing rule, applied to the new toggle as well: an overhead
+means nothing without the base run underneath it, and Panels follows suit rather
+than being the one toggle that behaves differently. `room.LAYERS` is still the
+three CABINET layers and `layer_of` is never asked about a panel; `"panels"` is a
+fourth toggle over the top, and `render.plan_svg` is the only place the word
+means anything.
+
+**A new placement lands clear of what is already on that wall** (E8, ruled 21
+September 2026). Giving a cabinet or a panel a wall used to put it at 0 mm
+whatever was there, which dropped it on top of the first thing on that wall and
+out of sight underneath it. `room.free_x` answers it, off the same candidates a
+drag reads — the wall start and the right-hand edge of everything already placed
+— and the browser asks `/api/drag` and uses the figure. Nothing is worked out in
+the browser. An item that fits nowhere comes to rest against the end of the run,
+clamped to the wall: an honest overlap the validator will name, which beats a
+position nothing worked out.
+
+**Not built, and not asked for: dragging a panel in the plan, and `PanelSpec.anchor`.**
+A panel still stays where it is put and does not follow a cabinet.
+
+## Zoom
+
+**The wall elevation and the plan zoom on the scroll wheel** (E9, 21 September
+2026), with `−` / `100%` / `+` beside each drawing; the percentage is the way
+back. Zoom only — panning is the box's own scrollbars, and nothing was asked for
+beyond that.
+
+**The drawing is scaled by setting the SVG element's CSS size, and the viewBox is
+left alone.** That is the whole trick: every conversion from a pointer to
+millimetres — `elevPoint`, `svgPoint`, the plan's wall tracks, the elevation's
+`.etrack` mapping and the panels' hit areas — reads `getBoundingClientRect()`
+against the same viewBox, so it is exact at any zoom level without one line of
+that arithmetic changing. Measured on the real app: a cabinet and a panel both
+move the right number of millimetres at 64 %, 100 % and 156 %.
+
+**A wheel over a drawing zooms it rather than scrolling the page.** That is what
+was asked for, and it is worth knowing before you reach for the wheel to scroll
+past the plan.
 
 ## Supports
 

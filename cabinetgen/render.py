@@ -7,13 +7,14 @@ wrong here it is wrong in the cut list too.
 from html import escape
 from typing import List
 
+from .engine import panel_of
 from .model import (NO_COLOUR, Cabinet, Job, grain_of, hinge_side,
                     material_board, material_colour, material_record)
 from .room import (LAYERS, cabinet_footprint, carcass_z, clashes, corner_points,
-                   gap_outline, gaps, geometry, layer_of, overlaps, placed,
-                   plinth_choice_for, plinth_lengths, pullout_envelope,
-                   return_profiles, run_key, runs, swing_envelopes, to_world,
-                   wall_frames)
+                   gap_outline, gaps, geometry, layer_of, overlaps,
+                   panel_clashes, placed, placed_panels, plinth_choice_for,
+                   plinth_lengths, pullout_envelope, return_profiles, run_key,
+                   runs, swing_envelopes, to_world, wall_frames)
 from .standard import Standard, STANDARD
 
 INK = "#191c1a"
@@ -164,6 +165,29 @@ def _grain_lines(x, y, w, h, vertical, ink, pitch=7.0):
     return out
 
 
+# A 16 mm panel is about four pixels wide on a wall elevation, which is nothing
+# to aim a pointer at. Every panel carries an invisible rectangle at least this
+# many pixels across so it can actually be picked up.
+PANEL_GRAB = 16
+
+
+def _panel_grain_vertical(spec):
+    """Which way the grain lines run on a panel drawn face on: True for up the
+    drawing, False for along it, None when the grain runs into the page.
+
+    `Length` IS the grain direction and which physical direction that is depends
+    on the orientation: `a` runs along the wall on an upright or a flat panel
+    and out from the wall on an end cap; `b` runs up on an upright or an end cap
+    and out from the wall on a flat one. A grain running out from the wall has
+    no direction on an elevation, so nothing is drawn rather than a line that
+    would say the wrong thing.
+    """
+    o = spec.orientation
+    if spec.grain_along == "a":
+        return False if o in ("upright", "flat") else None
+    return True if o in ("upright", "end") else None
+
+
 def _layer_outline(layer: str, bad: bool = False):
     """Stroke colour, width and dash for a carcass outline: `(ink, width, dash)`.
 
@@ -188,6 +212,14 @@ def _boards_drawn(job: Job, cabs) -> list:
     """
     into = []
     for c in cabs:
+        if c.is_panel:
+            # A panel is one board, and the board whose colour bands it. None of
+            # the cupboard questions below apply to it.
+            spec = c.panel_spec
+            _seen(into, spec.board)
+            if spec.edge_kind and spec.edge_board:
+                _seen(into, spec.edge_board)
+            continue
         _seen(into, c.carcass_board)
         for i in range(c.door_count):
             _seen(into, c.door_board(i))
@@ -431,15 +463,23 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
     dims = wall_elevation_dims(job, wall_id)
     everywhere = {c.number: (c, p) for c, p, _ in placed(job)}
     on_wall = [(c, p, lay, geometry(c, std)) for c, p, lay in placed(job) if p.wall == wall_id]
+    # Panels are drawn but take part in nothing else: no run, no plinth, no
+    # dimension chain, no tip-up. They come from their own list for exactly that
+    # reason, and are drawn over the cabinets because a bulkhead front is in
+    # front of the units it caps.
+    on_panels = [(c, p, geometry(c, std, job.materials))
+                 for c, p in placed_panels(job) if p.wall == wall_id]
     bad = {n for o in overlaps(job, std)
            if o.wall == wall_id or (o.across and wall_id in o.wall.split("/"))
            for n in (o.a, o.b)}
+    bad_panels = {c.panel for c in panel_clashes(job, std) if c.wall == wall_id}
 
     length, top = wall.length, dims["top"]
     pad_l, pad_r, pad_t, pad_b = 72, 30, 64, 80
     scale = min((max_width - pad_l - pad_r) / length, 540 / top)
     W = int(length * scale) + pad_l + pad_r
-    rows = _legend_rows(job, _boards_drawn(job, [c for c, _p, _l, _g in on_wall]),
+    rows = _legend_rows(job, _boards_drawn(job, [c for c, _p, _l, _g in on_wall] +
+                                           [c for c, _p, _g in on_panels]),
                         W - pad_l - pad_r)
     leg = _legend_height(rows)
     H = int(top * scale) + pad_t + pad_b + leg
@@ -576,6 +616,45 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
                        f'font-size="8" text-anchor="middle" fill="{MUTED}">legs</text>')
         out.append('</g>')
 
+    # One numbered part each, drawn in the board it is cut from, over the
+    # cabinets. `carcass_z` is still the one answer to how high it really is —
+    # a panel stands on no legs, so its z IS its underside, exactly as typed.
+    for c, p, g in on_panels:
+        spec = c.panel_spec
+        z0 = carcass_z(c, p, std)
+        px, py = X(p.x), Y(z0 + g.height)
+        pw, ph = max(g.width * scale, 0.8), max(g.height * scale, 0.8)
+        look = board_look(job, spec.board)
+        crash = c.number in bad_panels
+        stroke = CRIT if crash else INK
+        out.append(f'<g class="ecabg epanel" data-cab="{c.number}">')
+        out.append(f'<rect class="epan" data-cab="{c.number}" x="{px:.1f}" y="{py:.1f}" '
+                   f'width="{pw:.1f}" height="{ph:.1f}" fill="{look["colour"]}" '
+                   f'stroke="{stroke}" stroke-width="{"2" if crash else "1.3"}"/>')
+        if look["grain"]:
+            vert = _panel_grain_vertical(spec)
+            if vert is not None:
+                out += _grain_lines(px, py, pw, ph, vert, look["ink"])
+        # E4: a 16 mm panel is a few pixels of target. This is invisible, catches
+        # the pointer for the whole group, and is what makes one grabbable at all.
+        hw, hh = max(pw, PANEL_GRAB), max(ph, PANEL_GRAB)
+        out.append(f'<rect class="ehit" x="{px + pw / 2 - hw / 2:.1f}" '
+                   f'y="{py + ph / 2 - hh / 2:.1f}" width="{hw:.1f}" height="{hh:.1f}" '
+                   f'fill="none" pointer-events="all"/>')
+        # the number beside a thin panel, inside a fat one — either way legible
+        line = panel_of(c, job.materials)
+        if pw >= 26 and ph >= 22:
+            out.append(f'<text x="{px + 4:.1f}" y="{py + 11:.1f}" font-size="9.5" '
+                       f'fill="{look["ink"]}">{c.number}</text>')
+            if ph >= 34:
+                out.append(f'<text x="{px + 4:.1f}" y="{py + 21:.1f}" font-size="8" '
+                           f'fill="{muted_on(look["colour"])}">'
+                           f'{line.length}x{line.width}</text>')
+        else:
+            out.append(f'<text x="{px + pw + 3:.1f}" y="{py - 3:.1f}" font-size="8.5" '
+                       f'fill="{INK}">{c.number} · {line.length}x{line.width}</text>')
+        out.append('</g>')
+
     if any(c.door_count for c, _p, _lay, _g in on_wall):
         out.append(f'<text x="{pad_l}" y="{H - 20 - leg}" font-size="8.5" fill="{MUTED}">'
                    f'Hinges drawn {std.hinge_inset_drawn} mm in from each door end, any '
@@ -620,6 +699,11 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     neither is not drawn at all. Ghosting rather than hiding is deliberate — an
     overhead means nothing without the base run underneath it.
 
+    Independent panels answer to the name `"panels"` in either list. It is not
+    one of `room.LAYERS` — those are the three CABINET layers and `layer_of` is
+    never asked about a panel — it is a fourth toggle over the top of them, and
+    this is the only place that word means anything.
+
     Wall units draw dashed over the base run, which is the usual kitchen
     drawing convention.
     """
@@ -635,10 +719,16 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
 
     corners = corner_points(rm)
     items = [(c, p, lay) for c, p, lay in placed(job) if lay in show or lay in ghost]
+    # The plan is where `Placement.y` is actually visible: a panel standing off
+    # the wall is drawn off the wall line.
+    pans = ([(c, p) for c, p in placed_panels(job)]
+            if ("panels" in show or "panels" in ghost) else [])
 
     pts = list(corners)
     for cab, p, _ in items:
         pts += cabinet_footprint(rm, p, cab)
+    for cab, p in pans:
+        pts += cabinet_footprint(rm, p, cab, std, job.materials)
     xs = [q[0] for q in pts]
     ys = [q[1] for q in pts]
     pad = 54
@@ -646,7 +736,8 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     span_y = max(max(ys) - min(ys), 1)
     scale = min((max_width - pad * 2) / span_x, (max_height - pad * 2) / span_y)
     W = int(span_x * scale) + pad * 2
-    rows = _legend_rows(job, _dedup(c.exterior_board for c, _p, _l in items),
+    rows = _legend_rows(job, _dedup([c.exterior_board for c, _p, _l in items] +
+                                    [c.panel_spec.board for c, _p in pans]),
                         W - pad * 2)
     leg = _legend_height(rows)
     H = int(span_y * scale) + pad * 2 + leg
@@ -679,10 +770,21 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     # over the cabinets, not under them: a swing that fouls something has to be
     # visible against the thing it fouls
     out += _plan_fronts(job, solid, clashing, T, std)
+    # Panels over the cabinets, thin and in their own board's colour: a bulkhead
+    # front is in front of the units it caps. Not draggable here — a panel is
+    # placed by typing, and the plan drag knows nothing about y.
+    bad_panels = {c.panel for c in panel_clashes(job, std)}
+    for cab, p in pans:
+        out += _plan_panel(job, rm, cab, p, T, std,
+                           faint="panels" not in show,
+                           bad=cab.number in bad_panels)
     # labels after every shape: an overhead sits over the base run it belongs to,
     # and a number you cannot read is worse than no number
     for cab, p, lay in solid:
         out += _plan_label(rm, cab, p, T)
+    if "panels" in show:
+        for cab, p in pans:
+            out += _plan_label(rm, cab, p, T, std, job.materials)
     out += _plan_plinths(job, show, T)
     out += _plan_obstructions(rm, T)
     out += _plan_tracks(rm, corners, T)
@@ -890,16 +992,45 @@ def _plan_cabinet(rm, cab, p, layer, T, faint, bad=False, colour=None):
             f'stroke="{_stroke}" stroke-width="{width}"{dash}{op}/>']
 
 
-def _plan_label(rm, cab, p, T):
+def _plan_panel(job, rm, cab, p, T, std, faint=False, bad=False):
+    """One panel's footprint: a thin rectangle in the board it is cut from.
+
+    16 mm on plan is under a pixel at most scales, so the outline is what is
+    actually seen and the fill is there for the colour. It carries no `.cab`
+    class and no drag: a panel is placed by typing, and the plan drag has no
+    idea what `y` is.
+
+    And it takes no pointer events at all. A bulkhead underside is 570 deep on
+    plan and covers the whole run beneath it, so left grabbable it would have
+    put an undraggable sheet over every cabinet it caps — the plan drag looks
+    for `.cab` under the pointer and would have found the panel instead.
+    """
+    fp = [T(q) for q in cabinet_footprint(rm, p, cab, std, job.materials)]
+    pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in fp)
+    colour = board_look(job, cab.panel_spec.board)["colour"]
+    op = ' opacity="0.30"' if faint else ""
+    return [f'<polygon class="pan" data-panel="{cab.number}" points="{pts}" '
+            f'fill="{"#f6e0e3" if bad else colour}" fill-opacity="0.9" '
+            f'stroke="{CRIT if bad else INK}" pointer-events="none" '
+            f'stroke-width="{"2" if bad else "1.3"}"{op}/>']
+
+
+def _plan_label(rm, cab, p, T, std: Standard = STANDARD, materials: dict = None):
     """Number and size at the middle of the outline, whatever shape it is."""
-    fp = [T(q) for q in cabinet_footprint(rm, p, cab)]
+    fp = [T(q) for q in cabinet_footprint(rm, p, cab, std, materials)]
     cx = sum(x for x, _ in fp) / len(fp)
     cy = sum(y for _, y in fp) / len(fp)
     side = min(max(x for x, _ in fp) - min(x for x, _ in fp),
                max(y for _, y in fp) - min(y for _, y in fp))
+    if cab.is_panel:
+        # A panel is a few pixels across the thin way, so the number goes beside
+        # it rather than in it — inside, `side <= 24` would drop every one.
+        cx = max(x for x, _ in fp) + 4
+        return [f'<text x="{cx:.1f}" y="{cy + 3:.1f}" font-size="9" '
+                f'fill="{INK}">{cab.number}</text>']
     if side <= 24:
         return []
-    g = geometry(cab)
+    g = geometry(cab, std, materials)
     out = [f'<text x="{cx:.1f}" y="{cy - 1:.1f}" font-size="10" '
            f'text-anchor="middle" fill="{INK}">{cab.number}</text>']
     if side > 40:

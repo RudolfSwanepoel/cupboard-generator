@@ -72,11 +72,16 @@
      column of its own, starting level with the top of the drawing. */
   #cabmain{flex:1;min-width:0}
   #cabmain>.card:last-child{margin-bottom:0}
-  #layers,#elevpick{float:right;margin-top:-3px;display:flex;gap:3px}
-  #layers button,#elevpick button{padding:2px 9px;font-size:11px;text-transform:none;
-                                  letter-spacing:0}
+  #layers,#elevpick,.zoombar{float:right;margin-top:-3px;display:flex;gap:3px}
+  #layers button,#elevpick button,.zoombar button{padding:2px 9px;font-size:11px;
+                                  text-transform:none;letter-spacing:0}
   #layers button.on,#elevpick button.on{background:var(--ink);color:#fff;
                                         border-color:var(--ink)}
+  .zoombar{margin-left:10px}
+  .zoombar button{min-width:26px}
+  #elevation svg,#plan svg{display:block}
+  #elevation svg .epanel{cursor:grab}
+  #elevation svg .epanel:hover .epan{stroke-width:2.6}
   #cablist{flex:1;min-width:0}
   #editor{width:560px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
           overflow:auto}
@@ -242,7 +247,10 @@
     <div id="cabwrap">
       <div id="cabmain">
         <div class="card">
-          <h2>Elevation <span id="elevpick"></span></h2>
+          <h2>Elevation <span id="elevzoombar" class="zoombar"><button data-zoom="0.8"
+            title="zoom out">&minus;</button><button data-zoom="reset"
+            id="elevzoom" title="back to 100%">100%</button><button data-zoom="1.25"
+            title="zoom in">+</button></span> <span id="elevpick"></span></h2>
           <div class="scroll" id="elevation" style="padding:8px 12px"></div>
         </div>
         <div class="card" id="cablist">
@@ -260,7 +268,10 @@
 
   <section id="tab-room" hidden>
     <div class="card">
-      <h2>Plan <span id="layers"></span></h2>
+      <h2>Plan <span id="planzoombar" class="zoombar"><button data-zoom="0.8"
+        title="zoom out">&minus;</button><button data-zoom="reset"
+        id="planzoom" title="back to 100%">100%</button><button data-zoom="1.25"
+        title="zoom in">+</button></span> <span id="layers"></span></h2>
       <div class="scroll" id="plan" style="padding:8px 12px"></div>
     </div>
     <div class="split">
@@ -477,6 +488,7 @@ async function renderElevation() {
   if (S.elev === null) {
     $("elevation").innerHTML = ((S.res && S.res.elevation) || "")
       + `<div id="elevdrag"></div>`;
+    applyZoom("elevation");
     return;
   }
   const seq = ++elevSeq;
@@ -484,6 +496,7 @@ async function renderElevation() {
   if (seq !== elevSeq) return;             // a newer wall or job has been asked for
   if (!r.ok) { toast(r.error, true); return; }
   $("elevation").innerHTML = r.svg + `<div id="elevdrag"></div>`;
+  applyZoom("elevation");
 }
 
 // The settings panel starts level with the line under the Run / Wall buttons —
@@ -2801,10 +2814,13 @@ $("elevation").addEventListener("pointerdown", async (e) => {
 });
 
 // Where the underside actually is, which is not the same as Placement.z: a
-// carcass on the floor stands on its legs. The lift is the standard's.
+// carcass on the floor stands on its legs, a hung unit does not — and neither
+// does a PANEL, which is a part put where it is put. How much the lift is when
+// z is 0 is `room.carcass_z`'s answer, handed over by /api/drag and read back
+// here. It used to be derived from the layer, which would have stood every
+// panel 100 mm off the floor.
 function carcassZ(p, model) {
-  const legs = (S.def.standard || {}).leg_height || 0;
-  return p.z > 0 ? p.z : (model.layer === "wall" ? 0 : legs);
+  return p.z > 0 ? p.z : (model.leg_lift || 0);
 }
 
 function onElevDrag(e) {
@@ -2904,6 +2920,78 @@ function finishElevDrag(d) {
   compute();
 }
 
+/* ---------- zoom: wall elevation and plan --------------------------------
+   The drawing is scaled by setting the SVG ELEMENT's CSS size. Its viewBox is
+   left alone, so every conversion from a pointer to millimetres — elevPoint,
+   svgPoint, the wall tracks, the .etrack mapping and the panels' fat hit areas
+   — goes on reading getBoundingClientRect() against the same viewBox and comes
+   out right at any zoom level. Scaling the viewBox instead, or a CSS transform
+   on a wrapper, would each have needed that arithmetic changed in five places.
+
+   Nothing here is a dimension: it is how big the picture is drawn.          */
+
+S.zoom = {elevation: 1, plan: 1};
+const ZOOM_MIN = 0.4, ZOOM_MAX = 6;
+
+function applyZoom(id) {
+  const box = $(id);
+  const svg = box && box.querySelector("svg");
+  const out = $(id === "plan" ? "planzoom" : "elevzoom");
+  if (out) out.textContent = Math.round((S.zoom[id] || 1) * 100) + "%";
+  if (!svg) return;
+  const vb = svg.viewBox.baseVal;
+  const w = (vb && vb.width) || svg.getBoundingClientRect().width;
+  const h = (vb && vb.height) || svg.getBoundingClientRect().height;
+  const z = S.zoom[id] || 1;
+  svg.style.maxWidth = "none";
+  svg.style.width = (w * z).toFixed(1) + "px";
+  svg.style.height = (h * z).toFixed(1) + "px";
+  // Zoomed in, the box scrolls rather than pushing the rest of the page down.
+  box.style.maxHeight = z > 1 ? Math.round(h) + "px" : "";
+}
+
+function zoomAt(id, factor, evt) {
+  const box = $(id);
+  if (!box || !box.querySelector("svg")) return;
+  const was = S.zoom[id] || 1;
+  const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, was * factor));
+  if (z === was) return;
+  // keep whatever is under the pointer under the pointer
+  const r = box.getBoundingClientRect();
+  const px = (evt ? evt.clientX - r.left : box.clientWidth / 2) + box.scrollLeft;
+  const py = (evt ? evt.clientY - r.top : box.clientHeight / 2) + box.scrollTop;
+  S.zoom[id] = z;
+  applyZoom(id);
+  box.scrollLeft += px * (z / was - 1);
+  box.scrollTop += py * (z / was - 1);
+}
+
+function zoomReset(id) {
+  S.zoom[id] = 1;
+  applyZoom(id);
+  $(id).scrollLeft = 0;
+  $(id).scrollTop = 0;
+}
+
+for (const id of ["elevation", "plan"]) {
+  $(id).addEventListener("wheel", (e) => {
+    if (!$(id).querySelector("svg")) return;
+    e.preventDefault();               // over a drawing, the wheel zooms it
+    zoomAt(id, Math.exp(-e.deltaY * 0.0015), e);
+  }, {passive: false});
+}
+
+// − / 100% / + beside each drawing. The percentage is the way back: a viewer
+// with no way out of a bad zoom level is worse than no zoom at all.
+for (const [bar, id] of [["elevzoombar", "elevation"], ["planzoombar", "plan"]]) {
+  $(bar).addEventListener("click", (e) => {
+    const b = e.target.closest("[data-zoom]");
+    if (!b) return;
+    if (b.dataset.zoom === "reset") zoomReset(id);
+    else zoomAt(id, +b.dataset.zoom, null);
+  });
+}
+
 /* ---------- room --------------------------------------------------------- */
 
 // Rebuild the form only when its shape changes, so typing in a wall field is
@@ -2992,20 +3080,36 @@ function renderClosure() {
 
 /* ---------- plan view ----------------------------------------------------- */
 
-// null means every layer solid; otherwise that one is solid and the rest ghost.
-S.layer = null;
+// Which layers are drawn SOLID. Base, wall, tall and panels each toggle on and
+// off on their own (21 Sept 2026) — it used to be one radio, so choosing a layer
+// meant giving up every other one at the same time. Everything not shown is
+// ghosted, not hidden: that is the existing rule, and an overhead means nothing
+// without the base run underneath it. Null until the first render fills it from
+// the engine's layer list; the browser holds no list of its own.
+S.layers = null;
+
+// "panels" is not one of room.LAYERS — those are the three CABINET layers, and
+// layer_of is never asked about a panel. It is a fourth toggle over the top.
+function planLayers() {
+  if (S.layers === null) S.layers = allLayers();
+  return S.layers;
+}
+
+function allLayers() {
+  return (S.def.layers || []).concat(["panels"]);
+}
 
 function renderLayers() {
   const info = S.res && S.res.room;
   const box = $("layers");
   if (!info) { box.innerHTML = ""; return; }
-  const names = {base: "Base", wall: "Wall", tall: "Tall"};
-  box.innerHTML = [["all", "All"]].concat((S.def.layers || []).map((l) => [l, names[l] || l]))
-    .map(([k, label]) => {
-      const on = S.layer === null ? k === "all" : k === S.layer;
-      const n = k === "all" ? info.placed : (info.layers[k] || 0);
-      return `<button data-layer="${k}" class="${on ? "on" : ""}">${label} ${n}</button>`;
-    }).join("");
+  const on = planLayers();
+  const names = {base: "Base", wall: "Wall", tall: "Tall", panels: "Panels"};
+  box.innerHTML = allLayers().map((k) => {
+    const n = k === "panels" ? (info.panels || 0) : (info.layers[k] || 0);
+    return `<button data-layer="${esc(k)}" class="${on.indexOf(k) >= 0 ? "on" : ""}">${
+      esc(names[k] || k)} ${n}</button>`;
+  }).join("");
 }
 
 async function renderPlan() {
@@ -3016,8 +3120,8 @@ async function renderPlan() {
     return;
   }
   renderLayers();
-  const show = S.layer ? [S.layer] : (S.def.layers || []);
-  const ghost = S.layer ? (S.def.layers || []).filter((l) => l !== S.layer) : [];
+  const show = planLayers();
+  const ghost = allLayers().filter((l) => show.indexOf(l) < 0);
   const r = await post("/api/plan", {job: S.job, show: show, ghost: ghost});
   if (!r.ok) { toast(r.error, true); return; }
   const un = (S.res && S.res.room && S.res.room.unplaced) || [];
@@ -3025,6 +3129,7 @@ async function renderPlan() {
     + `<div id="dragreadout"></div>`
     + (un.length ? `<div class="note" style="padding:6px 2px">
         Not placed, so not drawn: ${un.join(", ")}</div>` : "");
+  applyZoom("plan");
 }
 
 /* ---------- drag placement ------------------------------------------------
@@ -3069,8 +3174,9 @@ $("plan").addEventListener("pointerdown", async (e) => {
   const poly = e.target.closest(".cab");
   if (!poly || !S.job.room) return;
   const number = +poly.dataset.cab;
-  // Wall units drag only while their layer is the one being shown solid.
-  if (S.layer !== null && poly.dataset.layer !== S.layer) return;
+  // A ghosted layer is not draggable: a wall unit moves only while its own
+  // layer is one of the ones being shown solid.
+  if (planLayers().indexOf(poly.dataset.layer) < 0) return;
 
   const model = await post("/api/drag", {job: S.job, cabinet: number});
   if (!model.ok) { toast(model.error, true); return; }
@@ -3159,7 +3265,9 @@ $("plan").addEventListener("pointerover", (e) => {
 $("layers").addEventListener("click", (e) => {
   const b = e.target.closest("[data-layer]");
   if (!b) return;
-  S.layer = b.dataset.layer === "all" ? null : b.dataset.layer;
+  const on = planLayers();
+  const i = on.indexOf(b.dataset.layer);
+  if (i >= 0) on.splice(i, 1); else on.push(b.dataset.layer);
   renderPlan();
 });
 
@@ -3172,7 +3280,9 @@ let placesSig = null;
 function renderPlaces(force) {
   const rm = S.job.room;
   const sig = !rm ? "none"
-    : S.job.cabinets.map((c) => c.number).join(",") + "|" +
+    // the kind is in the signature because Y is a panel's field: an item turned
+    // into a panel has to get its Y cell, and one turned back has to lose it
+    : S.job.cabinets.map((c) => c.number + (c.kind === "panel" ? "p" : "")).join(",") + "|" +
       S.job.placements.map((p) => p.cabinet + p.wall).join(",") + "|" +
       rm.walls.map((w) => w.id).join(",");
   if (!force && sig === placesSig) { refreshLayerCells(); return; }
@@ -3187,8 +3297,12 @@ function renderPlaces(force) {
   const rows = S.job.cabinets.map((c) => {
     const i = S.job.placements.findIndex((p) => p.cabinet === c.number);
     const p = i < 0 ? null : S.job.placements[i];
+    // Y is a PANEL's field. A carcass sits against the wall it is placed on, so
+    // its Y is 0 and the cell is not offered — the table cannot put a cabinet
+    // off its own wall.
+    const pan = c.kind === "panel";
     return `<tr data-cab="${c.number}">
-      <td class="n">${c.number}</td>
+      <td class="n">${c.number}${pan ? ' <span class="note">pnl</span>' : ""}</td>
       <td><select data-p="${c.number}" data-pk="wall">
         <option value="">—</option>
         ${wallOpts.map((w) => `<option${p && p.wall === w ? " selected" : ""}>${esc(w)}</option>`).join("")}
@@ -3197,19 +3311,29 @@ function renderPlaces(force) {
            value="${p ? p.x : ""}" ${p ? "" : "disabled"}></td>
       <td><input type="number" step="1" data-p="${c.number}" data-pk="z"
            value="${p ? p.z : ""}" ${p ? "" : "disabled"}></td>
+      <td><input type="number" step="1" data-p="${c.number}" data-pk="y"
+           value="${p && pan ? (p.y || 0) : ""}" ${p && pan ? "" : "disabled"}
+           title="${pan ? "out from the wall face to the panel's back"
+                        : "a cabinet is against its wall"}"></td>
       <td class="note">${esc(placedLayer(c.number))}</td>
     </tr>`;
   }).join("");
   $("places").innerHTML = `<div class="body">
     <table class="rows"><thead><tr>
-      <th class="n">Cab</th><th>Wall</th><th>X</th><th>Z</th><th>Layer</th>
+      <th class="n">Item</th><th>Wall</th><th>X</th><th>Z</th><th>Y</th><th>Layer</th>
     </tr></thead><tbody>${rows}</tbody></table>
     <p class="note" style="margin-top:10px">
-      X is from the wall's start corner to the cabinet's left edge, facing the
+      X is from the wall's start corner to the item's left edge, facing the
       wall. Z is 0 for anything standing on the floor — it stands on its legs,
       which the engine allows for, plinth board or not. Set Z only for a hung
-      unit, to its underside. Layer is read from the cabinet's kind and its Z.
-      Pick a wall to place a cabinet, or “—” to take it out.</p>
+      unit, to its underside; a panel stands on no legs, so its Z is its
+      underside exactly as typed. Layer is read from the cabinet's kind and its
+      Z. Pick a wall to place an item, or “—” to take it out; it lands clear of
+      whatever is already on that wall.</p>
+    <p class="note">
+      Y is out from the wall face to the back of an independent PANEL — 0 is
+      flush against the wall, and it is what puts a bulkhead underside out over
+      the units below it. A cabinet is against its wall, so it has no Y.</p>
   </div>`;
 }
 
@@ -3227,7 +3351,7 @@ function placedLayer(number) {
   return p ? (p.layer + (p.override ? " (set)" : "")) : "";
 }
 
-$("places").addEventListener("input", (e) => {
+$("places").addEventListener("input", async (e) => {
   const num = e.target.dataset.p;
   if (num === undefined) return;
   const n = +num;
@@ -3236,14 +3360,32 @@ $("places").addEventListener("input", (e) => {
   if (pk === "wall") {
     if (!e.target.value) {
       if (i >= 0) S.job.placements.splice(i, 1);
-    } else if (i < 0) {
-      S.job.placements.push({cabinet: n, wall: e.target.value, x: 0, z: 0,
-                             flip: false, layer: null});
-    } else {
+      renderPlaces(true);
+    } else if (i >= 0) {
       S.job.placements[i].wall = e.target.value;
+      renderPlaces(true);
+    } else {
+      // A NEW placement. Where it goes is the engine's answer, not 0 mm: at 0 it
+      // landed on top of whatever was already at the start of that wall and out
+      // of sight underneath it. `free_x` comes off the same candidates the drag
+      // reads, so nothing is worked out here.
+      const place = {cabinet: n, wall: e.target.value, x: 0, z: 0, y: 0,
+                     flip: false, layer: null};
+      S.job.placements.push(place);
+      renderPlaces(true);
+      const model = await post("/api/drag", {job: S.job, cabinet: n});
+      const w = model.ok && model.walls[place.wall];
+      if (w && S.job.placements.indexOf(place) >= 0) {
+        place.x = w.free_x;
+        renderPlaces(true);
+      }
     }
-    renderPlaces(true);
   } else if (i >= 0) {
+    // Y is a panel's field, and the cell is disabled on a cabinet row — this is
+    // the second lock, so nothing can put a carcass off its own wall.
+    if (pk === "y" && S.job.cabinets.some((c) => c.number === n && c.kind !== "panel")) {
+      return;
+    }
     S.job.placements[i][pk] = parseInt(e.target.value, 10) || 0;
   }
   schedule();

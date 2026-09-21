@@ -358,13 +358,34 @@ keeps `wall_elevation_svg` with no room equal to `elevation_svg` — nor in the
 edging legend, nor in the structure, door, drawer, support or carcass-thickness
 checks.
 
-**Placement is Part E and is not built.** A panel has no placement, is not in
-the Placements table, is not drawn in the plan or the wall elevations, and an
-unplaced panel is deliberately not a warning: a panel cut and not put anywhere
-is normal. `Placement.y` — the out-from-the-wall offset a bulkhead needs — is
-Part E and does not exist yet.
+**Placement — Part E, built 21 September 2026.** A panel is in the Placements
+table with a Y column of its own, is drawn in the wall elevation and the plan,
+and is dragged and snapped by the same pipeline as a cabinet. An unplaced panel
+is still deliberately not a warning: a panel cut and not put anywhere is normal.
 
-`jobs/Test_Panels.json` is the fixture; `tools/check_panels.py` is the check.
+`Placement.y` is out from the wall face to the panel's back — 0 flush, and what
+puts a bulkhead underside out over the units below it. It is serialised **only
+when non-zero**, so cabinet placements written before it round-trip byte for
+byte, and a cabinet is never given one: the table's Y cell is not offered on a
+cabinet row.
+
+`room.placed_panels(job)` is the panel-only twin of `placed()`, which stays
+cabinet-only — that separation is the load-bearing half above, and keeping two
+lists is what preserves it. `room._on_wall` reads the two together, and only
+for the question of what something comes to rest against: `snap_points` and
+`z_snap_points` offer wall ends, the floor, the ceiling, opening edges, other
+panels and **cabinet tops**, which is what a bulkhead front lands on.
+
+`room.panel_clashes` is a WARNING and never a critical: a panel is cut and
+costed wherever it is, and a bulkhead front is meant to sit flush on the run.
+Touching is clear, so a flush bulkhead raises nothing.
+
+`room.free_x` puts a newly-placed cabinet or panel clear of what is already on
+that wall instead of at 0 mm, off the same candidates a drag reads.
+
+`jobs/Test_Panels.json` is the cut-only fixture; `tools/check_panels.py` is the
+check, and it builds its own placed bulkhead in memory rather than reading a job
+file — a check never reads live workshop data to pin a fact.
 
 ## Phasing
 
@@ -385,10 +406,29 @@ Each phase ends with `regen_check.py` and `check_examples.py` clean.
 5a. **Independent panels, cut only.** — **done** (Part D, 20 September 2026):
    the model, the engine, the geometry, the editor and the validation. A panel
    is cut, costed and nested and is not yet placed.
-5b. **Placing panels.** — **not started** (Part E). `Placement.y`,
-   `room.placed_panels`, the Placements table, the wall elevation and plan
-   drawings, the drag and its snap targets, and the clash warning. One piece is
-   already done and must not be built twice: `room.placed()` skips panels.
+5b. **Placing panels.** — **done** (Part E, 21 September 2026): `Placement.y`
+   (serialised only when non-zero), `room.placed_panels`, the Placements table's
+   Y column, panels drawn in the wall elevation and the plan, the drag through
+   the one existing pipeline, the snap targets including cabinet tops, the 16 px
+   hit area a 16 mm panel needs to be grabbable, the Panels layer toggle and the
+   clash warning. October regression byte-identical throughout (272/59/30
+   panels, 92 pot holes, 18/9/6 boards, R28,363.50).
+
+   **Three things beyond the brief, decided with Rudolf on 21 September 2026:**
+   the plan's layer toggle is **multi-select** rather than one radio (Base, Wall,
+   Tall and Panels each on and off on their own, all four on by default,
+   everything not shown ghosted rather than hidden — the existing rule applied to
+   the new toggle); a newly-placed cabinet or panel gets a **default position
+   clear of what is already on that wall** (`room.free_x`, server-side, off the
+   drag's own candidates); and the wall elevation and the plan take
+   **scroll-wheel zoom** with a `100%` reset, done by scaling the SVG element's
+   CSS size and leaving the viewBox alone, so every pointer-to-millimetre
+   conversion stays exact at any zoom level.
+
+   **Not built and not asked for:** dragging a panel in the plan (typed entry is
+   what ships, and the plan's panel footprints take no pointer events so they
+   cannot swallow a cabinet drag), and `PanelSpec.anchor`, which still nothing
+   reads.
 6. **3D.**
 7. **CAD export** riding on the same coordinates — DXF plus the SolidWorks
    parameter table already on the not-built-yet list.

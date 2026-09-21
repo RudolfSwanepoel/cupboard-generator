@@ -15,7 +15,8 @@ from .model import (PANEL_ORIENTATIONS, TAPE_PREFIX, WHITE_TOKEN, Cabinet, Job,
 from .room import (above_ceiling, blocked_openings, cab_corner_outline,
                    clashes as room_clashes, closure_error, corner_offset,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
-                   placed, plinth_choice_for, runs as room_runs, tip_problems,
+                   panel_clashes as room_panel_clashes, placed,
+                   plinth_choice_for, runs as room_runs, tip_problems,
                    triangulate)
 from .standard import Standard, STANDARD
 
@@ -758,6 +759,12 @@ def _placement_clashes(job: Job, std):
     drawer that fouls something is a warning — it is a real defect, but which
     way a door hangs is a judgement, and blocking the export over it would be
     the app overruling the person who measured the room.
+
+    A PANEL standing in something is a warning for the same reason: a bulkhead
+    front is meant to sit flush on the run below it, and how far it laps a
+    carcass is a judgement about how the job is built. A panel is cut and
+    costed whether or not it is placed, so its position moves no figure on the
+    order and must not block one.
     """
     out = []
     for o in room_overlaps(job):
@@ -768,6 +775,9 @@ def _placement_clashes(job: Job, std):
         thing = "door swing" if c.kind == "door" else "drawer pull-out"
         out.append(Issue(WARNING, str(c.cabinet),
                          f"{thing} fouls {c.against}"))
+    for c in room_panel_clashes(job, std):
+        out.append(Issue(WARNING, str(c.panel),
+                         f"panel stands in {c.against} on wall {c.wall}"))
     return out
 
 

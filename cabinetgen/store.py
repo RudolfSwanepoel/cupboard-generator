@@ -65,6 +65,16 @@ def cabinet_from_dict(d: dict) -> Cabinet:
     return Cabinet(**{k: v for k, v in d.items() if k in known})
 
 
+def placement_to_dict(p: Placement) -> dict:
+    """`y` only when it is non-zero. A cabinet is always against its wall, so
+    every placement written before panels could be placed says exactly what it
+    always said and the file does not move."""
+    d = asdict(p)
+    if not d.get("y"):
+        d.pop("y", None)
+    return d
+
+
 def room_to_dict(room: Room) -> dict:
     d = asdict(room)
     d["walls"] = [asdict(w) for w in room.walls]
@@ -98,7 +108,7 @@ def job_to_dict(job: Job) -> dict:
     if job.room is not None:
         d["room"] = room_to_dict(job.room)
     if job.placements:
-        d["placements"] = [asdict(p) for p in job.placements]
+        d["placements"] = [placement_to_dict(p) for p in job.placements]
     if job.gaps:
         d["gaps"] = [asdict(g) for g in job.gaps]
     if job.plinths:

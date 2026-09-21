@@ -37,11 +37,16 @@ sys.path.insert(0, ROOT)
 from cabinetgen import boards as B                                       # noqa: E402
 from cabinetgen.engine import generate_cabinet, generate_job            # noqa: E402
 from cabinetgen.model import (PANEL_CODE, PANEL_ORIENTATIONS, Cabinet,   # noqa: E402
-                              Drawer, Job, Panel, PanelSpec, Support)
+                              Drawer, Job, Panel, PanelSpec, Placement,
+                              Support)
 from cabinetgen.render import elevation_svg, tape_legend                 # noqa: E402
-from cabinetgen.room import geometry, placed, stands_on_legs             # noqa: E402
+from cabinetgen.room import (cabinet_footprint, clashes as room_clashes,  # noqa: E402
+                             free_x, geometry, panel_clashes, placed,
+                             placed_panels, rectangular, snap_points,
+                             stands_on_legs, tip_problems, z_snap_points)
 from cabinetgen.store import (cabinet_from_dict, cabinet_to_dict,        # noqa: E402
-                              job_from_dict, job_to_dict, load, next_number)
+                              job_from_dict, job_to_dict, load, next_number,
+                              placement_to_dict)
 from cabinetgen.validate import validate                                 # noqa: E402
 
 FAILS = []
@@ -318,6 +323,165 @@ def main():
         generate_job(fix)
         check("two cut lists later, the job is untouched",
               json.dumps(job_to_dict(fix), sort_keys=True) == before, True)
+
+    # ---- E: placing a panel ------------------------------------------------
+    print("\nE — a panel has a place in the room, and the cabinets do not notice")
+
+    def bulkhead():
+        """Wall A: two base units, and a bulkhead of four panels capping them.
+
+        Front upright, underside flat, an end cap each side — each its own
+        number, which is the whole reason a bulkhead is several panels rather
+        than one part with a shape.
+        """
+        cups = [Cabinet(number=n, width=600, height=780, depth=570, doors=1,
+                        carcass_board="MEL", exterior_board="WOOD",
+                        back_board="THIN")
+                for n in (1, 2)]
+        pans = [panel(3, board="WOOD", orientation="upright", a=1200, b=400),
+                panel(4, board="MEL", orientation="flat", a=1200, b=570),
+                panel(5, board="MEL", orientation="end", a=570, b=400),
+                panel(6, board="MEL", orientation="end", a=570, b=400)]
+        j = job_of(*(cups + pans))
+        j.room = rectangular(4000, 3000, ceiling=2700)
+        # The two units on the floor, the bulkhead capping them: 780 high on
+        # 100 mm legs, so its underside is at 880. The end caps sit BEHIND the
+        # front, at y = 16 — which is exactly what y is for, and without it they
+        # would genuinely be in the same space as the front and say so.
+        j.placements = [Placement(1, "A", 0), Placement(2, "A", 600),
+                        Placement(3, "A", 0, z=880),
+                        Placement(4, "A", 0, z=1280),
+                        Placement(5, "A", 0, z=880, y=16),
+                        Placement(6, "A", 1184, z=880, y=16)]
+        return j
+
+    j = bulkhead()
+    plain = job_of(*[c for c in j.cabinets if not c.is_panel])
+    plain.room, plain.placements = j.room, j.placements[:2]
+    check("placed() returns the cabinets and only the cabinets, in order",
+          [c.number for c, _p, _l in placed(j)], [1, 2])
+    check("and exactly what it returned before the panels were placed",
+          [(c.number, p.x, lay) for c, p, lay in placed(j)],
+          [(c.number, p.x, lay) for c, p, lay in placed(plain)])
+    check("placed_panels() is the other four",
+          [c.number for c, _p in placed_panels(j)], [3, 4, 5, 6])
+    check("an unplaced panel is simply not in it — cut-only is normal",
+          [c.number for c, _p in placed_panels(job_of(panel(9, board="MEL",
+                                                            a=10, b=10)))], [])
+    check("tip-up is unmoved by them", tip_problems(j), tip_problems(plain))
+    check("and so is the door swing",
+          [(c.cabinet, c.against) for c in room_clashes(j)],
+          [(c.cabinet, c.against) for c in room_clashes(plain)])
+
+    print("\n  x, y and z, and the third extent that is the board's own thickness")
+    g = {c.number: geometry(c, j.std, j.materials) for c, _p in placed_panels(j)}
+    check("upright: along the wall, thick, up",
+          (g[3].width, g[3].depth, g[3].height), (1200, 16, 400))
+    check("flat: along the wall, out from the wall, thick",
+          (g[4].width, g[4].depth, g[4].height), (1200, 570, 16))
+    check("end: thick, out from the wall, up",
+          (g[5].width, g[5].depth, g[5].height), (16, 570, 400))
+    check("z is the underside exactly as typed — a panel stands on no legs",
+          [p.z for _c, p in placed_panels(j)], [880, 1280, 880, 880])
+    front = next(c for c in j.cabinets if c.number == 3)
+    at0 = cabinet_footprint(j.room, Placement(3, "A", 0), front, j.std, j.materials)
+    at60 = cabinet_footprint(j.room, Placement(3, "A", 0, y=60), front, j.std,
+                             j.materials)
+    check("y moves the footprint out from the wall, and nothing else",
+          [(x, y - 60) for x, y in at60], at0)
+
+    print("\n  the job file: y is written only when it is not zero")
+    check("a cabinet placement says exactly what it always said",
+          placement_to_dict(Placement(1, "A", 300)),
+          {"cabinet": 1, "wall": "A", "x": 300, "z": 0, "flip": False,
+           "layer": None})
+    check("and a panel standing off the wall says so",
+          placement_to_dict(Placement(4, "A", 0, z=1280, y=60)).get("y"), 60)
+    check("the bulkhead round-trips through save and load",
+          job_to_dict(job_from_dict(job_to_dict(j))) == job_to_dict(j), True)
+    back = job_from_dict(job_to_dict(j))
+    check("with every y intact", [p.y for p in back.placements],
+          [0, 0, 0, 0, 16, 16])
+    check("and only the placements that need one carry the key",
+          [("y" in placement_to_dict(p)) for p in j.placements],
+          [False, False, False, False, True, True])
+
+    print("\n  what a panel may come to rest on")
+    tops = {s["why"] for s in z_snap_points(j, 3, "A", j.std, spans=True)}
+    check("a bulkhead front lands on the cabinet tops below it",
+          ("on top of 1" in tops, "on top of 2" in tops), (True, True))
+    check("and on the floor and the ceiling",
+          ("on the floor" in tops, "tight to the ceiling" in tops), (True, True))
+    check("the underside lands on the front panel beside it",
+          "on top of 3" in {s["why"] for s in
+                            z_snap_points(j, 4, "A", j.std, spans=True)}, True)
+    xs = {s["why"]: s["x"] for s in snap_points(j, 6, "A", j.std)}
+    check("sideways, an end cap butts the panels it is up there with",
+          (xs.get("right of 3"), xs.get("right of 5")), (1200, 16))
+    check("and not the cabinets a course below it — heights decide, as ever",
+          [w for w in xs if w.endswith(" of 1") or w.endswith(" of 2")], [])
+    low = bulkhead()
+    low.placements[5] = Placement(6, "A", 2000)             # down on the floor
+    check("brought down beside the run, it butts the run",
+          {s["why"]: s["x"] for s in snap_points(low, 6, "A", low.std)
+           }.get("right of 2"), 1200)
+    check("a cabinet's own sideways snaps are what they were with no panels",
+          snap_points(j, 1, "A", j.std), snap_points(plain, 1, "A", j.std))
+    unplaced = bulkhead()
+    unplaced.placements = unplaced.placements[:2]
+    check("and its heights are, while the panels are only cut and not placed",
+          z_snap_points(j, 1, "A", j.std) == z_snap_points(unplaced, 1, "A", j.std),
+          False)
+    check("...where 'only cut' is the same job as one with no panels in it",
+          z_snap_points(unplaced, 1, "A", j.std),
+          z_snap_points(plain, 1, "A", j.std))
+    check("placed, the bulkhead is something for a cabinet to come up under",
+          "under 3" in {s["why"] for s in z_snap_points(j, 1, "A", j.std,
+                                                        spans=True)}, True)
+
+    print("\n  a clash is a WARNING: a panel is cut and costed wherever it is")
+    check("a bulkhead sitting flush on the run is not a clash", panel_clashes(j), [])
+    into = bulkhead()
+    into.placements[2] = Placement(3, "A", 0, z=400)        # down into the units
+    hits = panel_clashes(into)
+    check("a panel driven down into the cabinets is",
+          sorted(c.against for c in hits), ["cabinet 1", "cabinet 2"])
+    check("reported against the panel, on its wall",
+          sorted({(c.panel, c.wall) for c in hits}), [(3, "A")])
+    issues = [i for i in validate(into, generate_job(into)) if i.where == "3"]
+    check("and it warns rather than blocking — no cut changes",
+          sorted({i.level for i in issues}), ["warning"])
+    check("the cut list itself is identical either way",
+          [p.label for p in generate_job(into)], [p.label for p in generate_job(j)])
+    two = bulkhead()
+    two.placements[4] = Placement(5, "A", 100, z=880)   # cap in front of the front
+    check("panel against panel is caught too",
+          sorted(c.against for c in panel_clashes(two) if c.panel == 3), ["panel 5"])
+    check("which is the y that was holding it clear, and nothing else",
+          [c.against for c in panel_clashes(two) if c.panel == 3
+           and c.against == "panel 6"], [])
+
+    print("\n  E8 — a new placement lands clear of what is already there")
+    empty = bulkhead()
+    empty.placements = []
+    check("nothing on the wall: it starts at the corner",
+          free_x(empty, 1, "A", empty.std), 0)
+    one = bulkhead()
+    one.placements = [Placement(1, "A", 0)]
+    check("one unit there: the next goes beside it, not on top of it",
+          free_x(one, 2, "A", one.std), 600)
+    check("and a panel is kept clear of the run as well",
+          free_x(one, 3, "A", one.std), 600)
+    apart = bulkhead()
+    apart.placements = [Placement(1, "A", 0), Placement(2, "A", 1800)]
+    check("a gap wide enough in the middle is used before the end",
+          free_x(apart, 3, "A", apart.std), 600)
+    tight = bulkhead()
+    tight.placements = [Placement(1, "A", 0), Placement(2, "A", 700)]
+    check("a gap too narrow for it is passed over",
+          free_x(tight, 3, "A", tight.std), 1300)
+    check("and a narrow item does fit that same gap",
+          free_x(tight, 5, "A", tight.std), 600)
 
     # ---- the three fixed jobs have not moved -------------------------------
     print("\nand a job with no panels is exactly what it was")

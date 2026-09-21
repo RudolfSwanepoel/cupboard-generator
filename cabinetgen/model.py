@@ -963,13 +963,22 @@ class Room:
 
 @dataclass
 class Placement:
-    """Where one cabinet stands. Geometry lives in room.py, never here."""
+    """Where one cabinet or one independent panel stands. Geometry lives in
+    room.py, never here.
+
+    `y` is the one field a panel needs and a cabinet does not: a carcass sits
+    against the wall it is placed on, so its y is 0 and stays 0, while a panel
+    may stand off the wall — a bulkhead underside projects out over the units
+    below it. It is written to the job file ONLY when it is non-zero, so every
+    cabinet placement written before this round-trips byte for byte.
+    """
     cabinet: int           # Cabinet.number
     wall: str              # Wall.id
     x: int                 # mm from wall start to the cabinet's left edge, facing the wall
     z: int = 0             # 0 stands on the floor, on its legs; above 0, a hung unit's underside
     flip: bool = False     # handedness for corner and asymmetric units
     layer: Optional[str] = None   # override; normally derived from kind and z
+    y: int = 0             # out from the wall face to the back of an independent panel
 
 
 @dataclass
