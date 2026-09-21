@@ -125,6 +125,13 @@ the face height, exactly as the cut list has it. Never question it.** The
 proposed hard rules H5 and H6 are not in this file yet because they are his to
 accept; Part C was built as though they hold.
 
+Open and not a question — a known bug, **not fixed**: the **plan** drag's
+`pointerdown` awaits `/api/drag` before it attaches its listeners, so a quick
+drag can let go before anything is listening and the cabinet sticks to the
+pointer. Reproduces at 100 % zoom, so it is nothing to do with Part E's zoom;
+the elevation drag was given the fix on 18 September 2026 and the plan's never
+was (found 21 September 2026).
+
 ## Drawings
 
 **A drawing is a read-only view of the model. Nothing reads one back.** The
@@ -1035,14 +1042,16 @@ one `class="ecabg"` group per cabinet so the whole thing moves rather than an
 empty outline. The vertical figure is `Placement.z`: 0 is the floor, where the
 carcass stands on its legs, and above it is a hung unit's underside.
 
-Two things about that drag that were wrong and are pinned only by hand (the UI
-has no test harness): the press does all its synchronous work — listeners,
-`preventDefault` — *before* awaiting `/api/drag`, and replays the last pointer
-position and the release once the model arrives. Awaiting first meant a quick
-drag let go before anything listened, and the cabinet stuck to the pointer. And
-the floor snap is compared where a standing carcass really is (its underside on
-the legs), not at `z = 0`; an underside below leg height is "on the floor". Before,
-a sideways drag with a 2 px wobble hung a base unit 86 mm up.
+Two things about **the elevation drag** that were wrong and are pinned only by
+hand (the UI has no test harness): its press does all its synchronous work —
+listeners, `preventDefault` — *before* awaiting `/api/drag`, and replays the last
+pointer position and the release once the model arrives. Awaiting first meant a
+quick drag let go before anything listened, and the cabinet stuck to the pointer.
+**Only the elevation's press was changed; the plan's still awaits first** — see
+the open item above. And the floor snap is compared where a standing carcass
+really is (its underside on the legs), not at `z = 0`; an underside below leg
+height is "on the floor". Before, a sideways drag with a 2 px wobble hung a base
+unit 86 mm up.
 
 **Lining up, not only stacking** (18 September 2026). Besides "on top of" and
 "under", which only apply over or under the other cabinet, `z_snap_points` offers
