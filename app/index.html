@@ -578,7 +578,7 @@ async function dupCabinet(i) {
   copy.number = r.number;
   (copy.bespoke || []).forEach((p) => { p.cabinet = copy.number; });
   S.job.cabinets.splice(i + 1, 0, copy);
-  S.sel = i + 1;
+  selectCabinet(i + 1);
   schedule(); renderList();
 }
 
@@ -603,13 +603,14 @@ $("cabtable").addEventListener("click", async (e) => {
       S.job.plinths = (S.job.plinths || []).filter((p) => p.first !== n);
       placesSig = null; gapsSig = null; plinthSig = null;
     }
+    if (gone && S.isolate === gone.number) S.isolate = null;
     if (S.sel === i) S.sel = null;
     else if (S.sel > i) S.sel -= 1;
     schedule(); renderList();
     return;
   }
   const tr = e.target.closest("tr[data-i]");
-  if (tr) { S.sel = +tr.dataset.i; renderList(); }
+  if (tr) { selectCabinet(+tr.dataset.i); renderList(); refreshPlan(); }
 });
 
 $("add").addEventListener("click", async () => {
@@ -640,7 +641,11 @@ $("add").addEventListener("click", async () => {
   fresh.exterior_board = pool[pool.length - 1];
   fresh.has_doors = false;      // tick it on when this cabinet actually has doors
   S.job.cabinets.push(fresh);
-  S.sel = S.job.cabinets.length - 1;
+  // P3: a new cabinet isolates itself. It has no placement yet, so there is
+  // nothing to draw until a wall is picked for it in the Room tab — and the
+  // moment there is, it is the one solid thing on the plan however much is
+  // already sitting where `free_x` had to put it.
+  selectCabinet(S.job.cabinets.length - 1);
   schedule(); renderList();
 });
 
@@ -2778,7 +2783,7 @@ $("elevation").addEventListener("pointerdown", async (e) => {
   // starts nothing: it is the list, drawn. The same for a job with no room.
   if (!track || !S.job.room) {
     const i = S.job.cabinets.findIndex((x) => x.number === number);
-    if (i >= 0 && i !== S.sel) { S.sel = i; renderList(); }
+    if (i >= 0 && i !== S.sel) { selectCabinet(i); renderList(); refreshPlan(); }
     return;
   }
   const p = S.job.placements.find((x) => x.cabinet === number);
@@ -2795,7 +2800,7 @@ $("elevation").addEventListener("pointerdown", async (e) => {
              last: null, released: false};
   EDRAG = d;
   grp.classList.add("dragging");
-  S.sel = S.job.cabinets.findIndex((x) => x.number === number);
+  selectCabinet(S.job.cabinets.findIndex((x) => x.number === number));
   window.addEventListener("pointermove", onElevDrag);
   window.addEventListener("pointerup", endElevDrag);
   window.addEventListener("pointercancel", endElevDrag);
@@ -2842,10 +2847,17 @@ function moveElevDrag(d, e) {
 
   let x = Math.round((pt.x - t.x0) / t.scale - EDRAG.grabX);
   x = Math.max(0, Math.min(x, wall.max_x));
-  let why = "";
+  // The NEAREST candidate within tolerance, not the first one found. The engine
+  // hands them over sorted, and taking the first meant a farther target could
+  // win over a nearer one wherever two fall within the same 20 mm — which the
+  // vertical axis now does routinely, with an opening's datums among the
+  // neighbours' (21 September 2026).
+  let why = "", pick = null, best = tol + 1;
   for (const sn of wall.snaps) {
-    if (Math.abs(sn.x - x) <= tol) { x = sn.x; why = sn.why; break; }
+    const off = Math.abs(sn.x - x);
+    if (off < best) { best = off; pick = sn; }
   }
+  if (pick) { x = pick.x; why = pick.why; }
 
   let z = Math.round((t.y0 - pt.y) / t.scale - EDRAG.grabZ);
   const maxZ = EDRAG.model.max_z;      // null when no ceiling has been measured
@@ -2857,7 +2869,7 @@ function moveElevDrag(d, e) {
   // really stands, not at 0 — compared at 0 it could never be reached from a
   // standing start, and a sideways drag with a little wobble hung the unit.
   const legs = carcassZ({z: 0}, EDRAG.model);
-  let snapped = false;
+  let zPick = null, zBest = tol + 1;
   for (const sn of wall.z_snaps) {
     // a height that belongs to another cabinet only applies where this one is
     // actually over or under it — the engine hands over the stretch, this only
@@ -2869,8 +2881,11 @@ function moveElevDrag(d, e) {
     if (sn.not_x0 !== null && sn.not_x0 !== undefined &&
         !(sn.not_x0 >= x + w || sn.not_x1 <= x)) continue;
     const at = sn.z === 0 ? legs : sn.z;
-    if (Math.abs(at - z) <= tol) { z = sn.z; whyZ = sn.why; snapped = true; break; }
+    const off = Math.abs(at - z);
+    if (off < zBest) { zBest = off; zPick = sn; }
   }
+  const snapped = zPick !== null;
+  if (zPick) { z = zPick.z; whyZ = zPick.why; }
   // Nothing hangs lower than its own legs would stand it: an underside between
   // the floor and the leg height is standing on the floor.
   if (!snapped && z > 0 && z < legs) { z = 0; whyZ = "on the floor"; }
@@ -3096,6 +3111,27 @@ function renderClosure() {
 // the engine's layer list; the browser holds no list of its own.
 S.layers = null;
 
+// ISOLATE (21 September 2026). One item's number, or null. A cabinet given a
+// wall can land underneath one that is already there — `room.free_x` only keeps
+// it clear of its OWN run, so a new wall unit lands over the base run quite
+// legitimately — and once it is under something there is nothing to click on.
+// So it is reached from the LIST, not from the plan: clicking is exactly what
+// does not work when the thing is hidden. Everything else is then ghosted, not
+// hidden, which is the treatment the layer toggle already uses; one convention
+// for "not the focus", not two. It overrides the layer toggle for this one item
+// and changes the toggle for nothing else.
+S.isolate = null;
+
+// Selecting an item is what isolates it, wherever the selection was made — the
+// list, the editor, or a press in the wall elevation. Never a click in the plan:
+// see above. A newly added or duplicated cabinet comes through here too, which
+// is all P3 needs — it is selected on creation, so it is isolated on creation.
+function selectCabinet(i) {
+  S.sel = i;
+  const c = i === null ? null : S.job.cabinets[i];
+  S.isolate = c ? c.number : null;
+}
+
 // "panels" is not one of room.LAYERS — those are the three CABINET layers, and
 // layer_of is never asked about a panel. It is a fourth toggle over the top.
 function planLayers() {
@@ -3113,11 +3149,23 @@ function renderLayers() {
   if (!info) { box.innerHTML = ""; return; }
   const on = planLayers();
   const names = {base: "Base", wall: "Wall", tall: "Tall", panels: "Panels"};
-  box.innerHTML = allLayers().map((k) => {
+  // Ghosting on its own looks like a fault, so say what is going on and give it
+  // a way out that is not "guess where the empty canvas is".
+  const iso = S.isolate === null ? "" :
+    `<button id="unisolate" class="on" title="show the whole room again"
+      >isolating ${S.isolate} ×</button>`;
+  box.innerHTML = iso + allLayers().map((k) => {
     const n = k === "panels" ? (info.panels || 0) : (info.layers[k] || 0);
     return `<button data-layer="${esc(k)}" class="${on.indexOf(k) >= 0 ? "on" : ""}">${
       esc(names[k] || k)} ${n}</button>`;
   }).join("");
+}
+
+// A selection made on the Cabinets tab changes what the plan isolates, but the
+// plan is not on screen there — so it is redrawn only when it is being looked
+// at. Switching to the Room tab renders it anyway, and reads S.isolate then.
+function refreshPlan() {
+  if (S.tab === "room") renderPlan();
 }
 
 async function renderPlan() {
@@ -3130,8 +3178,12 @@ async function renderPlan() {
   renderLayers();
   const show = planLayers();
   const ghost = allLayers().filter((l) => show.indexOf(l) < 0);
-  const r = await post("/api/plan", {job: S.job, show: show, ghost: ghost});
+  const r = await post("/api/plan", {job: S.job, show: show, ghost: ghost,
+                                     isolate: S.isolate});
   if (!r.ok) { toast(r.error, true); return; }
+  // A number the job no longer carries isolates nothing; the engine says so and
+  // the pill catches up rather than naming a cabinet that has been deleted.
+  if (r.isolate !== S.isolate) { S.isolate = r.isolate; renderLayers(); }
   const un = (S.res && S.res.room && S.res.room.unplaced) || [];
   $("plan").innerHTML = r.svg
     + `<div id="dragreadout"></div>`
@@ -3180,11 +3232,19 @@ function svgPoint(evt) {
 
 $("plan").addEventListener("pointerdown", async (e) => {
   const poly = e.target.closest(".cab");
+  // Empty canvas — a wall line, a gap, the paper — is how you get the room back.
+  if (!poly && S.isolate !== null) { S.isolate = null; renderPlan(); return; }
   if (!poly || !S.job.room) return;
   const number = +poly.dataset.cab;
-  // A ghosted layer is not draggable: a wall unit moves only while its own
-  // layer is one of the ones being shown solid.
-  if (planLayers().indexOf(poly.dataset.layer) < 0) return;
+  if (S.isolate !== null) {
+    // Isolated: that one item is the only thing that moves, and it moves
+    // whatever its layer is doing — which is the whole point of isolating it.
+    if (number !== S.isolate) return;
+  } else if (planLayers().indexOf(poly.dataset.layer) < 0) {
+    // A ghosted layer is not draggable: a wall unit moves only while its own
+    // layer is one of the ones being shown solid.
+    return;
+  }
 
   const model = await post("/api/drag", {job: S.job, cabinet: number});
   if (!model.ok) { toast(model.error, true); return; }
@@ -3271,6 +3331,7 @@ $("plan").addEventListener("pointerover", (e) => {
 });
 
 $("layers").addEventListener("click", (e) => {
+  if (e.target.closest("#unisolate")) { S.isolate = null; renderPlan(); return; }
   const b = e.target.closest("[data-layer]");
   if (!b) return;
   const on = planLayers();
@@ -3750,6 +3811,7 @@ function adopt(job) {
   S.job = job;
   markDirty(false);          // what is on screen is what is on disk
   S.sel = null;
+  S.isolate = null;
   S.selRendered = -2;
   roomSig = null;
   placesSig = null;

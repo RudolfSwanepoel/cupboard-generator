@@ -439,13 +439,14 @@ def main() -> int:
           [s["z"] for s in z_snap_points(jz, 2, "A", std) if s["why"] == "on top of 1"],
           [std.leg_height + base.height])
     jz.placements[0] = Placement(1, "A", 3000)
-    check("a cabinet that shares no span is nothing to sit on — but its top lines up",
+    check("a cabinet that shares no span is nothing to sit on — but both its edges line up",
           [s["why"] for s in z_snap_points(jz, 2, "A", std)],
-          ["on the floor", "tops level with 1", "tight to the ceiling"])
+          ["on the floor", "bottoms level with 1", "tops level with 1",
+           "tight to the ceiling"])
     jz.room.ceiling = None
     check("with no ceiling measured there is nothing to cap it against",
           [s["why"] for s in z_snap_points(jz, 2, "A", std)],
-          ["on the floor", "tops level with 1"])
+          ["on the floor", "bottoms level with 1", "tops level with 1"])
 
     # A drag crosses several of these on the way, so it asks for all of them with
     # the stretch of wall each applies over rather than a round trip per pixel.
@@ -453,12 +454,15 @@ def main() -> int:
     spanned = z_snap_points(jz, 2, "A", std, spans=True)
     check("every candidate, with the stretch it applies over",
           [(s["z"], s["why"], s["x0"], s["x1"]) for s in spanned],
-          [(0, "on the floor", None, None), (120, "tops level with 1", None, None),
+          [(0, "on the floor", None, None),
+           (std.leg_height, "bottoms level with 1", None, None),
+           (120, "tops level with 1", None, None),
            (820, "on top of 1", 3000, 3900), (2000, "tight to the ceiling", None, None)])
     check("and a level line carries the stretch it does NOT apply over — over the "
           "other cabinet, level tops would put one inside the other",
           [(s["why"], s.get("not_x0"), s.get("not_x1")) for s in spanned
-           if "level" in s["why"]], [("tops level with 1", 3000, 3900)])
+           if "level" in s["why"]],
+          [("bottoms level with 1", 3000, 3900), ("tops level with 1", 3000, 3900)])
 
     print("\ndragging in the elevation: lining up with a neighbour")
     # Rudolf's case: a wall unit moved up beside a tall unit snaps to its side
@@ -480,14 +484,60 @@ def main() -> int:
     check("and beside another wall unit, the undersides and the tops both line up",
           (zs.get("bottoms level with 3"), zs.get("tops level with 3")),
           (1650, 1650 + 500 - 700))
-    check("a standing neighbour's underside is the floor, which is already a candidate",
-          "bottoms level with 1" in zs, False)
-    check("a level line under the leg height is not offered — it would hang the "
-          "carcass lower than its legs stand it",
-          all(z > std.leg_height for why, z in zs.items() if "level" in why), True)
+    # A standing neighbour's underside is `carcass_z` — the PLINTH TOP, because
+    # every carcass on the floor is on its legs. It used to be reported as 0,
+    # which is a leg height out, and `Test.json`'s panel 8 sits at exactly that
+    # height with nothing to drag it back to (21 September 2026).
+    check("a standing neighbour's underside is the plinth top, not the floor",
+          zs.get("bottoms level with 1"), std.leg_height)
+    check("and that is a real height for a hung unit to come to rest at",
+          all(z > 0 for why, z in zs.items() if "level" in why), True)
+    # Not for a carcass that stands on the floor, though: it stands on its legs,
+    # so there is nothing for it between the floor and the plinth top — and any z
+    # above 0 reads as hung (`layer_of`), so it would quietly change drawing layer
+    # standing exactly where it already was.
+    jb = job([tall, cab(4, 600)], [Placement(1, "A", 0), Placement(4, "A", 600)])
+    jb.room.ceiling = 2700
+    check("a legged carcass is offered nothing between the floor and the plinth top",
+          [(s["z"], s["why"]) for s in z_snap_points(jb, 4, "A", std)
+           if 0 < s["z"] <= std.leg_height], [])
+    check("...and the floor itself is still there, unconditionally",
+          [s["why"] for s in z_snap_points(jb, 4, "A", std)][0], "on the floor")
     check("asked at a position it has not reached yet, the top is a candidate",
           [s["why"] for s in z_snap_points(jz, 2, "A", std, at_x=3000)],
           ["on the floor", "on top of 1", "tight to the ceiling"])
+
+    print("\ndragging in the elevation: an opening is a datum, both ways")
+    # The one place the two axes really diverged (21 September 2026). `snap_points`
+    # has offered both jambs since the drag was built; `z_snap_points` offered
+    # nothing at all for an opening, though the wall elevation draws its sill and
+    # its head and a kitchen is set out off both.
+    jo = job([cab(1, 600, kind="upper", h=700)], [Placement(1, "A", 2400, z=1500)])
+    jo.room.ceiling = 3000
+    jo.room.walls[0].openings.append(Opening("window", 1000, 1200, sill=900, head=2100))
+    check("sideways, both jambs — as they always were",
+          sorted(s["x"] for s in snap_points(jo, 1, "A", std)
+                 if s["why"] == "clear of the window"), [400, 2200])
+    zo = {s["why"]: s["z"] for s in z_snap_points(jo, 1, "A", std)}
+    check("and now the head and the sill, my underside on each",
+          (zo.get("above the window"), zo.get("bottoms level with the window sill")),
+          (2100, 900))
+    check("and my top on each, which is how a run is set out under a window",
+          (zo.get("tops level with the window head"), zo.get("below the window")),
+          (2100 - 700, 900 - 700))
+    check("a datum runs the whole wall, so it carries no stretch — lining up "
+          "beside the window is as much the point as sitting over it",
+          [(s.get("x0"), s.get("not_x0")) for s in
+           z_snap_points(jo, 1, "A", std, spans=True) if "window" in s["why"]],
+          [(None, None)] * 4)
+    tallo = cab(2, 600, kind="tall", h=2400)
+    jo2 = job([tallo], [Placement(2, "A", 2400)])
+    jo2.room.ceiling = 2700
+    jo2.room.walls[0].openings.append(Opening("window", 1000, 1200, sill=900, head=2100))
+    check("a 2400 unit cannot get its underside up to a 2100 head, and is not "
+          "offered it — the ceiling caps the list as it always did",
+          [s["why"] for s in z_snap_points(jo2, 2, "A", std) if "window" in s["why"]],
+          [])
 
     print("\nthe drawing carries what an elevation drag reads back")
     jz.room.ceiling = 2700

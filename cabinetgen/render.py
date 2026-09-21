@@ -692,7 +692,7 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
 
 
 def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
-             max_height: int = 620) -> str:
+             max_height: int = 620, isolate=None) -> str:
     """Plan of the room, looking down. Read-only.
 
     `show` is the layers drawn solid; `ghost` those drawn faint. A layer in
@@ -703,6 +703,14 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     one of `room.LAYERS` — those are the three CABINET layers and `layer_of` is
     never asked about a panel — it is a fourth toggle over the top of them, and
     this is the only place that word means anything.
+
+    `isolate` is one item's number, and it overrides both lists: that item is the
+    only thing drawn solid and it is drawn whatever its layer is doing, so a
+    cabinet that has landed underneath another one can be got at (21 September
+    2026). Everything else is GHOSTED, not hidden — the same treatment the layer
+    toggle already uses, because there is one convention for "not the focus" and
+    a plan with the rest of the room taken out of it is not a plan. A panel is
+    isolated exactly as a cabinet is: it is occluded the same way.
 
     Wall units draw dashed over the base run, which is the usual kitchen
     drawing convention.
@@ -718,11 +726,21 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     ghost = tuple(ghost or ())
 
     corners = corner_points(rm)
-    items = [(c, p, lay) for c, p, lay in placed(job) if lay in show or lay in ghost]
+    # The isolated item is drawn whatever the layer toggle says about it: the
+    # whole point is that selecting it from the list always reaches it.
+    items = [(c, p, lay) for c, p, lay in placed(job)
+             if lay in show or lay in ghost or c.number == isolate]
     # The plan is where `Placement.y` is actually visible: a panel standing off
     # the wall is drawn off the wall line.
-    pans = ([(c, p) for c, p in placed_panels(job)]
-            if ("panels" in show or "panels" in ghost) else [])
+    pans = [(c, p) for c, p in placed_panels(job)
+            if "panels" in show or "panels" in ghost or c.number == isolate]
+    # Isolating something this plan does not draw would grey out the whole room
+    # for nothing. A newly added cabinet is exactly that case: it is selected,
+    # and so isolated, before it has been given a wall.
+    if isolate is not None and not any(
+            c.number == isolate for c, _p, _l in items) and not any(
+            c.number == isolate for c, _p in pans):
+        isolate = None
 
     pts = list(corners)
     for cab, p, _ in items:
@@ -756,13 +774,18 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     out += _plan_walls(rm, corners, T, scale)
     out += _plan_gaps(job, show, T)
     # ghosted first so the selected layers sit on top of them
-    solid = [i for i in items if i[2] in show]
-    faint = [i for i in items if i[2] in ghost and i[2] not in show]
+    if isolate is None:
+        solid = [i for i in items if i[2] in show]
+        faint = [i for i in items if i[2] in ghost and i[2] not in show]
+    else:
+        solid = [i for i in items if i[0].number == isolate]
+        faint = [i for i in items if i[0].number != isolate]
     clashing = {c.cabinet for c in clashes(job, std)}
     colliding = {n for o in overlaps(job) for n in (o.a, o.b)}
     for cab, p, lay in faint:
         out += _plan_cabinet(rm, cab, p, lay, T, faint=True, bad=False,
-                             colour=board_look(job, cab.exterior_board)["colour"])
+                             colour=board_look(job, cab.exterior_board)["colour"],
+                             deaf=isolate is not None)
     for cab, p, lay in solid:
         out += _plan_cabinet(rm, cab, p, lay, T, faint=False,
                              bad=cab.number in colliding,
@@ -776,14 +799,15 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     bad_panels = {c.panel for c in panel_clashes(job, std)}
     for cab, p in pans:
         out += _plan_panel(job, rm, cab, p, T, std,
-                           faint="panels" not in show,
+                           faint=(cab.number != isolate if isolate is not None
+                                  else "panels" not in show),
                            bad=cab.number in bad_panels)
     # labels after every shape: an overhead sits over the base run it belongs to,
     # and a number you cannot read is worse than no number
     for cab, p, lay in solid:
         out += _plan_label(rm, cab, p, T)
-    if "panels" in show:
-        for cab, p in pans:
+    for cab, p in pans:
+        if (cab.number == isolate if isolate is not None else "panels" in show):
             out += _plan_label(rm, cab, p, T, std, job.materials)
     out += _plan_plinths(job, show, T)
     out += _plan_obstructions(rm, T)
@@ -968,7 +992,8 @@ def _dedup(ids) -> list:
     return into
 
 
-def _plan_cabinet(rm, cab, p, layer, T, faint, bad=False, colour=None):
+def _plan_cabinet(rm, cab, p, layer, T, faint, bad=False, colour=None,
+                  deaf=False):
     """One footprint, tinted with the exterior board's colour.
 
     A tint, not a fill: the number and the size go on top of it, and a plan is
@@ -987,9 +1012,14 @@ def _plan_cabinet(rm, cab, p, layer, T, faint, bad=False, colour=None):
     if bad:
         fill_op = ''
     op = ' opacity="0.30"' if faint else ""
+    # `deaf` is isolate: ghosting alone would not be enough, because the item
+    # that is hidden is hidden UNDER something, and that something would still
+    # take the click. Only isolate sets it — a layer ghosted by the toggle keeps
+    # its pointer events, which is what reveals its door swing on hover.
+    ears = ' pointer-events="none"' if deaf else ""
     return [f'<polygon class="cab" data-cab="{cab.number}" data-layer="{layer}" '
             f'points="{pts}" fill="{fill}"{fill_op} '
-            f'stroke="{_stroke}" stroke-width="{width}"{dash}{op}/>']
+            f'stroke="{_stroke}" stroke-width="{width}"{dash}{op}{ears}/>']
 
 
 def _plan_panel(job, rm, cab, p, T, std, faint=False, bad=False):

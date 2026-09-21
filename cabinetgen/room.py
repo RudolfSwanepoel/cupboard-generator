@@ -843,6 +843,29 @@ def snap_points(job, number: int, wall_id: str, std: Standard = STANDARD):
     return keep
 
 
+def _hangs_clear(z: int, cab, std: Standard = STANDARD) -> bool:
+    """Whether `z` is a height this item could really come to rest at.
+
+    The floor is offered separately and unconditionally, so all this ever rules
+    out is the strip between the floor and the plinth top.
+
+    A carcass that stands on the floor stands on its legs, so hanging one in that
+    strip would put it lower than its own legs would stand it — and worse, any z
+    above 0 reads as hung (`layer_of`), so a base unit snapped to the plinth top
+    would quietly change drawing layer while standing exactly where it already
+    was. It is offered nothing there; z of 0 is the honest answer.
+
+    A PANEL stands on nothing and an upper is hung by definition, so for those any
+    height clear of the floor is real — a bulkhead end cap 60 mm up is a part put
+    where it is put, and `Test.json`'s panel 8 lives on the plinth top itself.
+    """
+    if z <= 0:
+        return False
+    if cab.is_panel or cab.kind == "upper":
+        return True
+    return z > std.leg_height
+
+
 def z_snap_points(job, number: int, wall_id: str, std: Standard = STANDARD,
                   at_x=None, spans: bool = False):
     """How high a cabinet may come to rest on a wall, and why.
@@ -856,6 +879,15 @@ def z_snap_points(job, number: int, wall_id: str, std: Standard = STANDARD,
     carcass is lifted by its legs, and anything above it the underside of a hung
     unit. Only cabinets that actually overlap this one along the wall count: a
     unit three metres away is nothing to sit on top of.
+
+    Brought to parity with `snap_points` on 21 September 2026. Every datum the
+    horizontal axis offers has a vertical twin: the wall ends answer to the floor
+    and the ceiling, a neighbour's left and right edges to its top and its
+    underside — which is `carcass_z`, the PLINTH TOP, never 0 — and an opening's
+    two jambs to its sill and its head. Openings were the one real gap: the wall
+    elevation has drawn both lines since it was built and nothing could snap to
+    either. Every figure still comes off `geometry` and the placements; nothing
+    here reads a declared height.
 
     `at_x` asks the question at a position other than where the cabinet stands —
     a drag that has moved sideways is asking about where it is going, not where
@@ -874,7 +906,7 @@ def z_snap_points(job, number: int, wall_id: str, std: Standard = STANDARD,
     if cab is None:
         return []
     try:
-        _wall(rm, wall_id)
+        w = _wall(rm, wall_id)
     except ValueError:
         return []
 
@@ -895,20 +927,41 @@ def z_snap_points(job, number: int, wall_id: str, std: Standard = STANDARD,
         if spans or over:
             out.append((oz + og.height, f"on top of {other.number}", ox0, ox1, None, None))
             under = oz - g.height
-            if under > 0:
+            if _hangs_clear(under, cab, std):
                 out.append((under, f"under {other.number}", ox0, ox1, None, None))
         # Lining up with a neighbour rather than stacking on it (18 Sept 2026): a
         # wall unit beside a tall unit wants its top level with the tall unit's
         # top, and two wall units want their undersides level. That holds anywhere
         # along the wall EXCEPT over or under the other cabinet, where level tops
         # would put one inside the other — so it carries the stretch it does not
-        # apply over. Only a height that is really hung counts: anything below the
-        # leg height would hang the carcass lower than its legs would stand it.
+        # apply over.
+        #
+        # The neighbour's underside is `carcass_z`, never 0: a carcass standing on
+        # the floor stands on its legs, so its bottom edge is the PLINTH TOP. It
+        # was reported as 0, which is a leg height out for anything lining up with
+        # it — and `Test.json`'s own placed panel sits at exactly that height with
+        # nothing to drag it back to (21 September 2026).
         if spans or not over:
             for z, why in ((oz + og.height - g.height, f"tops level with {other.number}"),
-                           (oz if op.z > 0 else 0, f"bottoms level with {other.number}")):
-                if z > std.leg_height:
+                           (oz, f"bottoms level with {other.number}")):
+                if _hangs_clear(z, cab, std):
                     out.append((z, why, None, None, ox0, ox1))
+
+    # An opening is a datum, the same as a neighbour and the same as the ceiling:
+    # a wall unit goes above the head, a base unit's top comes under the sill, and
+    # a run lines up with either. `snap_points` has offered both jambs since the
+    # drag was built and this offered nothing at all, which is the one place the
+    # two axes really diverged (21 September 2026). A datum runs the length of the
+    # wall, so these carry no stretch — lining up with a window head beside the
+    # window is as much the point as sitting over it.
+    for op in w.openings:
+        kind = op.kind
+        for z, why in ((op.head, f"above the {kind}"),
+                       (op.sill - g.height, f"below the {kind}"),
+                       (op.head - g.height, f"tops level with the {kind} head"),
+                       (op.sill, f"bottoms level with the {kind} sill")):
+            if _hangs_clear(z, cab, std):
+                out.append((z, why, None, None, None, None))
 
     # A measured ceiling caps how high the underside may go. The floor is never
     # capped out of the list: standing on the floor is where a carcass starts,

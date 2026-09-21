@@ -29,6 +29,7 @@ The three that would bite hardest:
 """
 import json
 import os
+import re
 import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -39,7 +40,7 @@ from cabinetgen.engine import generate_cabinet, generate_job            # noqa: 
 from cabinetgen.model import (PANEL_CODE, PANEL_ORIENTATIONS, Cabinet,   # noqa: E402
                               Drawer, Job, Panel, PanelSpec, Placement,
                               Support)
-from cabinetgen.render import elevation_svg, tape_legend                 # noqa: E402
+from cabinetgen.render import elevation_svg, plan_svg, tape_legend       # noqa: E402
 from cabinetgen.room import (cabinet_footprint, clashes as room_clashes,  # noqa: E402
                              free_x, geometry, panel_clashes, placed,
                              placed_panels, rectangular, snap_points,
@@ -435,9 +436,54 @@ def main():
     check("...where 'only cut' is the same job as one with no panels in it",
           z_snap_points(unplaced, 1, "A", j.std),
           z_snap_points(plain, 1, "A", j.std))
+    # A cabinet short enough to hang under the bulkhead is offered it. The
+    # fixture's own 780 unit is not, and that is right: standing on its legs its
+    # top is at 880, exactly the bulkhead's underside, so the floor already IS
+    # under 3 — and the only other way to get there would be a z of 100, which
+    # reads as hung (`layer_of`) and would change its drawing layer standing
+    # where it already stood (21 September 2026).
+    short = bulkhead()
+    short.cabinets[0].height = 600
     check("placed, the bulkhead is something for a cabinet to come up under",
+          {s["why"]: s["z"] for s in z_snap_points(short, 1, "A", short.std,
+                                                   spans=True)}.get("under 3"), 280)
+    check("and a carcass that only fits under it on the floor is left on the floor",
           "under 3" in {s["why"] for s in z_snap_points(j, 1, "A", j.std,
-                                                        spans=True)}, True)
+                                                        spans=True)}, False)
+
+    print("\n  isolate: a panel is occluded like anything else, so it isolates")
+    # P2, 21 September 2026. A bulkhead underside is 570 deep on plan and covers
+    # every cabinet it caps, and the cabinets cover the thin ones — so isolate
+    # has to reach a panel too, not just a cabinet.
+    def faint_ids(svg):
+        out = {}
+        for tag in re.findall(r'<polygon class="(?:cab|pan)"[^>]*/>', svg):
+            n = re.search(r'data-(?:cab|panel)="([0-9]+)"', tag)
+            out[int(n.group(1))] = 'opacity="0.30"' in tag
+        return out
+
+    # "panels" is the fourth toggle, not one of room.LAYERS, so it is named
+    # here exactly as the plan tab names it.
+    every = ("base", "wall", "tall", "panels")
+    check("the bulkhead plan draws two cabinets and four panels",
+          sorted(faint_ids(plan_svg(j, show=every))), [1, 2, 3, 4, 5, 6])
+    check("isolating a panel ghosts the cabinets AND the other panels",
+          faint_ids(plan_svg(j, show=every, isolate=5)),
+          {1: True, 2: True, 3: True, 4: True, 5: False, 6: True})
+    check("and isolating a cabinet ghosts the panels over it",
+          faint_ids(plan_svg(j, show=every, isolate=1)),
+          {1: False, 2: True, 3: True, 4: True, 5: True, 6: True})
+    # Counting only the PANELS: isolate also turns the pointer events off on
+    # every ghosted CABINET, which is a different rule and check_room pins it.
+    def panels_deaf(svg):
+        return ['pointer-events="none"' in t for t in
+                re.findall(r'<polygon class="pan"[^>]*/>', svg)]
+
+    check("a panel is still not draggable in the plan, isolated or not — it is "
+          "placed by typing, and the plan drag knows nothing about y",
+          (panels_deaf(plan_svg(j, show=every)),
+           panels_deaf(plan_svg(j, show=every, isolate=5))),
+          ([True] * 4, [True] * 4))
 
     print("\n  a clash is a WARNING: a panel is cut and costed wherever it is")
     check("a bulkhead sitting flush on the run is not a clash", panel_clashes(j), [])

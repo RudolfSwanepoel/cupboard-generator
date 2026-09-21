@@ -19,6 +19,7 @@ existed, which is what keeps tools/regen_check.py honest.
 import json
 import math
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -166,6 +167,53 @@ def main() -> int:
           plan_svg(j, show=("base",), ghost=()).count('<polygon class="cab"'), 1)
     check("wall units draw dashed", 'stroke-dasharray="5 3"' in plan_svg(j), True)
     check("no room draws a note, not a crash", "<text" in plan_svg(Job(name="x")), True)
+
+    print("\nplan view: isolate")
+    # A cabinet that has landed underneath another one has nothing to click on,
+    # so it is reached from the LIST and everything else is GHOSTED, not hidden
+    # — the same treatment the layer toggle already uses, not a second
+    # convention (21 September 2026).
+    def ghosted(svg):
+        """Which cabinets that plan drew faint, and which it drew solid."""
+        out = {}
+        for tag in re.findall(r'<polygon class="cab"[^>]*/>', svg):
+            out[int(re.search(r'data-cab="([0-9]+)"', tag).group(1))] = (
+                'opacity="0.30"' in tag)
+        return out
+
+    check("isolate off is exactly the plan as it was",
+          plan_svg(j, isolate=None) == svg, True)
+    check("isolated, everything is still drawn — ghosted, never hidden",
+          sorted(ghosted(plan_svg(j, isolate=2))), [1, 2, 3])
+    check("and all of it is faint but the one isolated",
+          ghosted(plan_svg(j, isolate=2)), {1: True, 2: False, 3: True})
+    check("whichever one it is", ghosted(plan_svg(j, isolate=3)),
+          {1: True, 2: True, 3: False})
+    # P4: the layer toggle does not get a vote on the isolated item. Cabinet 2 is
+    # the wall unit, and its layer is in neither list here.
+    off = plan_svg(j, show=("base",), ghost=("tall",), isolate=2)
+    check("a layer toggled off still shows the item isolated out of it",
+          ghosted(off), {1: True, 2: False, 3: True})
+    check("...and isolate means ONE ITEM, not one layer: the base run it stood "
+          "over is ghosted with the rest",
+          ghosted(plan_svg(j, show=("base",), ghost=("tall",))),
+          {1: False, 3: True})
+    # Ghosting alone is not enough: the item that is hidden is hidden UNDER
+    # something, and that something would still swallow the click.
+    def deaf(svg):
+        return len(re.findall(
+            r'<polygon class="cab"[^>]*pointer-events="none"[^>]*/>', svg))
+
+    check("every ghosted cabinet takes no pointer events while isolating",
+          deaf(plan_svg(j, isolate=2)), 2)
+    check("and none of them do when nothing is isolated — a layer ghosted by the "
+          "TOGGLE keeps its events, which is what reveals its swing on hover",
+          (deaf(svg), deaf(plan_svg(j, show=("base",), ghost=("wall", "tall")))),
+          (0, 0))
+    check("a number this plan does not draw isolates nothing, rather than "
+          "greying out the whole room — which is a cabinet added and not yet "
+          "given a wall",
+          plan_svg(j, isolate=99) == svg, True)
 
     print("\nopenings and obstructions")
     withop = rectangular(4000, 3000)

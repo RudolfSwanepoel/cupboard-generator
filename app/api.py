@@ -1118,7 +1118,17 @@ def plan(payload):
     allowed = LAYERS + ("panels",)
     keep = lambda v: tuple(x for x in (v or ()) if x in allowed)   # noqa: E731
     show = keep(payload.get("show")) or allowed
-    return {"ok": True, "svg": plan_svg(job, show=show, ghost=keep(payload.get("ghost")))}
+    # Isolate: one item drawn solid whatever the layer toggle says, everything
+    # else ghosted, so a cabinet that has landed underneath another one can be
+    # got at. An item the job does not carry is simply not isolated — a stale
+    # number from a deleted cabinet draws the plan as it always was.
+    iso = payload.get("isolate")
+    iso = int(iso) if iso not in (None, "") else None
+    if iso is not None and not any(c.number == iso for c in job.cabinets):
+        iso = None
+    return {"ok": True, "isolate": iso,
+            "svg": plan_svg(job, show=show, ghost=keep(payload.get("ghost")),
+                            isolate=iso)}
 
 
 def elevation(payload):

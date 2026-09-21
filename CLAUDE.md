@@ -91,6 +91,16 @@ zoom** (E9).
 
 **Next: Part F (3D). It is not started.**
 
+**A standalone fix, not a lettered Part (21 September 2026): vertical snap in
+the wall elevation, and isolate in the plan.** Two things Rudolf hit while
+using it. The vertical snap had no twin for a horizontal target it has always
+offered — an opening — and reported a standing neighbour's underside as the
+floor rather than the plinth top, which is a leg height out and is why
+`Test.json`'s own placed panel could not be dragged back to where it sits. And
+a cabinet given a wall can land underneath one already there, with nothing to
+click on, so it is now reached from the LIST instead. See **Vertical snap** and
+**Isolate** below.
+
 Also done since Part C, and not in the brief:
 
 - **The editor no longer rebuilds its controls on every compute.** Dropdowns
@@ -124,6 +134,13 @@ exterior board does not offer is a CRITICAL.** **Q4 is ruled: drawer-face grain 
 the face height, exactly as the cut list has it. Never question it.** The
 proposed hard rules H5 and H6 are not in this file yet because they are his to
 accept; Part C was built as though they hold.
+
+Awaiting a ruling, and **not built**: **dragging a new cabinet straight from
+the list onto the plan.** It came up in the same conversation as the deferred
+island work and was never separately confirmed once islands were dropped, so it
+is deliberately not here. Isolate covers the case it was meant to solve —
+getting at something that has landed out of reach — without a second way to
+place things.
 
 Open and not a question — a known bug, **not fixed**: the **plan** drag's
 `pointerdown` awaits `/api/drag` before it attaches its listeners, so a quick
@@ -202,7 +219,7 @@ tools/check_examples.py    verifies the worked examples in docstrings are true
 tools/check_room.py        room geometry: closure, corners, to_world
 tools/check_fillers.py     gap detection, taper, scribe, filler panels
 tools/check_plinth.py      runs, butt joints, long-run splits, plinth panels
-tools/check_drag.py        overlaps, snap targets, door swings, pull-outs
+tools/check_drag.py        overlaps, snap targets both axes, swings, pull-outs
 tools/check_elevation.py   per-wall elevations: chains close, plinth heights, hinges
 tools/check_edging.py      Has Edging, the kinds a board offers, its colour
 tools/check_single_source.py  the one list of which cabinet fields hold a board
@@ -935,6 +952,90 @@ calling `preventDefault` unless `e.ctrlKey` is set (corrected 21 September 2026)
 reported as a wheel event with `ctrlKey` true — how Chrome, Firefox and Safari
 all report it — so pinch and an explicit Ctrl+scroll on a mouse come down the
 same path. There is no separate pinch detection, and none is wanted.
+
+## Vertical snap in the wall elevation
+
+**Brought to parity with the sideways snap on 21 September 2026.** Both come
+off one `/api/drag` reply and one browser handler, on the same 20 mm
+`Standard.snap_tolerance`; what diverged was the set of targets each one names.
+
+Every datum the sideways snap offers now has a vertical twin. The wall ends
+answer to the floor and the ceiling; a neighbour's left and right edges to its
+top and its underside; and an opening's two jambs to its **sill and its head**.
+Openings were the real gap — `render.wall_elevation_svg` has drawn both lines
+since it was built and nothing could snap to either, though a kitchen is set out
+off both. Four per opening, named for what they are: `above the <kind>`,
+`below the <kind>`, `tops level with the <kind> head`, `bottoms level with the
+<kind> sill`. A datum runs the length of the wall, so unlike a neighbour's top
+it carries **no stretch**: lining a run up with a window head beside the window
+is as much the point as sitting over it.
+
+**A standing neighbour's underside is `carcass_z` — the PLINTH TOP, never 0.**
+Every carcass on the floor is on its legs, so `bottoms level with N` used to be
+a leg height out. `Test.json`'s panel 8 is the case that proves it: it sits at
+exactly 100, level with the plinth line and with every base carcass beside it,
+and before this there was no target there and nothing to drag it back to.
+
+**`room._hangs_clear` is the one rule about the strip between the floor and the
+plinth top**, and it is what `under N` and both level lines ask. A carcass that
+stands on the floor is offered nothing in that strip: it stands on its legs, and
+worse, any z above 0 reads as hung (`layer_of`), so snapping a base unit to the
+plinth top would quietly change its drawing layer while it stood exactly where
+it already was. A **panel** stands on nothing and an upper is hung by
+definition, so for those any height clear of the floor is real. The floor itself
+is offered unconditionally, always, so all the rule ever does is rule out that
+strip.
+
+**The browser picks the NEAREST candidate within tolerance, not the first one it
+finds** — both axes, corrected 21 September 2026. The engine hands them over
+sorted and the docstrings always said "nearest"; the code took the first, which
+only started to matter when an opening's datums landed among the neighbours'.
+
+**A vertical move is checked exactly like a sideways one.** `room.overlaps`
+reads `_z_span`, which reads `carcass_z`, so dropping a wall unit down into the
+base run below it is the same critical as sliding it sideways into a neighbour
+— and touching is still clear, so the snap target `on top of N` is not a
+collision.
+
+## Isolate
+
+**One item drawn solid, everything else ghosted, reached from the LIST** (21
+September 2026). A cabinet given a wall can come to rest underneath one already
+there — `room.free_x` keeps it clear only of its OWN run, so a new wall unit
+lands over the base run quite legitimately — and once it is under something
+there is nothing to click on. So isolate is triggered by SELECTING the item, not
+by clicking it in the plan: clicking is exactly what does not work.
+
+**Ghosted, not hidden**, at the same `opacity="0.30"` the layer toggle uses.
+One convention for "not the focus", not two, and a plan with the rest of the
+room taken out of it is not a plan.
+
+**It overrides the layer toggle for that one item and changes it for nothing
+else.** An item isolated out of a layer that is switched off is still drawn
+solid and still draggable; every other toggle stays exactly where it was.
+
+**Ghosting alone is not enough, so a ghosted cabinet takes no pointer events.**
+The thing that is hidden is hidden UNDER something, and that something would
+still swallow the click. Only isolate does this — a layer ghosted by the toggle
+keeps its events, which is what reveals its door swing on hover.
+
+**A panel isolates exactly as a cabinet does**: it is occluded the same way. It
+is still not draggable in the plan, isolated or not — that is the existing
+ruling, unchanged.
+
+**`plan_svg(isolate=...)` falls back to the ordinary plan when the number names
+nothing it draws**, rather than greying out the whole room for nothing. A newly
+added cabinet is exactly that case: it is selected, and so isolated, before it
+has been given a wall.
+
+**Where it is set.** `S.isolate` in the browser, one number or null, sent to
+`/api/plan` and decided nowhere else. `selectCabinet(i)` is the single place it
+moves, and every selection goes through it — the cabinet table, Duplicate, Add
+cabinet (which is all P3 needs: a new cabinet is selected on creation, so it is
+isolated on creation) and a press in the wall elevation. Never a click in the
+plan. It ends on a click on empty plan canvas, on the `isolating N ×` pill
+beside the layer toggles, or by selecting something else, which isolates that
+instead. Loading or starting a job clears it.
 
 ## Supports
 
