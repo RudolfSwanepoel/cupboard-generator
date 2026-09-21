@@ -66,12 +66,49 @@ board; a swap moves every panel; the editors refresh themselves; deleting a
 project moves its files to `jobs/_deleted/`; grain is shown in the swap step
 and on the cut list.
 
-**Part D (independent panels) is built and checked** — D1 to D9 of the brief.
-See **Panels** below. **Next: E (placing them), then F (3D).** Nothing of E or
-F is built: a panel is cut, costed and nested, and it is not yet put anywhere.
+**Part D (independent panels) is complete — D1 to D9, every one passing, and
+exercised in the running app rather than only in Python.** Kind → Panel swaps
+the cupboard sections for Panel design and says what stops being cut first; all
+three orientations relabel their two extents and give the right geometry; a
+board, an edging kind and the banded-edge counts produce the cut-list line the
+engine derives, preview and all; Duplicate gives the next free number and copies
+everything but the placement; and `jobs/Test_Panels.json` loads, edits and saves
+back **byte-identical**. See **Panels** below.
 
-Also done since Part C, and not in the brief: the editor stops rebuilding its
-controls on every compute (see **The UI**).
+**Next: Part E (placing panels), then F (3D). Neither is started** — a panel is
+cut, costed and nested, and it is not yet put anywhere.
+
+**One piece of E is already done: do not build it twice.** `room.placed()` skips
+panels explicitly (E1's "keep placed() cabinet-only"), brought forward into D
+because without it a panel could close a gap, break a run or carry a plinth
+board the moment anyone gave it a placement. What E still has to build is
+`Placement.y` (serialised only when non-zero), `room.placed_panels`, the
+Placements table's Y column, drawing panels in the wall elevation and the plan,
+the drag and its snap targets — including cabinet tops, for bulkheads — the
+fat invisible hit area a 16 mm panel needs to be grabbable at all, the Panels
+layer toggle, and the clash WARNING.
+
+Also done since Part C, and not in the brief:
+
+- **The editor no longer rebuilds its controls on every compute.** Dropdowns
+  twitched because every `<select>` was destroyed and remade after each compute,
+  and a drawer cabinet sitting untouched on screen computed about three times a
+  second for ever (12 computes and 13 drawer-solves per 4 seconds, measured),
+  lighting the unsaved-changes marker on a job nobody had edited. The editor is
+  still rebuilt from the job every time — it has to be — but the HTML is now
+  applied to the DOM that is already there, and a focused control is never
+  touched. The cabinet table is painted the same way. See **The UI**.
+- **The pre-library checks read a frozen fixture, not a live job.** Three checks
+  pinned "a job written before the library still names DECOR" against
+  `jobs/Test_Build.json`, and upgrading that job in the Boards tab broke all
+  three. They read `tools/fixtures/Test_Build_pre_library.json` now. The one
+  half still asked of the live folder, on purpose, is whether `jobs/` is
+  readable. See **One source for "which fields hold a board"**.
+
+**The benchmark held through all of it**, and is what says so: 272 MEL /
+59 BROOKHILL / 30 BACK panels, 92 pot holes, 18 / 9 / 6 boards, R28,363.50,
+`snapshot.py --compare` identical on all three fixed jobs, and every
+`tools/check_*.py` green.
 
 Open questions from the brief that Rudolf has not ruled: **Q1** line endings
 and git hygiene (the working tree is CRLF, HEAD is LF; edit without changing a
@@ -430,6 +467,11 @@ delegated on `#editor` — so reusing a node cannot stack a second handler on it
 The flags that used to force a full rebuild (`S.selRendered = -2` on a board
 change, a tickbox, a renumber, a drag) are gone: all they could do now is destroy
 the control being used.
+
+**The cabinet table is painted the same way**, through the same `slot()`
+stand-in. It holds no dropdown, so nothing there was twitching, but it was being
+rebuilt three times a second alongside the editor and taking the hover and the
+focus ring with it.
 
 **Save is the only thing that writes** (ruled 20 September 2026). A saved job is
 the price capture, so an experiment must not be able to move one by itself. The

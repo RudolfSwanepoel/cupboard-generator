@@ -326,6 +326,30 @@ job's materials for a panel and for nothing else:
 | `flat` — horizontal | a | b | thickness |
 | `end` — upright, side-on | thickness | a | b |
 
+**Cut list.** `engine.panel_of` derives the line; nothing about it is typed.
+Code 08 with the role "Panel" (`model.PANEL_CODE`) — Plazaboard's CSV writes the
+Component column from `Panel.label` alone, so a new code would need their
+sign-off and would say nothing on the order that 08 does not. qty is always 1;
+identical panels are Duplicates, each with its own number.
+
+`Length` IS the grain direction, so on a grained board the extent the grain runs
+along becomes the length whether it is the longer of the two or not, and the
+panel locks; a plain board takes the longer extent and stays free to turn. Which
+means the operator's **long and short edges are not `edge_l` and `edge_w`** — a
+panel cut across its grain has its long edges running the width — so the two are
+mapped rather than assumed equal.
+
+**Editor.** *Size → Kind → Panel* swaps the cupboard sections for a single
+**Panel design** section: the board (any thickness — a panel is one board, not a
+carcass), the orientation as three radio options with inline-SVG icons and plain
+labels, the two extents labelled per orientation, *Grain runs along* on a grained
+board only, the edging (kind, colour board, long and short counts) filtered by
+what the Boards record offers, and a one-line preview of the cut-list line that
+is `panel_of`'s own answer read back. Turning a configured cupboard into a panel
+confirms first and names what stops being cut; nothing is emptied either way, so
+picking a cupboard kind again brings it all back. The cabinet table shows a
+panel's geometry figures, not its declared ones.
+
 **What a panel takes no part in, and this is the load-bearing half.**
 `room.placed` skips panels explicitly, so gaps, runs, plinth, tip-up, door
 swings and overlaps are exactly what they were. A panel stands on no legs, so
@@ -356,9 +380,15 @@ Each phase ends with `regen_check.py` and `check_examples.py` clean.
    swings, ceiling-clash check, unmeasured-wall block. All checks clean,
    October regression byte-identical (272/59/30 panels, 92 pot holes,
    R28,363.50), roomless elevation fingerprint unchanged.
-5. **Per-wall elevations,** dimensioned. — **status unclear: confirm with
-   Claude Code whether this was folded into Phase 4's render.py work or is
-   still ahead of 3D.**
+5. **Per-wall elevations,** dimensioned. — **done**, in the same render.py
+   work as Phase 4.
+5a. **Independent panels, cut only.** — **done** (Part D, 20 September 2026):
+   the model, the engine, the geometry, the editor and the validation. A panel
+   is cut, costed and nested and is not yet placed.
+5b. **Placing panels.** — **not started** (Part E). `Placement.y`,
+   `room.placed_panels`, the Placements table, the wall elevation and plan
+   drawings, the drag and its snap targets, and the clash warning. One piece is
+   already done and must not be built twice: `room.placed()` skips panels.
 6. **3D.**
 7. **CAD export** riding on the same coordinates — DXF plus the SolidWorks
    parameter table already on the not-built-yet list.
