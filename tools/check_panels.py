@@ -483,9 +483,14 @@ def main():
     check("and a narrow item does fit that same gap",
           free_x(tight, 5, "A", tight.std), 600)
 
-    # ---- the three fixed jobs have not moved -------------------------------
-    print("\nand a job with no panels is exactly what it was")
-    for name in ("Test", "Test_Build"):
+    # ---- the fixed job files, read as they are on disk ---------------------
+    # `Test.json` carries a PLACED panel — cabinet 8, the end cap beside the run
+    # (21 September 2026); `Test_Build.json` carries none. Both are named, rather
+    # than both being asked the same question, because the two say different
+    # things worth holding: a job file that HAS a panel round-trips, and so does
+    # one written before panels existed.
+    print("\nand the two fixed job files round-trip, panel or no panel")
+    for name, has_panel in (("Test", True), ("Test_Build", False)):
         path = os.path.join(ROOT, "jobs", name + ".json")
         if not os.path.exists(path):
             check(f"{name}.json is there", False, True)
@@ -493,11 +498,21 @@ def main():
         with open(path, encoding="utf-8") as fh:
             raw = json.load(fh)
         job = job_from_dict(raw)
-        check(f"{name}: no cabinet is a panel",
-              any(c.is_panel for c in job.cabinets), False)
+        check(f"{name}: carries a panel", any(c.is_panel for c in job.cabinets),
+              has_panel)
         check(f"{name}: and it writes back byte for byte",
               json.dumps(job_to_dict(job), indent=2, ensure_ascii=False)
               == json.dumps(raw, indent=2, ensure_ascii=False), True)
+        if not has_panel:
+            continue
+        # PLACED, which is what makes this a Part E fixture and not a Part D one
+        nums = {c.number for c in job.cabinets if c.is_panel}
+        check(f"{name}: and the panel has a place in the room",
+              sorted(c.number for c, _p in placed_panels(job)), sorted(nums))
+        # and `y` is on the wire exactly where it is not zero, nowhere else
+        check(f"{name}: y is written only where it is non-zero",
+              [p["cabinet"] for p in job_to_dict(job)["placements"] if "y" in p],
+              [p.cabinet for p in job.placements if p.y])
 
     print()
     if FAILS:

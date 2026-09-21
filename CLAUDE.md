@@ -195,7 +195,8 @@ run_app.py                 starts the local server, opens the window
 app/api.py                 request handlers. Thin — they call cabinetgen.
 app/index.html             the whole UI. Vanilla JS, no build step.
 jobs/                      job definitions. wardrobe_oct2025.py is the fixture.
-                           Test_Panels.json is the panel fixture.
+                           Test_Panels.json is the cut-only panel fixture;
+                           Test.json's cabinet 8 is the PLACED one.
 tools/regen_check.py       the regression check above
 tools/check_examples.py    verifies the worked examples in docstrings are true
 tools/check_room.py        room geometry: closure, corners, to_world
@@ -899,6 +900,13 @@ drag reads — the wall start and the right-hand edge of everything already plac
 the browser. An item that fits nowhere comes to rest against the end of the run,
 clamped to the wall: an honest overlap the validator will name, which beats a
 position nothing worked out.
+
+**`Test.json` cabinet 8 is the placed-panel fixture** (21 September 2026): an
+`end` panel, 586 x 780 in BROOKHILL, standing on wall A at x 2800 beside the run,
+which is also why cabinet 6 is 570 deep rather than 500. `check_panels.py` and
+`check_edging.py` both read it, so do not take the panel back out — and
+`check_edging`'s support-row comparison skips panels, because a panel keeps its
+support rows in the file and the engine cuts none of them.
 
 **Not built, and not asked for: dragging a panel in the plan, and `PanelSpec.anchor`.**
 A panel still stays where it is put and does not follow a cabinet.

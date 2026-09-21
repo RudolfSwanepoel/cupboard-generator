@@ -340,7 +340,13 @@ def main():
     for name, j in jobs:
         panels = generate_job(j)
         for c in j.cabinets:
-            if c.template == "none":
+            if c.template == "none" or c.is_panel:
+                # A PANEL is neither. It keeps its support rows in the job file
+                # — hidden, never emptied — and the engine cuts none of them, so
+                # comparing what a Supports section would show against what was
+                # cut is comparing a section that is not on screen with panels
+                # that were never meant to exist. `Test.json` cabinet 8 is the
+                # case (21 September 2026).
                 continue
             cut = [p for p in panels
                    if p.role == "Support" and p.cabinet == c.number]
