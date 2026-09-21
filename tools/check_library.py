@@ -30,11 +30,22 @@ What is pinned here, and why:
 import copy
 import json
 import os
+import shutil
 import sys
 import tempfile
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
+
+# A job as it was written BEFORE the board library existed: bare-string
+# materials, no `boards` key, and `decor` rather than `exterior_board`. Taken
+# verbatim from jobs/Test_Build.json at the baseline commit (7daedb7) and frozen
+# here, because that file is a live job: upgrading it in the Boards tab renamed
+# its DECOR to BROOKHILL and broke every check that read it. The upgrade itself
+# was sound -- same 27 lines, same sizes, same total, only the board id moved --
+# but a fixture has to sit still. Nothing in the app can reach this copy.
+PRE_LIBRARY = os.path.join(ROOT, "tools", "fixtures", "Test_Build_pre_library.json")
+
 
 from app.api import board_swap                                               # noqa: E402
 from cabinetgen import boards as B                                            # noqa: E402
@@ -342,11 +353,20 @@ def main() -> int:                                                  # noqa: C901
           [i for i in validate(JOB, generate_job(JOB)) if "R0" in i.message], [])
 
     print("\nwhich jobs use which board — and which would not open")
-    usage = B.scan_jobs(os.path.join(ROOT, "jobs"))
-    # a subset, not the whole folder: saving a job must not fail this check
-    check("the real jobs are found",
-          {"Test_Build.json"} <= set(usage.used_by.get("DECOR", [])), True)
-    check("and nothing in the folder is unreadable today", usage.unreadable, [])
+    # Two separate questions, deliberately. That a board used under a FORMER id
+    # is still found is asked of the frozen fixture, because it is a fact about
+    # the scan and not about what happens to be in jobs/ today. That the real
+    # folder still opens is asked of the real folder, because that is the half
+    # worth knowing live — a job file that will not parse has to be reported by
+    # name rather than skipped.
+    with tempfile.TemporaryDirectory() as frozen:
+        shutil.copy(PRE_LIBRARY, os.path.join(frozen, "Test_Build.json"))
+        usage = B.scan_jobs(frozen)
+        check("a job using a board under its former id is found",
+              {"Test_Build.json"} <= set(usage.used_by.get("DECOR", [])), True)
+    live = B.scan_jobs(os.path.join(ROOT, "jobs"))
+    check("and nothing in the real jobs folder is unreadable today",
+          live.unreadable, [])
     with tempfile.TemporaryDirectory() as tmp:
         with open(os.path.join(tmp, "good.json"), "w", encoding="utf-8") as fh:
             json.dump({"name": "g", "boards": ["MEL"], "cabinets": []}, fh)
@@ -436,8 +456,7 @@ def main() -> int:                                                  # noqa: C901
     check("boards round-trip", rt.board_ids, JOB.board_ids)
     check("prices round-trip", costed(rt), 28363.50)
     check("a job written before the library still names its boards",
-          load(os.path.join(ROOT, "jobs", "Test_Build.json")).board_ids,
-          ["BACK", "DECOR", "MEL"])
+          load(PRE_LIBRARY).board_ids, ["BACK", "DECOR", "MEL"])
 
     print("\nthe library is where a board's details come from (18 Sept 2026)")
     from app.api import refresh_from_library                              # noqa: E402

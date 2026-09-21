@@ -161,6 +161,7 @@ tools/check_single_source.py  the one list of which cabinet fields hold a board
 tools/check_swap.py        a swap moves every use of a board, and says what it does
 tools/check_colour.py      board colour in the drawings, and the ink that reads on it
 tools/check_panels.py      independent panels: the line they cut, and what they stay out of
+tools/fixtures/            frozen job files the checks read. Never reachable from the app.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
 docs/ROOM-LAYOUT-SPEC.md  the room / plan / 3D build spec and its phasing
@@ -527,6 +528,9 @@ skipped. `tools/check_single_source.py` holds the two together **by reflection**
 a `_board` field added to `Cabinet` and not to `_board_slots` fails that check
 rather than becoming the fifth list that disagrees.
 
+**A check never reads live workshop data to pin a fact about the past.** It has
+bitten twice, the same way both times.
+
 `check_library.py` builds its own in-memory library fixture instead of reading
 the live `boards.json`. It used to read it, so renaming `MEL` to `WHITEMEL` — an
 ordinary thing to do in the Boards tab — made `B.find(lib, "MEL")` return None
@@ -534,6 +538,24 @@ and the file died at line 184, with about thirty checks after it silently not
 running. `boards.load` and `boards.save` resolve `LIBRARY` at call time rather
 than binding it as a default argument, so a check can point at a fixture without
 writing the workshop's real library.
+
+**`tools/fixtures/Test_Build_pre_library.json` is the same lesson for a job file**
+(21 September 2026). Three checks pinned "a job written before the library still
+names DECOR" against the LIVE `jobs/Test_Build.json`. Upgrading that job in the
+Boards tab — again, an ordinary thing to do — renamed its DECOR to BROOKHILL and
+broke all three. The upgrade was sound: the same 27 cut-list lines, the same
+designations, sizes and total, with only the board id moving on five of them,
+which is the rename and the price capture working exactly as designed. But a
+fixture has to sit still, so the pre-library version is frozen here, taken
+verbatim from `jobs/Test_Build.json` at the baseline commit (7daedb7): bare-string
+materials, no `boards` key, `decor` rather than `exterior_board`. Nothing in the
+app can reach it. `check_boards.py` and `check_library.py` read it by name.
+
+The one half that still reads the real folder is `scan_jobs(jobs/).unreadable`,
+and deliberately: that a job file will not parse has to be found live and
+reported by name. Whether a board is found under a former id is asked of the
+frozen copy, because that is a fact about the scan, not about what happens to be
+in `jobs/` today.
 
 ### Tapes are generated, not mapped
 

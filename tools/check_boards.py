@@ -31,6 +31,16 @@ import sys
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
 
+# A job as it was written BEFORE the board library existed: bare-string
+# materials, no `boards` key, and `decor` rather than `exterior_board`. Taken
+# verbatim from jobs/Test_Build.json at the baseline commit (7daedb7) and frozen
+# here, because that file is a live job: upgrading it in the Boards tab renamed
+# its DECOR to BROOKHILL and broke every check that read it. The upgrade itself
+# was sound -- same 27 lines, same sizes, same total, only the board id moved --
+# but a fixture has to sit still. Nothing in the app can reach this copy.
+PRE_LIBRARY = os.path.join(ROOT, "tools", "fixtures", "Test_Build_pre_library.json")
+
+
 from cabinetgen.engine import generate_cabinet, generate_job                  # noqa: E402
 from cabinetgen.model import (BOARD_ALIASES, MATERIALS, Cabinet, Drawer,     # noqa: E402
                               Job, Panel, Support, grain_of, material_board,
@@ -293,7 +303,7 @@ def main() -> int:                                                  # noqa: C901
     check("and generating it moved nothing in the job: its bespoke panels still say DECOR",
           sorted({p.material for c in JOB.cabinets for p in c.bespoke} - {"MEL", "BACK"}),
           ["DECOR"])
-    t = load(os.path.join(ROOT, "jobs", "Test_Build.json"))
+    t = load(PRE_LIBRARY)
     t.cabinets.append(Cabinet(99, 600, 720, 580, kind="base", doors=1))
     check("a new cabinet in a job quoted under DECOR is cut from that job's DECOR",
           sorted({p.material for p in generate_job(t)
