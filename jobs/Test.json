@@ -13,7 +13,7 @@
       "tape": "WHITE",
       "thickness": 16,
       "grain": "plain",
-      "price": 575.0,
+      "price": 575,
       "picture": "",
       "has_edging": true,
       "edging_kinds": [
@@ -29,7 +29,7 @@
       "tape": "BROOKHILL",
       "thickness": 16,
       "grain": "grain",
-      "price": 999.0,
+      "price": 999,
       "picture": "",
       "has_edging": true,
       "edging_kinds": [
@@ -45,7 +45,7 @@
       "tape": "WHITE",
       "thickness": 3,
       "grain": "plain",
-      "price": 310.0,
+      "price": 310,
       "picture": "",
       "has_edging": false,
       "edging_kinds": [
@@ -61,7 +61,7 @@
       "tape": "Grey",
       "thickness": 16,
       "grain": "plain",
-      "price": 1100.0,
+      "price": 1100,
       "picture": "",
       "has_edging": true,
       "edging_kinds": [
@@ -254,16 +254,18 @@
         "R"
       ],
       "has_doors": null,
-      "door_boards": [],
+      "door_boards": [
+        "GREY"
+      ],
       "drawers": [],
       "has_drawers": null,
       "exposed_sides": 0,
       "carcass_board": "WHITEMEL",
-      "exterior_board": "BROOKHILL",
+      "exterior_board": "GREY",
       "back_board": "BACK",
       "exterior_tape": "2mm",
       "door_edge_kind": null,
-      "door_edge_board": null,
+      "door_edge_board": "GREY",
       "drawer_edge_kind": null,
       "drawer_edge_board": null,
       "drawer_carcass_board": null,
@@ -298,11 +300,13 @@
       "shelf_width": null,
       "divider_height": null,
       "divider_count": 0,
-      "doors": 0,
+      "doors": 1,
       "door_height": null,
       "door_hinges": [],
-      "has_doors": null,
-      "door_boards": [],
+      "has_doors": false,
+      "door_boards": [
+        "GREY"
+      ],
       "drawers": [
         {
           "face_height": 110,
@@ -341,10 +345,10 @@
           "face_board": null
         }
       ],
-      "has_drawers": null,
+      "has_drawers": true,
       "exposed_sides": 1,
       "carcass_board": "WHITEMEL",
-      "exterior_board": "BROOKHILL",
+      "exterior_board": "GREY",
       "back_board": "BACK",
       "exterior_tape": "2mm",
       "door_edge_kind": null,
@@ -409,7 +413,7 @@
       "has_drawers": null,
       "exposed_sides": 0,
       "carcass_board": "WHITEMEL",
-      "exterior_board": "GREY",
+      "exterior_board": "BROOKHILL",
       "back_board": "BACK",
       "exterior_tape": "2mm",
       "door_edge_kind": null,
@@ -502,8 +506,8 @@
       ],
       "has_drawers": true,
       "exposed_sides": 0,
-      "carcass_board": "GREY",
-      "exterior_board": "GREY",
+      "carcass_board": "BROOKHILL",
+      "exterior_board": "BROOKHILL",
       "back_board": "BACK",
       "exterior_tape": "2mm",
       "door_edge_kind": null,

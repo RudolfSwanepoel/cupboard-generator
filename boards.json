@@ -65,6 +65,22 @@
         "2mm"
       ],
       "colour": "#504f4e"
+    },
+    {
+      "id": "CASCADE",
+      "name": "Cascade Grey",
+      "tape": "Cascade",
+      "thickness": 16,
+      "grain": "grain",
+      "price": 1054.79,
+      "picture": "",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#b0b0b0"
     }
   ]
 }

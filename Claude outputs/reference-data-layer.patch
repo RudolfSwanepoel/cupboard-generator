@@ -1,0 +1,317 @@
+diff -ruN a/app/api.py b/app/api.py
+--- a/app/api.py	2026-09-20 12:42:34.844646018 +0200
++++ b/app/api.py	2026-09-20 12:42:34.846457205 +0200
+@@ -19,8 +19,9 @@
+ from cabinetgen.export_plaza import (effective_price, estimate_cost, summarise,
+                                      write_csvs)
+ from cabinetgen.model import (BOARD_ALIASES, CODES, EXTERIOR_TAPES, MATERIALS,
+-                              SUPPORT_EDGES,
+-                              hinge_side, material_board, material_price,
++                              NO_COLOUR, SUPPORT_EDGES,
++                              hinge_side, material_board, material_colour,
++                              material_has_edging, material_offers, material_price,
+                               material_record, material_thickness, tape_for)
+ from cabinetgen.render import elevation_svg, plan_svg, wall_elevation_svg
+ from cabinetgen.room import (LAYERS, add_wall, clashes as room_clashes, closure_error,
+@@ -102,6 +103,8 @@
+         "support_edges": list(SUPPORT_EDGES),
+         "exterior_tapes": list(EXTERIOR_TAPES),
+         "thicknesses": list(B.THICKNESSES),
++        "edging_kinds": list(B.TAPE_KINDS),
++        "no_colour": NO_COLOUR,
+         "grains": list(B.GRAINS),
+         "board_guideline": BOARD_GUIDELINE,
+         "opening_kinds": ["door", "window", "arch"],
+@@ -194,6 +197,12 @@
+             "pvc": tape_for(job.materials, key, "pvc"),
+             "1mm": tape_for(job.materials, key, "1mm"),
+             "2mm": tape_for(job.materials, key, "2mm"),
++            # what the board offers, and how it looks — read off the job's copy of
++            # the library record, so the dropdowns filter and the drawings colour
++            # from the one place a board is described
++            "has_edging": material_has_edging(job.materials, key),
++            "edging_kinds": list(material_offers(job.materials, key)),
++            "colour": material_colour(job.materials, key),
+             "selected": key in job.board_ids}
+ 
+ 
+@@ -311,6 +320,16 @@
+ 
+     d["id"], d["name"] = board_id, name
+     board = B.board_from_dict(d)
++    # A board that says it has edging has to say what it is called and what it
++    # offers: the edging name is the only thing the tape names are built from,
++    # and a board with edging that offers nothing is a contradiction, not a choice.
++    if board.has_edging and not board.token:
++        return {"ok": False, "error": "Has Edging is ticked, so the board needs an "
++                                      "edging name — the name the edging is ordered "
++                                      "under, e.g. WHITE"}
++    if board.has_edging and not board.edging_kinds:
++        return {"ok": False, "error": "Has Edging is ticked, so tick at least one of "
++                                      "PVC, 1mm, 2mm — or untick Has Edging"}
+     if old_id and old_id in existing:
+         lib = [board if b.id == old_id else b for b in lib]     # in place, order kept
+     elif board_id in existing:
+@@ -336,7 +355,8 @@
+ 
+ # What the library decides for a board in the project on screen. Price is not on
+ # the list: a job keeps the price it was quoted at ("Price capture").
+-LIVE_FIELDS = ("name", "board", "tape", "thickness", "grain", "picture")
++LIVE_FIELDS = ("name", "board", "tape", "thickness", "grain", "picture",
++               "has_edging", "edging_kinds", "colour")
+ 
+ 
+ def refresh_from_library(job, lib=None, only=None) -> list:
+diff -ruN a/cabinetgen/boards.py b/cabinetgen/boards.py
+--- a/cabinetgen/boards.py	2026-09-20 12:42:34.817973764 +0200
++++ b/cabinetgen/boards.py	2026-09-20 12:42:34.819663190 +0200
+@@ -20,12 +20,26 @@
+ still generated and never mapped per thickness. A board that leaves the token
+ blank generates off its name, which is right for a board whose name is already
+ the short one.
++
++A board also says whether it has edging at all ("Has Edging") and, if it does,
++which of the three it offers. A board that offers none — the 3 mm backing sheet
++— generates no tape name, is not offered as an edging colour, and puts nothing
++about edging on any drawing. Unticking keeps the token and the kinds in the file
++(the same discipline as every other tickbox here), so re-ticking restores them.
++
++The colour is what the board looks like on screen: one hex value, picked here
++and nowhere else. A picture, if one is ever added, is a field of this record
++too — the drawings read every board attribute from the library's copy in the
++job and never invent one.
+ """
+ import json
+ import os
++import re
+ from dataclasses import asdict, dataclass, field, fields
+ from typing import Dict, List, Optional
+ 
++from .model import NO_COLOUR      # a board nobody has coloured: neutral, not a finish
++
+ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ LIBRARY = os.path.join(ROOT, "boards.json")
+ 
+@@ -37,6 +51,21 @@
+ TAPE_KINDS = ("pvc", "1mm", "2mm")
+ TAPE_PREFIX = {"pvc": "PVC", "1mm": "1mm", "2mm": "2mm"}
+ 
++_HEX = re.compile(r"^#?([0-9a-fA-F]{6})$")
++
++
++def clean_colour(raw) -> str:
++    """'#RRGGBB' in lower case, or '' for anything that is not one. A colour is
++    picked, never typed, so a malformed one is dropped rather than repaired."""
++    m = _HEX.match(str(raw or "").strip())
++    return "#" + m.group(1).lower() if m else ""
++
++
++def clean_kinds(raw) -> List[str]:
++    """The ticked edging kinds, in the canonical order, without repeats."""
++    have = {str(k).strip().lower() for k in (raw or [])}
++    return [k for k in TAPE_KINDS if k in have]
++
+ 
+ @dataclass
+ class Board:
+@@ -47,16 +76,35 @@
+     grain: str = "plain"         # 'grain' locks every panel cut from it
+     price: float = 0.0           # last price per board
+     picture: str = ""            # optional; a path or a data URI
++    # "Has Edging", and which of PVC / 1mm / 2mm it offers. A record written
++    # before these existed has neither key and reads as edged with all three,
++    # which is what every job quoted before them was quoted with. Unticking keeps
++    # the kinds and the token: nothing is forgotten, only ignored.
++    has_edging: bool = True
++    edging_kinds: List[str] = field(default_factory=lambda: list(TAPE_KINDS))
++    colour: str = ""             # '#rrggbb'; what it looks like on screen
+ 
+     @property
+     def token(self) -> str:
+         """What the tape names are built from."""
+         return (self.tape or self.name).strip()
+ 
++    @property
++    def offered(self) -> List[str]:
++        """The edging kinds this board actually offers: none when it has no edging."""
++        return list(self.edging_kinds) if self.has_edging else []
++
++    @property
++    def shown_colour(self) -> str:
++        return self.colour or NO_COLOUR
++
+     def tape_name(self, kind: str) -> str:
+-        """`PVC WOOD`, `2mm WOOD` ... or '' when there is nothing to build from."""
++        """`PVC WOOD`, `2mm WOOD` ... or '' when the board does not offer that
++        edging or there is nothing to build a name from."""
+         token = self.token
+-        return f"{TAPE_PREFIX[kind]} {token}" if token else ""
++        if not token or kind not in self.offered:
++            return ""
++        return f"{TAPE_PREFIX[kind]} {token}"
+ 
+     @property
+     def grain_flag(self) -> int:
+@@ -67,6 +115,12 @@
+     known = {f.name for f in fields(Board)}
+     d = {k: v for k, v in (d or {}).items() if k in known}
+     d.setdefault("id", d.get("name", ""))
++    if "has_edging" in d:
++        d["has_edging"] = bool(d["has_edging"])
++    if "edging_kinds" in d:
++        d["edging_kinds"] = clean_kinds(d["edging_kinds"])
++    if "colour" in d:
++        d["colour"] = clean_colour(d["colour"])
+     return Board(**d)
+ 
+ 
+@@ -126,7 +180,9 @@
+     """
+     return {"board": board.name, "name": board.name, "tape": board.token,
+             "thickness": board.thickness, "grain": board.grain,
+-            "price": board.price, "picture": board.picture}
++            "price": board.price, "picture": board.picture,
++            "has_edging": board.has_edging, "edging_kinds": list(board.edging_kinds),
++            "colour": board.colour}
+ 
+ 
+ # --- which jobs use which board ---------------------------------------------
+diff -ruN a/cabinetgen/model.py b/cabinetgen/model.py
+--- a/cabinetgen/model.py	2026-09-20 12:42:34.826536396 +0200
++++ b/cabinetgen/model.py	2026-09-20 12:42:34.828267173 +0200
+@@ -133,11 +133,44 @@
+     return str(rec.get("tape") or rec.get("name") or rec.get("board") or "").strip()
+ 
+ 
++ALL_KINDS = tuple(TAPE_PREFIX)                     # ('pvc', '1mm', '2mm')
++NO_COLOUR = "#d9d6cf"      # a board nobody has coloured yet: neutral, not a finish
++
++
++def material_offers(materials: dict, key: str) -> tuple:
++    """The edging kinds this board offers, in the order PVC, 1mm, 2mm.
++
++    Empty when the board has no edging ("Has Edging" unticked in the library).
++    A record with neither key — every job written before the tickbox — offers
++    all three, which is what it was quoted with, so nothing already priced moves.
++    """
++    rec = material_record(materials, key)
++    if rec.get("has_edging") is False:
++        return ()
++    kinds = rec.get("edging_kinds")
++    if kinds is None:
++        return ALL_KINDS
++    return tuple(k for k in ALL_KINDS if k in kinds)
++
++
++def material_has_edging(materials: dict, key: str) -> bool:
++    return bool(material_offers(materials, key))
++
++
++def material_colour(materials: dict, key: str) -> str:
++    """The board's on-screen colour, '#rrggbb'. Read from the job's copy of the
++    library record and from nowhere else; a board with none is neutral."""
++    return str(material_record(materials, key).get("colour") or "") or NO_COLOUR
++
++
+ def tape_for(materials: dict, key: str, thickness: str) -> str:
+-    """`PVC WOOD`, `2mm WOOD` ... generated, never mapped. '' when the board has
+-    nothing to generate from, which the validator names rather than guessing."""
++    """`PVC WOOD`, `2mm WOOD` ... generated, never mapped. '' when the board does
++    not offer that edging, or has nothing to generate a name from — either way the
++    validator names it rather than guessing."""
+     token = material_token(materials, key)
+-    return f"{TAPE_PREFIX[thickness]} {token}" if token else ""
++    if not token or thickness not in material_offers(materials, key):
++        return ""
++    return f"{TAPE_PREFIX[thickness]} {token}"
+ 
+ 
+ def material_price(materials: dict, key: str) -> float:
+diff -ruN a/cabinetgen/validate.py b/cabinetgen/validate.py
+--- a/cabinetgen/validate.py	2026-09-20 12:42:34.836034452 +0200
++++ b/cabinetgen/validate.py	2026-09-20 12:43:06.428230258 +0200
+@@ -10,7 +10,7 @@
+ from .engine import front_stack_check, generate_cabinet
+ from .export_plaza import effective_price
+ from .model import (TAPE_PREFIX, Cabinet, Job, Panel, grain_of, material_board,
+-                    material_thickness, tape_for)
++                    material_offers, material_thickness, material_token, tape_for)
+ from .room import (above_ceiling, blocked_openings, cab_corner_outline,
+                    clashes as room_clashes, closure_error, corner_offset,
+                    gaps as room_gaps, geometry, overlaps as room_overlaps,
+@@ -21,6 +21,9 @@
+ CRITICAL = "critical"
+ WARNING = "warning"
+ 
++# Tags an issue that says a cabinet needs an edging its board does not offer.
++EDGING_REF = "EDGING"
++
+ # Above this many boards on one project, say so. A guideline about cost and
+ # complexity — every extra board is another part sheet and another offcut pile —
+ # and deliberately not a limit.
+@@ -53,12 +56,16 @@
+     out += _front_stacks(job.cabinets, std)
+     out += _shelf_clears_back(job.cabinets, panels, std)
+     out += _labels_unique(panels)
+-    out += _edge_materials(job, panels)
++    # asked first, so a panel whose edging is missing for a reason already named
++    # against its cabinet is not reported a second time, panel by panel
++    tape_issues = _boards_and_tapes(job)
++    out += _edge_materials(job, panels,
++                           {i.where for i in tape_issues if i.ref == EDGING_REF})
+     out += _grain_on_boards(job, panels)
+     out += _zero_quantities(panels)
+     out += _drawer_boxes(job.cabinets)
+     out += _project_boards(job)
+-    out += _boards_and_tapes(job)
++    out += tape_issues
+     out += _carcass_thickness(job, std)
+     out += _board_prices(job, panels)
+     out += _supports(job.cabinets)
+@@ -160,7 +167,7 @@
+             for lab, v in sizes.items() if len(v) > 1]
+ 
+ 
+-def _edge_materials(job, panels):
++def _edge_materials(job, panels, covered=frozenset()):
+     """D6 / W10 — 'SOLID' is a board, not a tape; '2mm WOOD' and '2mm PVC Wood'
+     are the same thing.
+ 
+@@ -179,7 +186,8 @@
+         if p.edge_material not in allowed:
+             out.append(Issue(WARNING, p.label,
+                              f"edge material {p.edge_material!r} is not in the lookup", "W10"))
+-        if (p.edge_l or p.edge_w) and not p.edge_material:
++        if ((p.edge_l or p.edge_w) and not p.edge_material
++                and str(p.cabinet) not in covered):
+             out.append(Issue(CRITICAL, p.label, "edges specified but no edge material"))
+     return out
+ 
+@@ -342,9 +350,25 @@
+         for field, override, board, thickness, bands in wants:
+             if override is not None:
+                 continue                   # this cabinet was told what to use
+-            if board in (mats or {}) and not tape_for(mats, board, thickness):
++            if board not in (mats or {}) or tape_for(mats, board, thickness):
++                continue
++            name = material_board(mats, board)
++            if thickness not in material_offers(mats, board):
++                # The board says it has no such edging. That is a decision made
++                # on the Boards tab, so the cut list cannot quietly go out
++                # without the tape, or with a name the board never offered.
++                offered = [TAPE_PREFIX[k] for k in material_offers(mats, board)]
++                has = (f"only offers {', '.join(offered)}" if offered
++                       else "has no edging (Has Edging is off)")
++                out.append(Issue(CRITICAL, str(c.number),
++                                 f"{bands} need {TAPE_PREFIX[thickness]} edging in "
++                                 f"{name!r}, which {has}. Tick "
++                                 f"{TAPE_PREFIX[thickness]} on that board in the "
++                                 f"Boards tab, or choose another board here",
++                                 EDGING_REF))
++            elif not material_token(mats, board):
+                 out.append(Issue(WARNING, str(c.number),
+-                                 f"{material_board(mats, board)!r} has no name to build "
++                                 f"{name!r} has no name to build "
+                                  f"edging from, so {field} cannot be generated for "
+                                  f"{bands} — give the board an edging name in the "
+                                  f"library, or override the edging on this cabinet"))
