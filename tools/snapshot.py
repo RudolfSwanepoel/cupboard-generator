@@ -74,7 +74,11 @@ def take():
             svgs["plan"] = plan_svg(job)
         snap[name] = {
             "panels": keyed(panels),
-            "issues": [asdict(i) for i in issues],
+            # the four fields every issue has always had: the check id and the
+            # acceptance marks added on 22 September 2026 would otherwise make
+            # every baseline taken before them read as a change
+            "issues": [{k: asdict(i)[k] for k in ("level", "where", "message", "ref")}
+                       for i in issues],
             "summary": json.loads(json.dumps(s, default=str)),
             "total": est["total_incl_vat"],
             "svg": {k: hashlib.sha256(v.encode()).hexdigest() for k, v in svgs.items()},

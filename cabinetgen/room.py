@@ -904,6 +904,12 @@ def return_profiles(job, wall_id: str, std: Standard = STANDARD) -> List[dict]:
     The opposite wall is not included: it is behind anyone looking at this one.
     Nothing here is a new dimension — it is the same outline the plan draws, seen
     from the side.
+
+    Which walls are "either side" comes off the chain of corners — the wall
+    before this one and the wall after it, and round the end only in a closed
+    room — never off a letter, so a three- or four-wall room answers the same
+    way as two. Placed PANELS on those walls are included (`panel` True): an end
+    cap or a bulkhead on the return wall is seen end on exactly as a carcass is.
     """
     rm = job.room
     if rm is None:
@@ -921,13 +927,15 @@ def return_profiles(job, wall_id: str, std: Standard = STANDARD) -> List[dict]:
     here = _wall(rm, wall_id)
     (sx, sy), (dx, dy), (nx, ny) = wall_frames(rm)[here.id]
     out = []
-    for cab, p, lay in placed(job):
+    items = ([(cab, p, lay, False) for cab, p, lay in placed(job)] +
+             [(cab, p, "panel", True) for cab, p in placed_panels(job)])
+    for cab, p, lay, is_panel in items:
         if p.wall not in beside:
             continue
-        g = geometry(cab, std)
+        g = geometry(cab, std, job.materials)
         pts = []
         for fx, fy in g.footprint:
-            wx, wy, _ = to_world(rm, p.wall, p.x + fx, fy)
+            wx, wy, _ = to_world(rm, p.wall, p.x + fx, fy + getattr(p, "y", 0))
             pts.append(((wx - sx) * dx + (wy - sy) * dy,
                         (wx - sx) * nx + (wy - sy) * ny))
         if not pts:
@@ -937,6 +945,7 @@ def return_profiles(job, wall_id: str, std: Standard = STANDARD) -> List[dict]:
         if x1 <= x0 or min(y for _, y in pts) < -1:
             continue                     # not in front of this wall at all
         out.append({"cabinet": cab.number, "wall": p.wall, "layer": lay,
+                    "panel": is_panel,
                     "x0": int(round(x0)), "x1": int(round(x1)),
                     "z0": carcass_z(cab, p, std), "height": g.height,
                     "out": int(round(min(y for _, y in pts)))})
@@ -1848,13 +1857,28 @@ def tip_problems(job, std: Standard = STANDARD) -> List[Tuple[int, int, int, int
         return []
     out = []
     for cab, p, _lay in placed(job):
-        g = geometry(cab, std)
-        legs = std.leg_height if stands_on_legs(cab, p) else 0
-        top = carcass_z(cab, p, std) + g.height
-        need = tip_clearance(g.height, g.tip_depth, legs, std.leg_setback)
+        t = tip_inputs(cab, p, rm.ceiling, std)
+        top = t["underside"] + t["height"]
+        need = tip_clearance(t["height"], t["depth"], t["legs"], t["setback"])
         if top <= rm.ceiling < need:
             out.append((cab.number, top, need, rm.ceiling))
     return out
+
+
+def tip_inputs(cab, p, ceiling, std: Standard = STANDARD) -> dict:
+    """Every figure the tip-up check reads, and nothing else.
+
+    `tip_problems` works from exactly this, and so does the fingerprint an
+    accepted tip-up critical is stored with (`validate.fingerprint`) — so an
+    acceptance lapses when, and only when, something the check used has moved.
+    Height and depth are the panel set's (`geometry`), never the declared ones.
+    """
+    g = geometry(cab, std)
+    return {"height": g.height, "depth": g.tip_depth,
+            "legs": std.leg_height if stands_on_legs(cab, p) else 0,
+            "setback": std.leg_setback,
+            "underside": carcass_z(cab, p, std),
+            "ceiling": ceiling}
 
 
 @dataclass

@@ -2,7 +2,7 @@
 import json
 from dataclasses import asdict, fields
 
-from .model import (Cabinet, Drawer, GapChoice, Job, Obstruction, Opening, Panel,
+from .model import (Acceptance, Cabinet, Drawer, GapChoice, Job, Obstruction, Opening, Panel,
                     PanelSpec, Placement, PlinthChoice, Room, Support, Wall)
 
 
@@ -132,6 +132,10 @@ def job_to_dict(job: Job) -> dict:
         d["gaps"] = [asdict(g) for g in job.gaps]
     if job.plinths:
         d["plinths"] = [asdict(p) for p in job.plinths]
+    # Only when one has been given: a job with none is byte-identical to one
+    # written before criticals could be accepted.
+    if job.acceptances:
+        d["acceptances"] = [asdict(a) for a in job.acceptances]
     return d
 
 
@@ -152,6 +156,8 @@ def job_from_dict(d: dict) -> Job:
         gaps=[GapChoice(**_only_known(GapChoice, g)) for g in d.get("gaps", [])],
         plinths=[PlinthChoice(**_only_known(PlinthChoice, p))
                  for p in d.get("plinths", [])],
+        acceptances=[Acceptance(**_only_known(Acceptance, a))
+                     for a in d.get("acceptances", []) if isinstance(a, dict)],
     )
 
 

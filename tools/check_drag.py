@@ -945,6 +945,26 @@ def main() -> int:
           [i for i in validate(plain, []) if "overlap" in i.message or "fouls" in i.message],
           [])
 
+    # Brief item 5, 22 September 2026: a blind corner is meant mainly for base
+    # and wall-hung units, so the engine must not contradict itself on one. A
+    # shelf DERIVED by the engine (no depth typed anywhere) has to clear the
+    # back it derived, on every kind. The "shelf 968 deep fouls the back at 965"
+    # that prompted this came off a MITRE's mitred shelf, not a blind corner,
+    # and is awaiting a ruling — it is deliberately not pinned here.
+    print("\na blind corner's derived shelves clear its back, base, wall and tall")
+    fouls = []
+    for kind, h, d in (("base", 790, 600), ("upper", 720, 600), ("upper", 720, 350),
+                       ("tall", 2400, 1000)):
+        bc = Cabinet(number=1, width=1000, height=h, depth=d, kind=kind, doors=1,
+                     shelves=3, fixed_shelves=1, corner_unit=True,
+                     corner_style="blind", corner_hand="L", blind_width=500)
+        bj = Job("b", cabinets=[bc])
+        bp = generate_job(bj)
+        if not any(p.role == "Shelve" for p in bp):
+            fouls.append((kind, d, "no shelf cut"))
+        fouls += [(kind, d, str(i)) for i in validate(bj, bp) if "fouls the back" in i.message]
+    check("not one fouls the back", fouls, [])
+
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0
 

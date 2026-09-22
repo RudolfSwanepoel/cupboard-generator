@@ -25,6 +25,10 @@ python tools\check_pictures.py
 echo.
 python tools\check_drag.py
 echo.
+python tools\check_accept.py
+echo.
+python tools\check_elevation.py
+echo.
 echo ---------------------------------------------
 echo You want to see: 22 cabinets reproduce exactly
 echo             and: 0 wrong
