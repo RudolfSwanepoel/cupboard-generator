@@ -83,7 +83,11 @@ class Board:
     thickness: int = 16          # 16 | 25 (3 exists on the backing board)
     grain: str = "plain"         # 'grain' locks every panel cut from it
     price: float = 0.0           # last price per board
-    picture: str = ""            # optional; a path or a data URI
+    # Optional. A path relative to the repo (`Pictures/Storm Grey.jpg`) or a
+    # data: URI. `cabinetgen.pictures` is what puts it in that shape and what
+    # turns it into the URL a page asks for -- never an absolute path, because
+    # this file is shared through git.
+    picture: str = ""
     # "Has Edging", and which of PVC / 1mm / 2mm it offers. A record written
     # before these existed has neither key and reads as edged with all three,
     # which is what every job quoted before them was quoted with. Unticking keeps

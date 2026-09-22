@@ -15,7 +15,7 @@ from http.server import ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app.api import Handler  # noqa: E402
+from app.api import Handler, set_window  # noqa: E402
 
 
 def serve(port: int) -> ThreadingHTTPServer:
@@ -55,7 +55,11 @@ def main():
             pass
         return
 
-    webview.create_window("CupboardApp", url, width=1360, height=900)
+    # The handlers need the window for one thing only: the native Open dialog
+    # behind Browse… on a board picture. Everything else is the HTTP server, and
+    # under --no-window or the browser fallback there is simply no window — the
+    # picker says so and the browser's own file input takes over.
+    set_window(webview.create_window("CupboardApp", url, width=1360, height=900))
     webview.start()
 
 

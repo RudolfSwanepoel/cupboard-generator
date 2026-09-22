@@ -135,6 +135,20 @@
           border:1px solid var(--rule)}
   .swatch.none{background:repeating-linear-gradient(45deg,var(--carc),var(--carc) 4px,
                var(--panel) 4px,var(--panel) 8px)}
+  /* The board picture: Browse…, or drop the image straight on it. A drop on
+     this backend hands over the file's CONTENTS and no path, so the bytes go
+     to the server and it copies them into Pictures/ — see cabinetgen/pictures.py. */
+  .picdrop{display:flex;gap:10px;align-items:flex-start;margin-top:4px;padding:8px;
+           border:1px dashed var(--rule);border-radius:5px}
+  .picdrop.empty{opacity:.92}
+  .picdrop.over{border-color:var(--ok);border-style:solid;
+                background:rgba(60,160,120,.08)}
+  .picpreview{width:72px;height:72px;flex:0 0 auto;border-radius:4px;
+              object-fit:cover;border:1px solid var(--rule);display:block}
+  .picpreview.none{background:repeating-linear-gradient(45deg,var(--carc),var(--carc) 5px,
+                   var(--panel) 5px,var(--panel) 10px)}
+  .picdrop input[readonly]{opacity:.8}
+  .note .bad{color:var(--crit)}
   header .grow,.matline .grow{flex:1}
   .orients{display:flex;gap:6px;flex-wrap:wrap}
   .orient{display:flex;align-items:center;gap:6px;padding:5px 8px;
@@ -399,6 +413,16 @@ window.addEventListener("beforeunload", (e) => {
   e.preventDefault();
   e.returnValue = "";
 });
+
+/* A file dropped anywhere but on the board-picture zone would otherwise make the
+   window navigate to that file, which throws the whole app — and the unsaved
+   job with it — away. The zone stops the event before this sees it.          */
+["dragover", "drop"].forEach((ev) => window.addEventListener(ev, (e) => {
+  e.preventDefault();
+  if (ev === "drop" && e.dataTransfer && e.dataTransfer.files.length) {
+    toast("drop a board picture on the picture box in the Boards tab", true);
+  }
+}));
 
 // True when the edits should be thrown away: either there are none, or the
 // operator said so. Asked before anything replaces the job on screen.
@@ -2133,8 +2157,12 @@ function drawBoards() {
     return `<tr>
       <td><input type="checkbox" data-pick="${esc(b.id)}" ${inJob ? "checked" : ""}
            style="width:auto" title="use this board in this project"></td>
-      <td>${b.picture
-            ? `<img src="${esc(b.picture)}" alt="" class="swatch">`
+      <td>${b.picture && b.picture_url
+            ? `<img src="${esc(b.picture_url)}" alt="" class="swatch"
+                    title="${esc(b.picture)}">`
+            : b.picture
+              ? `<span class="swatch none" title="the picture is not there: ${
+                   esc(b.picture)}"></span>`
             : b.colour
               ? `<span class="swatch" style="background:${esc(b.colour)}"
                        title="${esc(b.colour)}"></span>`
@@ -2243,8 +2271,32 @@ function drawBoardEditor() {
           </div>
           <span class="note" id="bf-colournote"></span></div>
         <div class="f wide" style="grid-column:2/-1"><label>Picture (optional)</label>
-          <input id="bf-picture" value="${esc(b.picture || "")}"
-                 placeholder="a file path or a data: URI — optional"></div>
+          <div id="bf-drop" class="picdrop${b.picture ? "" : " empty"}">
+            ${b.picture && b.picture_url
+              ? `<img id="bf-picpreview" src="${esc(b.picture_url)}" alt=""
+                      class="picpreview">`
+              : `<span id="bf-picpreview" class="picpreview none"></span>`}
+            <div style="flex:1;min-width:0">
+              <div class="leaf">
+                <button id="bf-picbrowse" type="button">Browse…</button>
+                <button id="bf-picclear" type="button"
+                        title="no picture">Clear</button>
+                <input type="file" id="bf-picfile" accept="image/*"
+                       style="display:none">
+              </div>
+              <input id="bf-picture" value="${esc(b.picture || "")}" readonly
+                     title="set with Browse… or by dropping an image here"
+                     placeholder="none — Browse… or drop an image here">
+              <span class="note" id="bf-picnote">${b.picture
+                  ? (b.picture_ok
+                      ? `copied into ${esc(S.def.pictures_dir || "Pictures")}/ and
+                         stored relative to the project, so it works on both machines`
+                      : `<b class="bad">that file is not there</b> — Browse… for it
+                         again, or Clear`)
+                  : `drop an image here, or Browse… — it is copied into
+                     ${esc(S.def.pictures_dir || "Pictures")}/ for you`}</span>
+            </div>
+          </div></div>
       </div>
 
       <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
@@ -2333,8 +2385,97 @@ function drawBoardEditor() {
     $("bf-colour").value = "";
     refreshColour();
   });
+  wirePicture();
   refreshEdgingForm();
   refreshColour();
+}
+
+/* The board picture. Two ways in and one answer: whichever is used, the SERVER
+   copies the file into Pictures/ and hands back the relative path to store, so
+   nothing machine-specific reaches boards.json — which is shared through git.
+
+   Browse… is pywebview's native Open dialog, opened by /api/pick-picture on the
+   desktop window. There is no window under --no-window or in the browser, so
+   that reply says `no_window` and the hidden file input takes over; both arrive
+   at /api/drop-picture, which is also where a drop lands. A drop gives us the
+   file's CONTENTS and no path — WebView2 does not expose File.path and
+   pywebview 6.2.1 has no file-drop event — so the bytes are what is sent.     */
+function wirePicture() {
+  const drop = $("bf-drop"), field = $("bf-picture"), note = $("bf-picnote");
+  if (!drop || !field) return;
+
+  const settle = (r) => {
+    if (!r || !r.ok) {
+      if (r && r.cancelled) return;              // closing the dialog is not a fault
+      toast((r && r.error) || "the picture could not be read", true);
+      return;
+    }
+    field.value = r.picture;
+    S.libEdit.picture = r.picture;
+    S.libEdit.picture_url = r.url;
+    S.libEdit.picture_ok = true;
+    const old = $("bf-picpreview");
+    const img = document.createElement("img");
+    img.id = "bf-picpreview";
+    img.className = "picpreview";
+    img.alt = "";
+    img.src = r.url + (r.url.indexOf("data:") === 0 ? "" : "?t=" + Date.now());
+    old.replaceWith(img);
+    drop.classList.remove("empty");
+    note.textContent = "copied into " + ((S.def && S.def.pictures_dir) || "Pictures") +
+      "/ as " + r.name + " — stored relative to the project, so it works on " +
+      "both machines. Save the board to keep it.";
+  };
+
+  const sendBytes = (file) => {
+    const fr = new FileReader();
+    fr.onload = async () => {
+      settle(await post("/api/drop-picture",
+                        {name: file.name, data: String(fr.result)}));
+    };
+    fr.onerror = () => toast("that file could not be read", true);
+    fr.readAsDataURL(file);
+  };
+
+  $("bf-picbrowse").addEventListener("click", async () => {
+    const r = await post("/api/pick-picture", {});
+    if (r && r.no_window) { $("bf-picfile").click(); return; }
+    settle(r);
+  });
+  $("bf-picfile").addEventListener("change", (e) => {
+    if (e.target.files && e.target.files[0]) sendBytes(e.target.files[0]);
+    e.target.value = "";                      // so the same file can be picked twice
+  });
+  $("bf-picclear").addEventListener("click", () => {
+    field.value = "";
+    S.libEdit.picture = "";
+    S.libEdit.picture_url = "";
+    S.libEdit.picture_ok = false;
+    const span = document.createElement("span");
+    span.id = "bf-picpreview";
+    span.className = "picpreview none";
+    $("bf-picpreview").replaceWith(span);
+    drop.classList.add("empty");
+    note.textContent = "no picture. Save the board to keep it that way.";
+  });
+
+  // The drop itself. dragover has to be prevented or the page navigates to the
+  // file instead of handing it over, which is the browser default.
+  ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    drop.classList.add("over");
+  }));
+  ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    drop.classList.remove("over");
+  }));
+  drop.addEventListener("drop", (e) => {
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) sendBytes(f);
+    else toast("nothing to take from that drop — drop an image file", true);
+  });
 }
 
 function drawSwapPicker() {

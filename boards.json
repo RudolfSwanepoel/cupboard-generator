@@ -25,14 +25,14 @@
       "thickness": 16,
       "grain": "grain",
       "price": 999,
-      "picture": "",
+      "picture": "Pictures/Brookhill.png",
       "has_edging": true,
       "edging_kinds": [
         "pvc",
         "1mm",
         "2mm"
       ],
-      "colour": "#d2b36a"
+      "colour": "#c6a65d"
     },
     {
       "id": "BACK",
@@ -57,7 +57,7 @@
       "thickness": 16,
       "grain": "plain",
       "price": 1100,
-      "picture": "\"C:\\Dev\\CupboardApp\\Pictures\\Storm Grey.jpg\"",
+      "picture": "Pictures/Storm Grey.jpg",
       "has_edging": true,
       "edging_kinds": [
         "pvc",

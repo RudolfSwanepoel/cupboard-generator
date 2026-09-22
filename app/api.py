@@ -11,9 +11,11 @@ import threading
 import time
 from dataclasses import asdict, fields as dc_fields, replace
 from http.server import BaseHTTPRequestHandler
+from urllib.parse import unquote
 
 from cabinetgen import boards as B
 from cabinetgen import nest as N
+from cabinetgen import pictures as PIC
 from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
                                 opening_for, remainder, split_pair, stack)
 from cabinetgen.engine import generate_job, panel_of
@@ -43,10 +45,23 @@ from cabinetgen.validate import (ALLOWED_EDGE, BOARD_GUIDELINE, blocking,
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JOBS_DIR = os.path.join(ROOT, "jobs")
-OUT_DIR = os.path.join(ROOT, "out")
+OUT_DIR = os.path.join(ROOT, "output")
+PICTURES_DIR = os.path.join(ROOT, PIC.DIRNAME)
 
 # nest_job records its winning heuristic in module globals, so one nest at a time.
 NEST_LOCK = threading.Lock()
+
+# The pywebview window, when there is one. `run_app.py` hands it over after
+# creating it; it is None under `--no-window` and in the browser fallback, and
+# `pick_picture` says so rather than pretending a dialog opened. Nothing else
+# in this module touches the GUI.
+WINDOW = None
+
+
+def set_window(win):
+    """Let the handlers reach the desktop window, for the native file dialog."""
+    global WINDOW
+    WINDOW = win
 
 
 # --- helpers ---------------------------------------------------------------
@@ -140,6 +155,10 @@ def defaults(payload):
         "edging_kinds": list(B.TAPE_KINDS),
         "edging_prefix": dict(B.TAPE_PREFIX),
         "no_colour": NO_COLOUR,
+        # Where a board picture is kept. Said here so the editor can name
+        # the folder without holding its own copy of the answer.
+        "pictures_dir": PIC.DIRNAME,
+
         "grains": list(B.GRAINS),
         "board_guideline": BOARD_GUIDELINE,
         "opening_kinds": ["door", "window", "arch"],
@@ -317,6 +336,10 @@ def board_list(payload):
                             tapes={k: b.tape_name(k) for k in B.TAPE_KINDS},
                             offered=b.offered, shown_colour=b.shown_colour,
                             thin=b.is_thin,
+                            # Derived, like `tapes` and `offered`: the browser is
+                            # never told to work a URL out from a stored path.
+                            picture_url=PIC.url_for(b.picture, ROOT),
+                            picture_ok=PIC.readable(b.picture, ROOT),
                             used_by=used_by(usage, b.id))
                        for b in lib],
             "unreadable": usage.unreadable,
@@ -392,6 +415,24 @@ def board_save(payload):
     if "colour" in d and str(d.get("colour") or "").strip() and not B.clean_colour(d.get("colour")):
         return {"ok": False, "error": "the colour must be a hex value like #b4835a, "
                                       "or left empty for no colour set"}
+    # The picture, however it was entered. Browse and a drop have already put
+    # the file in `Pictures/` and handed back the relative path, so this is for
+    # the one that was typed or pasted — and for a record written before any of
+    # that existed. Cleaned, then copied in if it is somewhere else, then
+    # refused if it names no readable image. `boards.json` is shared through
+    # git, so an absolute path in it is one machine's answer.
+    if "picture" in d:
+        pic = PIC.clean(d.get("picture"), ROOT)
+        if pic and not PIC.is_data_uri(pic):
+            try:
+                pic = PIC.install(pic if os.path.isabs(pic)
+                                  else os.path.join(ROOT, pic), ROOT)
+            except (ValueError, OSError) as exc:
+                return {"ok": False,
+                        "error": f"the picture is no good: {exc} — use Browse, or "
+                                 f"drop the image on the swatch, and it will be "
+                                 f"copied into {PIC.DIRNAME}/ for you"}
+        d["picture"] = pic
     board = B.board_from_dict(d)
     # A board that says it has edging has to say what it is called and what it
     # offers: the edging name is the only thing the tape names are built from,
@@ -479,6 +520,74 @@ def board_delete(payload):
                          f"leave nothing to select it from again"}
     B.save([b for b in B.load() if b.id != board_id])
     return {"ok": True}
+
+
+# --- board pictures ---------------------------------------------------------
+#
+# Two ways in, one answer. Both end at `cabinetgen.pictures`, which copies the
+# file into `Pictures/` and hands back the relative path to store, so neither
+# route can leave a machine-specific path in a file that is shared through git.
+# A typed path is still accepted and cleaned on save — the field is not going
+# away — but nothing has to be typed any more.
+
+def _picture_reply(stored: str) -> dict:
+    """What both entry routes hand back: what to store, and what to draw."""
+    return {"ok": True, "picture": stored, "url": PIC.url_for(stored, ROOT),
+            "name": os.path.basename(stored)}
+
+
+def pick_picture(payload):
+    """Open the native Open dialog and take the chosen image into `Pictures/`.
+
+    The dialog belongs to the desktop window, so there has to be one. Under
+    `--no-window`, or in the browser fallback, this says so plainly (`no_window`)
+    and the browser falls back to its own file input, which arrives at
+    `drop_picture` with the same result. It is never a silent no-op.
+    """
+    win = WINDOW
+    if win is None:
+        return {"ok": False, "no_window": True,
+                "error": "there is no desktop window to open a dialog on — "
+                         "choose the file in the browser instead"}
+    try:
+        import webview
+        chosen = win.create_file_dialog(webview.FileDialog.OPEN,
+                                        directory=PICTURES_DIR
+                                        if os.path.isdir(PICTURES_DIR) else "",
+                                        allow_multiple=False,
+                                        file_types=PIC.FILE_TYPES)
+    except Exception as exc:                       # a GUI that will not co-operate
+        return {"ok": False, "error": f"the file dialog would not open: {exc}"}
+    if not chosen:
+        return {"ok": False, "cancelled": True}    # not an error; say nothing loud
+    try:
+        return _picture_reply(PIC.install(chosen[0], ROOT))
+    except (ValueError, OSError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def drop_picture(payload):
+    """Take in a picture that arrived as bytes rather than as a path.
+
+    This is what a drag-and-drop gives us on this backend: WebView2 does not
+    expose a dropped `File`'s path to the page and pywebview 6.2.1 has no
+    file-drop event, so the contents are the only thing there is. The browser's
+    own file input comes down the same route, which is the `pick_picture`
+    fallback.
+    """
+    import base64
+    name = str(payload.get("name") or "")
+    raw = str(payload.get("data") or "")
+    if "," in raw and raw.strip().lower().startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    try:
+        blob = base64.b64decode(raw, validate=False)
+    except (ValueError, TypeError) as exc:
+        return {"ok": False, "error": f"that file did not arrive intact: {exc}"}
+    try:
+        return _picture_reply(PIC.install_bytes(name, blob, ROOT))
+    except (ValueError, OSError) as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def board_select(payload):
@@ -1144,7 +1253,7 @@ def elevation(payload):
 
 
 def _safe_name(name) -> str:
-    """A job or wall name fit to go into a file name inside out/.
+    """A job or wall name fit to go into a file name inside output/.
 
     Both come from the job file, and a name like '../x' must not be able to
     write outside the export folder.
@@ -1238,6 +1347,8 @@ ROUTES = {
     "/api/board-delete": board_delete,
     "/api/board-select": board_select,
     "/api/board-swap": board_swap,
+    "/api/pick-picture": pick_picture,
+    "/api/drop-picture": drop_picture,
     "/api/export": export,
     "/api/jobs": job_list,
     "/api/save": job_save,
@@ -1285,7 +1396,36 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, f"cannot read index.html: {exc}", "text/plain")
         if path in ROUTES:
             return self._dispatch(path, {})
+        if path.startswith("/pictures/"):
+            return self._picture(path[len("/pictures/"):])
         self._send(404, "not found", "text/plain")
+
+    def _picture(self, raw):
+        """Serve one board picture out of `Pictures/`, and nothing else.
+
+        The page is served over http, so an `<img src>` naming a Windows path
+        resolves against this origin and 404s — which is why no board picture
+        has ever displayed. This is the route that answers.
+
+        It is a BASENAME lookup into one flat folder, never a path: the name
+        comes from a file somebody can edit, so it may not name a parent, a
+        drive or anything outside the folder. The extension has to be one the
+        browser would draw, which also keeps this from becoming a way to read
+        the repo.
+        """
+        name = PIC.safe_name(unquote(raw))
+        if not name or os.path.splitext(name)[1].lower() not in PIC.TYPES:
+            return self._send(404, "not a board picture", "text/plain")
+        full = os.path.join(PICTURES_DIR, name)
+        if os.path.normcase(os.path.dirname(os.path.abspath(full))) != \
+           os.path.normcase(os.path.abspath(PICTURES_DIR)):
+            return self._send(404, "not a board picture", "text/plain")
+        try:
+            with open(full, "rb") as fh:
+                body = fh.read()
+        except OSError:
+            return self._send(404, f"no picture {name!r}", "text/plain")
+        self._send(200, body, PIC.content_type(name))
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
