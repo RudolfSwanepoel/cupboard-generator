@@ -33,7 +33,8 @@ from cabinetgen.render import (elevation_svg, pictures_drawn, plan_svg,
                                wall_elevation_svg)
 from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth,
                              arm_shelf_length, arm_shelf_max_depth,
-                             blind_door_width, blind_opening, carcass_z,
+                             blind_door_width, blind_opening,
+                             blind_panel_height, blind_spans, carcass_z,
                              clashes as room_clashes,
                              closure_error, free_x, gaps as room_gaps, geometry,
                              layer_of, mitre_blank, mitre_inner_span, mitre_legs,
@@ -159,9 +160,10 @@ def defaults(payload):
                      "notch that takes two doors. Shape only: the construction "
                      "is not decided, so it cuts nothing yet."},
             {"key": "blind", "name": "Blind",
-             "hint": "a straight cupboard with a flush panel across the corner "
-                     "end and one door at the far end. The run on the return "
-                     "wall is ordinary cabinets and is no part of this unit."},
+             "hint": "a straight cupboard with a flush panel INSIDE the corner "
+                     "end, top to bottom, and one door at the far end lapping "
+                     "onto it. The run on the return wall is ordinary cabinets "
+                     "and is no part of this unit."},
         ],
         # Which end of the unit stands in the corner, as you face it in the room.
         # Wall-local x runs left to right on the wall elevation, and 'L'/'R' here
@@ -247,7 +249,7 @@ def _geometry_info(job, cab, std):
             # The corner unit, as the engine reads it. Every figure here is
             # derived — the editor shows them and works out none of them, which
             # is why the Size fields can be greyed and still say something true.
-            "corner": _corner_info(cab, std),
+            "corner": _corner_info(cab, std, job.materials),
             "drawers_on": bool(cab.drawer_list),
             "doors_on": bool(cab.door_count),
             "door_count": cab.door_count,
@@ -369,7 +371,7 @@ def corner_field_problems(cab, std) -> dict:
     return out
 
 
-def _corner_info(cab, std):
+def _corner_info(cab, std, materials=None):
     """What the engine makes of this cabinet's corner measurements.
 
     `ticked` and `kind` are the two halves of the question the Corner unit
@@ -412,10 +414,25 @@ def _corner_info(cab, std):
             "hinge_clearance": std.hinge_clearance,
         })
     elif cab.corner_kind == "blind":
+        spans = blind_spans(cab, std)
         out.update({
             "blind_width": cab.blind_width,
             "opening": blind_opening(cab, std),
             "door_width": blind_door_width(cab, std),
+            # The flush panel, as the cut list carries it: the line it cuts, the
+            # board it is cut from and the one edge it is banded on. The editor
+            # shows these and works out none of them.
+            "blind_height": blind_panel_height(cab, std),
+            "blind_board": cab.blind_panel_board,
+            "blind_board_set": cab.blind_board,
+            "blind_edge_kind": cab.blind_edge_thickness,
+            "blind_edge_kind_set": cab.blind_edge_kind,
+            "blind_edge_name": cab.blind_tape(materials or {}),
+            # Where the three parts sit across the front, in cabinet-local mm,
+            # so the plan diagram draws the engine's layout rather than laying
+            # the inset panel and the overlay door out for itself.
+            "spans": ({"side": list(spans[0]), "blind": list(spans[1]),
+                       "door": list(spans[2])} if spans else None),
         })
     return out
 

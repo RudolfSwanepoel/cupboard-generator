@@ -510,6 +510,58 @@ def blind_door_width(cab, std: Standard = STANDARD) -> Optional[int]:
     return opening + 2 * std.board_t - std.door_single_gap
 
 
+def blind_panel_height(cab, std: Standard = STANDARD) -> Optional[int]:
+    """A blind unit's flush panel, top to bottom: H - 2t.
+
+    The panel sits INSIDE the carcass at the corner end, between the corner-end
+    side panel and the opening, with its face flush with the carcass front edges
+    so the whole front reads as one flush face (ruled 22 September 2026). It runs
+    between the top and the bottom, which is H - 2t on a tall or a wall unit.
+
+    A BASE unit has no top, and the figure is the same: the panel stands on the
+    bottom and runs up to the underside of the front support, which is cut from
+    the same board and lies flat with its face flush with the carcass top edge.
+    That is the same H - 2t the engine already takes as a divider's default
+    height, for the same reason, so nothing here is a second answer to it.
+
+        blind_panel_height(EXAMPLE_BLIND)  ->  688
+    """
+    if cab.corner_kind != "blind" or not (cab.height or 0) > 0:
+        return None
+    return int(cab.height) - 2 * std.board_t
+
+
+def blind_spans(cab, std: Standard = STANDARD):
+    """Where a blind unit's three visible parts sit across its front.
+
+    `(side, blind, door)`, each a `(start, end)` in cabinet-local mm from the
+    unit's left edge as you face it - the frame `geometry`, the plan diagram and
+    the wall elevation all use. Both drawings read this rather than laying the
+    parts out themselves, so they cannot disagree with each other or with the
+    cut list.
+
+    * SIDE  - the corner-end side panel's front edge, one board wide.
+    * BLIND - the flush panel, the full B, inside the carcass with its face on
+      the front line. It starts one board in from the corner end, which is what
+      changed on 22 September 2026: it used to be drawn across the corner end
+      with no side beyond it.
+    * DOOR  - an ordinary overlay door, half the single-door gap in from the far
+      end, lapping the far side panel and the blind panel's face by
+      `t - door_single_gap / 2` each. Its WIDTH is `blind_door_width` and is not
+      derived again here; the inset construction did not move it.
+
+        blind_spans(EXAMPLE_BLIND)  ->  ((984, 1000), (484, 984), (1.5, 498.5))
+    """
+    dw = blind_door_width(cab, std)
+    if dw is None or dw <= 0:
+        return None
+    w, t, b = int(cab.width), std.board_t, int(cab.blind_width)
+    gap = std.door_single_gap / 2
+    if cab.hand == "L":
+        return (0, t), (t, t + b), (w - gap - dw, w - gap)
+    return (w - t, w), (w - t - b, w - t), (gap, gap + dw)
+
+
 def panel_geometry(cab, std: Standard = STANDARD,
                    materials: dict = None) -> CabinetGeometry:
     """An independent panel's real size and shape, off its panel record.

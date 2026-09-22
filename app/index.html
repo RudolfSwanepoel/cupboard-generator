@@ -417,6 +417,7 @@ function blankCabinet(number) {
     bespoke: [], note: "", footprint: [],
     corner_style: "", arm_a: null, arm_b: null, face_a: null, face_b: null,
     corner_unit: null, corner_hand: "", blind_width: null,
+    blind_board: "", blind_edge_kind: null,
     arm_shelves: 0, arm_shelf_arm: "a", arm_shelf_depth: null,
     mitred_shelves: 0, corner_door_width: null,
   };
@@ -1012,7 +1013,9 @@ function refreshCornerReadout(c, g) {
     el.textContent = k.opening === null || k.opening === undefined
       ? `W ${c.width}, and no blind panel width yet.`
       : `W ${c.width}, blind ${k.blind_width} \u2192 opening ${k.opening}, ` +
-        `door ${k.door_width}.`;
+        `door ${k.door_width}` +
+        (k.blind_height ? `; blind panel ${k.blind_height} \u00d7 ${k.blind_width}` +
+          (k.blind_edge_name ? `, one edge in ${k.blind_edge_name}` : "") : "") + ".";
   } else {
     el.textContent = "";
   }
@@ -1560,6 +1563,54 @@ function cornerNum(key, label, value, note, wide, problem) {
     ${note ? `<span class="note">${note}</span>` : ""}</div>`;
 }
 
+// The blind panel's own two choices: what it is cut from, and how thick the one
+// edge it carries is (ruled 22 September 2026). Both are "follow" by default -
+// the exterior board, so the strip beside the door matches the doors, and the
+// doors' edging thickness. The kind list is what that board OFFERS, read back
+// off /api/compute like every other edging control; the browser decides none of
+// it, and the name shown beside the two is the engine's.
+function blindPanelHTML(c, info) {
+  const mats = (S.res && S.res.materials) || {};
+  const keys = (S.res && S.res.boards) || [];
+  const pre = S.def.edging_prefix || {};
+  const chosen = c.blind_board || "";
+  const board = info.blind_board || c.exterior_board || "";
+  const kind = info.blind_edge_kind || "2mm";
+  const all = S.def.exterior_tapes || ["1mm", "2mm"];
+  const offers = (mats[board] || {}).edging_kinds || [];
+  const kinds = all.filter((k) => offers.indexOf(k) >= 0);
+  const kindLost = c.blind_edge_kind && kinds.indexOf(c.blind_edge_kind) < 0;
+  const name = info.blind_edge_name || "";
+  return `<div class="f wide"><label>Blind panel board</label>
+      <select data-k="blind_board" data-t="text">
+        <option value=""${chosen ? "" : " selected"}>exterior board (${
+          esc(c.exterior_board || "\u2014")})</option>
+        ${chosen && boardIsThin(chosen)
+          ? `<option value="${esc(chosen)}" selected>${esc(chosen)} (3 mm \u2014 too thin for a panel)</option>`
+          : ""}
+        ${keys.filter((k) => !boardIsThin(k)).map((k) =>
+          `<option value="${esc(k)}"${k === chosen ? " selected" : ""}>${esc(k)} \u2014 ${
+            esc((mats[k] || {}).board || k)}</option>`).join("")}
+      </select>
+      <span class="note">The strip beside the door is seen from the room, so it
+      follows the doors unless you say otherwise.</span></div>
+    <div class="f wide"><label>Blind panel edging</label>
+      <select data-k="blind_edge_kind" data-t="optext">
+        <option value=""${c.blind_edge_kind ? "" : " selected"}>follows the doors (${
+          esc(pre[kind] || kind)})</option>
+        ${kindLost ? `<option value="${esc(c.blind_edge_kind)}" selected>${
+          esc(pre[c.blind_edge_kind] || c.blind_edge_kind)} (not offered by ${
+          esc(board || "that board")})</option>` : ""}
+        ${kinds.map((k) => `<option value="${esc(k)}"${
+          k === c.blind_edge_kind ? " selected" : ""}>${esc(pre[k] || k)}</option>`).join("")}
+      </select>
+      <span class="note">One edge only \u2014 the vertical one facing the opening,
+      which is what you rub past reaching in. ${name
+        ? `Ordered as <b>${esc(name)}</b>.`
+        : `<b style="color:var(--crit)">${esc(pre[kind] || kind)} is not offered by ${
+            esc(board || "that board")} \u2014 tick it on the Boards tab.</b>`}</span></div>`;
+}
+
 /* The unit drawn to scale in plan, off the outline the ENGINE derived, with
    each measurement lettered the same as the field it comes from. Nothing is
    computed here but where to put a label: every corner point is the engine's.
@@ -1579,13 +1630,16 @@ function cornerDiagram(c, g, info) {
   let pts, edges, doorTxt = [];
   const blind = kind === "blind";
   if (blind) {
-    if (!g || !g.footprint || !(c.width > 0) || !(c.depth > 0)) return "";
+    // Every span here is the engine's (room.blind_spans, off /api/compute): the
+    // flush panel sits INSIDE the carcass one board in from the corner, and the
+    // overlay door laps onto its face. Nothing about that layout is worked out
+    // in the browser.
+    const sp = info.spans;
+    if (!g || !g.footprint || !(c.width > 0) || !(c.depth > 0) || !sp) return "";
     const W = g.width, D = g.depth, B = c.blind_width || 0;
     pts = [[0, 0], [W, 0], [W, D], [0, D]];
-    edges = null;
-    const bx0 = hand === "R" ? W - B : 0, bx1 = hand === "R" ? W : B;
-    const dx0 = hand === "R" ? 0 : B, dx1 = hand === "R" ? W - B : W;
-    return drawDiagram(pts, W, D, hand, {blind: [bx0, bx1], door: [dx0, dx1],
+    return drawDiagram(pts, W, D, hand, {blind: sp.blind, door: sp.door,
+      side: sp.side,
       D, W, B, doorW: info.door_width, opening: info.opening});
   }
   if (!g || g.source !== "corner" || !g.footprint) return "";
@@ -1623,15 +1677,28 @@ function drawDiagram(pts, W, D, hand, o) {
     out.push(`<text x="${rx + o.D / 2}" y="${o.D + ghost / 2}" font-size="${fs * 0.85}"
       text-anchor="middle" fill="var(--muted)">return run</text>`);
     out.push(`<polygon points="${pts.map(P).join(" ")}" fill="var(--carc)" stroke="var(--ink)" stroke-width="${sw}"/>`);
-    const [b0, b1] = o.blind, [d0, d1] = o.door;
-    if (o.B) out.push(`<rect x="${b0}" y="${o.D}" width="${b1 - b0}" height="${18 * k}"
-      fill="var(--rule)" stroke="var(--ink)" stroke-width="${sw * 0.7}"/>`);
-    out.push(`<rect x="${d0}" y="${o.D}" width="${Math.max(d1 - d0, 0)}" height="${18 * k}"
+    const [b0, b1] = o.blind, [d0, d1] = o.door, [s0, s1] = o.side;
+    // Every position ALONG the wall is the engine's, to the millimetre. Only the
+    // depth each part is drawn at is exaggerated — a 16 mm board is three pixels
+    // at plan scale and would say nothing — so both are drawn `th` deep and the
+    // front line at y = D is what they are read against: the flush panel behind
+    // it, the overlay door in front of it. That is the one thing this drawing is
+    // about, and the depth is dimensioned in words beside it, never off a rect.
+    const th = 18 * k;
+    out.push(`<rect x="${s0}" y="${o.D - th}" width="${s1 - s0}" height="${th}"
+      fill="var(--carc)" stroke="var(--ink)" stroke-width="${sw * 0.7}"/>`);
+    if (o.B) out.push(`<rect x="${b0}" y="${o.D - th}" width="${b1 - b0}" height="${th}"
+      fill="var(--rule)" stroke="var(--ink)" stroke-width="${sw}"/>`);
+    // and the door in front of the box, lapping onto the panel's face
+    out.push(`<rect x="${d0}" y="${o.D}" width="${Math.max(d1 - d0, 0)}" height="${th}"
       fill="var(--door)" stroke="var(--ink)" stroke-width="${sw * 0.7}"/>`);
     out.push(label(o.W / 2, -14 * k, `W ${o.W}`, fs));
     out.push(label(hand === "R" ? -30 * k : o.W + 30 * k, o.D / 2, `depth ${o.D}`, fs));
-    if (o.B) out.push(label((b0 + b1) / 2, o.D + 36 * k, `blind panel ${o.B}`, fs));
-    if (o.doorW) out.push(label((d0 + d1) / 2, o.D + 36 * k, `door ${o.doorW}`, fs));
+    // the panel's label goes on the strip the door does not cover
+    const sh0 = hand === "R" ? Math.max(b0, d1) : b0;
+    const sh1 = hand === "R" ? b1 : Math.min(b1, d0);
+    if (o.B) out.push(label((sh0 + sh1) / 2, o.D - 34 * k, `blind panel ${o.B}`, fs));
+    if (o.doorW) out.push(label((d0 + d1) / 2, o.D + 34 * k, `door ${o.doorW}`, fs));
   } else {
     // the two runs this unit meets, dashed, at the open ends' depths
     if (o.fa) {
@@ -1775,7 +1842,8 @@ function renderCorner() {
              cornerNum("depth", "Depth", c.depth, "", false, prob.depth) +
              cornerNum("blind_width", "Blind panel width", c.blind_width,
                        "cut at exactly this \u2014 it has to cover the run on the return wall",
-                       false, prob.blind_width);
+                       false, prob.blind_width) +
+             blindPanelHTML(c, info);
   } else {
     fields = cornerNum("arm_a", "A \u2014 length along this wall", c.arm_a,
                        "wall to the unit's open end", false, prob.arm_a) +

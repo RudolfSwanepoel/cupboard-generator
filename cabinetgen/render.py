@@ -16,7 +16,7 @@ from .room import (LAYERS, cabinet_footprint, carcass_z, clashes, corner_points,
                    panel_clashes, placed, placed_panels, plinth_choice_for,
                    plinth_lengths, pullout_envelope, return_profiles, run_key,
                    runs, swing_envelopes, to_world, wall_frames,
-                   blind_door_width)
+                   blind_spans)
 from .standard import Standard, STANDARD
 
 INK = "#191c1a"
@@ -1408,12 +1408,14 @@ def _corner_interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
       labelled with its REAL width and cross-hatched lightly, the drafting sign
       for a face that is not square on to you. Beyond it, the unit's open-face
       side on the return wall, plain carcass.
-    * BLIND - the blind panel at the corner end and the one door beside it, each
-      at the width it is cut.
+    * BLIND - the corner-end side edge, the flush panel inside the carcass
+      beside it, and the overlay door lapping onto that panel's face. Every
+      figure is `room.blind_spans`, so the drawing cannot lay the unit out
+      differently from the cut list.
     * ELL - the box only: its construction is not decided, so there is no front
       to draw, and it says so.
 
-    Every millimetre is the engine's (`geometry`, `blind_door_width`); `w` is
+    Every millimetre is the engine's (`geometry`, `blind_spans`); `w` is
     already the unit's real reach along the wall, so x is scaled off it.
     """
     out = []
@@ -1482,28 +1484,39 @@ def _corner_interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
                        f'font-size="8.5" text-anchor="middle" '
                        f'fill="{muted_on(body["colour"])}">return wall</text>')
     elif kind == "blind":
-        W = g.width
         B = int(c.blind_width or 0)
-        dw = blind_door_width(c, std)
-        if B > 0 and dw and dw > 0:
-            b0, b1 = (W - B, W) if hand == "R" else (0, B)
-            gap = std.door_single_gap / 2
-            d0 = gap if hand == "R" else B + gap
-            look = board_look(mats, c.exterior_board)
+        spans = blind_spans(c, std)
+        if B > 0 and spans:
+            (s0, s1), (b0, b1), (d0, d1) = spans
+            # The corner-end side panel's front edge. It is only one board wide,
+            # but it is what the flush front runs into, so it is drawn rather
+            # than left as bare carcass: the panel no longer reaches the corner.
+            body = board_look(mats, c.carcass_board)
+            out.append(f'<rect class="eside" x="{px(s0):.1f}" y="{top:.1f}" '
+                       f'width="{(s1 - s0) * scale:.1f}" height="{dh:.1f}" '
+                       f'fill="{fills.of(body, True)}" stroke="{RULE}" '
+                       f'stroke-width="0.8"/>')
+            # The flush panel, in ITS OWN board, across its full B. The door is
+            # drawn over it afterwards, so what is left showing is exactly the
+            # strip the door does not cover — which is what you see in the room.
+            look = board_look(mats, c.blind_panel_board)
             out.append(f'<rect class="eblind" x="{px(b0):.1f}" y="{top:.1f}" '
-                       f'width="{B * scale:.1f}" height="{dh:.1f}" '
+                       f'width="{(b1 - b0) * scale:.1f}" height="{dh:.1f}" '
                        f'fill="{fills.of(look, True)}" stroke="{INK}" stroke-width="0.9"/>')
-            if door_edge:
-                out.extend(_edge_band(px(b0), top, B * scale, dh, door_edge))
-            if dh > 20 and B * scale > 30:
-                out.append(f'<text x="{px((b0 + b1) / 2):.1f}" y="{top + dh / 2 + 3.5:.1f}" '
+            if c.door_count:
+                dw = int(round(d1 - d0))
+                leaf(px(d0), px(d1), 0, False, f"1 x {dw}")
+                if flip is not None:
+                    out += _hinge_marks(c, px(d0), top, (d1 - d0) * scale + 1, dh,
+                                        door_h, flip, std, mats)
+            # The label goes on the strip that is still showing, not on the
+            # middle of a panel whose middle is behind the door.
+            shown = ((b0, min(b1, d0)) if hand == "L" else (max(b0, d1), b1))
+            if dh > 20 and (shown[1] - shown[0]) * scale > 30:
+                out.append(f'<text x="{px(sum(shown) / 2):.1f}" '
+                           f'y="{top + dh / 2 + 3.5:.1f}" '
                            f'font-size="9" text-anchor="middle" '
                            f'fill="{muted_on(look["colour"])}">blind {B}</text>')
-            if c.door_count:
-                leaf(px(d0), px(d0 + dw), 0, False, f"1 x {dw}")
-                if flip is not None:
-                    out += _hinge_marks(c, px(d0), top, dw * scale + 1, dh, door_h,
-                                        flip, std, mats)
     else:
         why = ("ell corner: construction not decided yet" if kind == "ell"
                else "fix the corner measurements")

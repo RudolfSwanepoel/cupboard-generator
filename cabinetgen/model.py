@@ -546,10 +546,20 @@ class Cabinet:
     corner_hand: str = ""                # '' (= 'R') | 'L' | 'R'
 
     # ---- blind corner ------------------------------------------------------
-    # A blind unit is a straight carcass with a flush panel across the corner end
-    # and one door at the far end. width / height / depth above are its carcass,
-    # exactly as on any other cabinet; this is the only extra measurement.
+    # A blind unit is a straight carcass with a flush panel INSIDE the corner end
+    # - between the corner-end side and the opening, face flush with the front
+    # edges, top to bottom - and one door at the far end lapping onto it (ruled
+    # 22 September 2026). width / height / depth above are its carcass, exactly
+    # as on any other cabinet; this is the only extra MEASUREMENT.
     blind_width: Optional[int] = None    # the blind panel's width, as cut
+    # The blind panel is selectable in its own right (ruled 22 September 2026):
+    # the board it is cut from, and the thickness of the one edge it carries.
+    # Blank / None means "follow" - the exterior board, so the strip visible
+    # between the door and the return run matches the doors, and the doors'
+    # edging thickness. Both are written to the job file only when they are set
+    # (store.LATE_CABINET_FIELDS), so every job written before them is unchanged.
+    blind_board: str = ""                # '' = the exterior board
+    blind_edge_kind: Optional[str] = None   # None = the doors' thickness
 
     # ---- mitre shelves -----------------------------------------------------
     # A mitre takes two kinds of shelf and can carry both (ruled 22 September
@@ -682,6 +692,7 @@ class Cabinet:
         simple("carcass_board", "carcass board")
         simple("exterior_board", "exterior board")
         simple("back_board", "backing board")
+        simple("blind_board", "blind panel board")
         simple("drawer_carcass_board", "drawer carcass board")
         simple("drawer_face_board", "drawer face board")
         simple("door_edge_board", "door edging board")
@@ -860,6 +871,41 @@ class Cabinet:
         carries and the band the drawing puts round a door leaf cannot name two
         different boards."""
         return self.door_edge_board or self.exterior_board
+
+    @property
+    def blind_panel_board(self) -> str:
+        """The board a blind unit's flush panel is cut from.
+
+        Its own choice, or the cabinet's exterior board. The default is the
+        exterior board because the strip of panel the door does not cover is
+        seen from the room, beside the doors, and has to match them.
+        """
+        return self.blind_board or self.exterior_board
+
+    @property
+    def blind_edge_thickness(self) -> str:
+        """1mm or 2mm: the blind panel's own choice, then the doors'.
+
+        Offered separately from the doors because reaching into the cupboard
+        rubs against that one edge, so it may want the heavier band whatever the
+        doors carry (ruled 22 September 2026). With nothing chosen it is the
+        doors' thickness, which is what the panel was edged in before the
+        control existed.
+        """
+        kind = self.blind_edge_kind or self.door_edge_kind or self.exterior_tape
+        if kind not in EXTERIOR_TAPES:
+            kind = "2mm"
+        return kind
+
+    def blind_tape(self, materials: dict) -> str:
+        """The blind panel's edging: its own thickness, in its OWN board's colour.
+
+        One long edge only - the vertical edge facing the opening, which is the
+        one seen and rubbed when the door is open. The colour is the panel's own
+        board rather than the doors', because it is that board's own edge; where
+        the panel follows the exterior board the two are the same name anyway.
+        """
+        return tape_for(materials, self.blind_panel_board, self.blind_edge_thickness)
 
     @property
     def drawer_face_edge_colour_board(self) -> str:

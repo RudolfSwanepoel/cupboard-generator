@@ -724,16 +724,17 @@ cut list is worse than a form that produces a right one.
     clearance out — this app deducts no tape anywhere, and that holds here.
 
 25. **A blind corner is a straight cupboard, not a shaped one.** A carcass W × H
-    × D with a flush panel across the corner end and **one door**, always, at the
+    × D with a flush panel at the corner end (inside it — see item 29) and **one
+    door**, always, at the
     far end. The run on the return wall is ordinary cabinets and is no part of
     this unit.
 
         opening  O = W - 2t - B
         door     derived from the opening exactly as any other door is,
                  (O + 2t) - door_single_gap = W - B - door_single_gap
-        blind    exactly B wide - the board size is the board size - the same
-                 height as the door, cut from the exterior board, grain as a
-                 door, edged like the door, fixed, no pot holes
+        blind    exactly B wide - the board size is the board size - INSIDE the
+                 carcass between the top and the bottom, fixed, no pot holes
+                 (see item 29 for what it is cut from and how it is edged)
 
     W 1000, B 500, t 16 → opening 468, door 497, blind panel 500.
 
@@ -798,3 +799,53 @@ cut list is worse than a form that produces a right one.
     add bespoke panels in the job file, or change the type — rather than an empty
     cabinet quietly costing R0. An ell with `template="none"` and its own bespoke
     panels works exactly as cabinet 7 does and is untouched by it.
+
+29. **The blind panel sits INSIDE the carcass, and it is selectable.** Ruled
+    22 September 2026, replacing the second half of item 25. The cut sizes of the
+    door and the opening do not change; the panel's construction does.
+
+    It sits between the corner-end side panel and the opening, with its front
+    face flush with the carcass front edges like the sides, the top and the
+    bottom, so the unit reads as one flush front. It runs between the top and the
+    bottom, so its length is **H − 2t**. A base unit has no top and is the same
+    figure: it stands on the bottom and runs up to the underside of the front
+    support, which is the same 16 mm board — which is also the figure the engine
+    already takes as a divider's default height.
+
+    The door is an ordinary overlay door on the outside, following the same
+    overlap rules as every other door: it overlays the far side panel and the
+    blind panel's face by `t − door_single_gap / 2` each, which is 14.5 mm.
+
+        blind panel  (H - 2t) x B
+        door         W - B - door_single_gap, unchanged
+        along the wall, from the far end:
+            side t | opening O | blind B | side t          (right-handed)
+            door from door_single_gap / 2, W - B - 3 wide
+
+    W 1000, H 2400, D 500, B 500, t 16 → blind panel **2368 × 500**, door
+    **2397 × 497**, opening **468**. A base unit at H 790 → blind panel 758 × B.
+    `room.blind_spans` is the one place that layout is worked out, and the wall
+    elevation and the Corner Unit plan diagram both read it.
+
+    **Board:** `Cabinet.blind_board`, blank meaning the exterior board — the
+    default, because the strip visible between the door and the return run is
+    seen from the room beside the doors. It is in `Cabinet._board_slots`, so the
+    swap, the un-select, the rename and the library scan all see it.
+
+    **Edging: one long edge only**, the vertical edge facing the opening, which
+    is the one seen and rubbed when the door is open. Grain runs vertical
+    (Length = height), as on a door, so it is `edge_l = 1`, `edge_w = 0`. The
+    thickness is `Cabinet.blind_edge_kind`, 1 mm or 2 mm, None meaning the
+    doors' — offered separately because reaching into the cupboard rubs against
+    that edge. The colour is the panel's **own** board's edging, through the
+    existing `tape_for` chain; a kind that board does not offer is the existing
+    EDGING critical, and nothing states an edging name anywhere but the Boards
+    record (hard rule 6).
+
+    **The return-run clearance check (item 26's blind half) keeps its threshold
+    at B.** Moving the panel inside the carcass moved the clear OPENING one board
+    further from the corner — it starts at t + B now — but the door did not move:
+    its corner-end edge still stands `B + door_single_gap / 2` from the corner.
+    A return run reaching between B and B + t clears the opening and still stops
+    the door opening, so measuring against the opening would be wrong in the
+    unsafe direction.

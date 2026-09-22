@@ -233,7 +233,7 @@ class Usage:
 # would let a board be deleted from the library out from under a saved job.
 CABINET_BOARD_FIELDS = ("carcass_board", "exterior_board", "back_board",
                         "drawer_carcass_board", "drawer_face_board",
-                        "door_edge_board", "drawer_edge_board",
+                        "door_edge_board", "drawer_edge_board", "blind_board",
                         "decor")          # the pre-library name for the exterior
 DRAWER_BOARD_FIELDS = ("box_board", "face_board")
 

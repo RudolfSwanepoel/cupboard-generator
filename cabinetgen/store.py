@@ -29,8 +29,9 @@ def panel_from_dict(d: dict) -> Panel:
 # A field added to Cabinet and not added here is what makes every job file on
 # disk grow a key the next time it is saved.
 LATE_CABINET_FIELDS = (
-    "corner_hand", "blind_width", "arm_shelves", "arm_shelf_arm",
-    "arm_shelf_depth", "mitred_shelves", "corner_door_width",
+    "corner_hand", "blind_width", "blind_board", "blind_edge_kind",
+    "arm_shelves", "arm_shelf_arm", "arm_shelf_depth", "mitred_shelves",
+    "corner_door_width",
 )
 
 

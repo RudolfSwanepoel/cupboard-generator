@@ -28,10 +28,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import json                                                                 # noqa: E402
 
 from cabinetgen.engine import generate_job                                  # noqa: E402
-from cabinetgen.model import Cabinet, Drawer, Job, Opening, Panel, Placement  # noqa: E402
+from cabinetgen.model import (Cabinet, Drawer, Job, MATERIALS, Opening,     # noqa: E402
+                             Panel, Placement)
 from cabinetgen.engine import generate_cabinet, mitre_door_width           # noqa: E402
 from cabinetgen.room import (_gap_along, arm_shelf_max_depth,              # noqa: E402
                              blind_door_width, blind_opening,
+                             blind_panel_height, blind_spans,
                              clashes, convex_overlap,
                              corner_outline,
                              corner_shadow, gaps as room_gaps, geometry,
@@ -101,14 +103,20 @@ def template_mitre(number=7, hand="", **kw):
                    arm_a=850, arm_b=850, face_a=500, face_b=500, **kw)
 
 
-def blind_cab(number=1, width=1000, blind=500, hand="", depth=560, **kw):
+def blind_cab(number=1, width=1000, blind=500, hand="", depth=560, height=720, **kw):
     """The worked blind example: W 1000, B 500, t 16 -> opening 468, door 497."""
     kw.setdefault("kind", "base")
     kw.setdefault("back", "none")
     kw.setdefault("supports", 0)
-    return Cabinet(number=number, width=width, height=720, depth=depth,
+    return Cabinet(number=number, width=width, height=height, depth=depth,
                    corner_unit=True, corner_style="blind",
                    corner_hand=hand, blind_width=blind, **kw)
+
+
+def only(panels, role):
+    """The one panel with this role. A blind unit cuts exactly one of each."""
+    found = [p for p in panels if p.role == role]
+    return found[0] if len(found) == 1 else None
 
 
 def sizes(panels, role):
@@ -255,13 +263,110 @@ def corner_checks():
     check("the door is derived from the opening exactly as any other door is",
           sizes(BP, "Door"), [(717, 497, 1)])
     check("the blind panel is cut at exactly B, the width it was measured at",
-          sizes(BP, "Blind Panel"), [(717, 500, 1)])
+          sizes(BP, "Blind Panel"), [(688, 500, 1)])
     check("and it is code 08 with its own role, so the cut list can tell it apart",
           sorted({(p.label, p.role) for p in BP if p.role == "Blind Panel"}),
           [("108", "Blind Panel")])
-    check("it is edged like the door beside it and takes no pot holes",
+    check("one long edge only, the vertical one facing the opening, and no pot holes",
           [(p.edge_l, p.edge_w, p.pot_holes) for p in BP if p.role == "Blind Panel"],
-          [(2, 2, 0)])
+          [(1, 0, 0)])
+
+    # ---- the panel sits INSIDE the carcass (ruled 22 September 2026) --------
+    #
+    # It used to stand across the corner end at door height. It is between the
+    # top and the bottom now, flush with the front edges, with the corner-end
+    # side panel beyond it and an ordinary overlay door lapping onto its face.
+    # The door and the opening did not move: only the panel's construction did.
+    print("\nthe flush panel is between the top and the bottom, inside the carcass")
+    big = blind_cab(1, height=2400, depth=500)
+    BIG = generate_cabinet(big)
+    check("the brief's worked unit: W 1000, H 2400, D 500, B 500, t 16",
+          (blind_opening(big), blind_door_width(big), blind_panel_height(big)),
+          (468, 497, 2368))
+    check("blind panel 2368 x 500, code 08, one long edge",
+          [(p.code, p.length, p.width, p.qty, p.edge_l, p.edge_w)
+           for p in BIG if p.role == "Blind Panel"], [("08", 2368, 500, 1, 1, 0)])
+    check("and the door beside it is the one it always was",
+          sizes(BIG, "Door"), [(2397, 497, 1)])
+    check("it is H - 2t, the figure a divider's default height already uses",
+          blind_panel_height(big), 2400 - 2 * std.board_t)
+    # A BASE unit has no top: it stands on the bottom and runs up to the
+    # underside of the front support, which is the same 16 mm board lying flat
+    # with its face flush with the carcass top edge. So the clear span is the
+    # same H - 2t, and the engine's own support line is what says so - a support
+    # is cut from the carcass board at the same thickness as a top.
+    base = blind_cab(1, height=790, depth=500, kind="base", supports=1)
+    BASE = generate_cabinet(base)
+    check("a base unit with no top is the same figure, H - 2t",
+          [(p.length, p.width) for p in BASE if p.role == "Blind Panel"], [(758, 500)])
+    check("because its support is cut from the carcass board like a top is",
+          sorted({(p.role, p.material) for p in BASE
+                  if p.role in ("Support", "Bottom")}),
+          [("Bottom", "MEL"), ("Support", "MEL")])
+    check("and a base blind unit really has no top to measure to",
+          [p.role for p in BASE if p.role == "Top"], [])
+
+    print("\nwhere the three parts sit across the front, and what laps what")
+    side, panel, door = blind_spans(big)
+    t, gap = std.board_t, std.door_single_gap / 2
+    check("right-handed: the corner-end side is the last board on the wall",
+          (side, panel, door), ((984, 1000), (484, 984), (1.5, 498.5)))
+    check("the panel starts one board in from the corner, not at it",
+          1000 - panel[1], t)
+    check("the door laps onto the panel's face by t - half the door gap",
+          door[1] - panel[0], t - gap)
+    check("and laps the far side panel by the same",
+          t - door[0], t - gap)
+    check("left-handed is the mirror of it, to the millimetre",
+          blind_spans(blind_cab(1, height=2400, hand="L")),
+          ((0, 16), (16, 516), (501.5, 998.5)))
+    check("the door is exactly the width the cut list cuts",
+          round(door[1] - door[0]), blind_door_width(big))
+
+    print("\nthe panel names its own board and its own edging, and nothing else does")
+    check("blank follows the exterior board, which is what it was",
+          (blind_cab(1).blind_panel_board, blind_cab(1, exterior_board="X").blind_panel_board),
+          ("BROOKHILL", "X"))
+    own = blind_cab(1, height=2400, blind_board="MEL")
+    check("choosing another board changes what the line is cut from",
+          [(p.material, p.grain) for p in generate_cabinet(own) if p.role == "Blind Panel"],
+          [("MEL", 0)])
+    check("and the grain it locks is that board's, not the doors'",
+          [p.grain for p in BIG if p.role == "Blind Panel"], [1])
+    check("the edging follows the doors' thickness with nothing chosen",
+          (blind_cab(1).blind_edge_thickness,
+           blind_cab(1, door_edge_kind="1mm").blind_edge_thickness), ("2mm", "1mm"))
+    check("and its COLOUR is the panel's own board, not the doors'",
+          only(generate_cabinet(own), "Blind Panel").edge_material,
+          "2mm WHITE")
+    one_mm = blind_cab(1, height=2400, blind_edge_kind="1mm")
+    two_mm = blind_cab(1, height=2400, blind_edge_kind="2mm")
+    check("1mm and 2mm change the edging NAME and nothing else",
+          [(only(generate_cabinet(c), "Blind Panel").edge_material,
+            only(generate_cabinet(c), "Blind Panel").length,
+            only(generate_cabinet(c), "Blind Panel").width)
+           for c in (one_mm, two_mm)],
+          [("1mm WOOD", 2368, 500), ("2mm WOOD", 2368, 500)])
+
+    print("\nand it is in the one list of which fields hold a board")
+    named = blind_cab(1, blind_board="ONLYHERE")
+    check("board_refs names it, so a swap and a rename both find it",
+          [label for board, label in named.board_refs() if board == "ONLYHERE"],
+          ["blind panel board"])
+    swapped = blind_cab(1, height=2400, blind_board="MEL")
+    swapped.map_board_refs(lambda b: "BROOKHILL" if b == "MEL" else b)
+    check("a swap moves it with everything else",
+          [(p.material, p.grain) for p in generate_cabinet(swapped)
+           if p.role == "Blind Panel"], [("BROOKHILL", 1)])
+
+    print("\nan edging the panel's board does not offer is the usual CRITICAL")
+    mats = {k: dict(v) for k, v in MATERIALS.items()}
+    mats["BROOKHILL"] = dict(mats["BROOKHILL"], edging_kinds=["pvc", "2mm"])
+    thin_edge = Job(name="x", boards=list(mats), materials=mats,
+                    cabinets=[blind_cab(1, height=2400, blind_edge_kind="1mm")])
+    check("it blocks, and it says which board to tick it on",
+          [(i.level, i.ref) for i in validate(thin_edge, generate_job(thin_edge))
+           if "blind panel" in i.message], [("critical", "EDGING")])
     check("the carcass is the ordinary path: back, supports and shelves all cut",
           sorted({p.role for p in generate_cabinet(blind_cab(back="four", supports=4,
                                                              shelves=1))}
@@ -284,12 +389,26 @@ def corner_checks():
                 [Placement(1, "A", 3000), Placement(2, "B", 560)], room=room)
     check("a return run reaching past the blind panel BLOCKS the export",
           [(i.level, "at least 616" in i.message) for i in validate(tight, generate_job(tight))
-           if "across the door opening" in i.message], [("critical", True)])
+           if "into the door" in i.message], [("critical", True)])
     roomy = job([blind_cab(1, blind=700), ret],
                 [Placement(1, "A", 3000), Placement(2, "B", 560)], room=room)
     check("and a blind panel wide enough for it clears",
           [i for i in validate(roomy, generate_job(roomy))
-           if "across the door opening" in i.message], [])
+           if "into the door" in i.message], [])
+    # The re-read the inset panel asked for. Moving the panel inside the carcass
+    # put the clear OPENING one board further from the corner — it starts at
+    # t + B now — but the DOOR did not move: its corner-end edge still stands
+    # B + half a door gap from the corner. So a return run reaching between B
+    # and B + t clears the opening and still stops the door opening, and the
+    # threshold stays at B. Reading it off the opening would be wrong in the
+    # unsafe direction, and this is the case that would show it.
+    near = cab(2, 600, d=492, doors=1)          # reach 508: past B, inside B + t
+    between = job([blind_cab(1, blind=500), near],
+                  [Placement(1, "A", 3000), Placement(2, "B", 492)], room=room)
+    check("a run reaching past B but not past B + t still blocks the DOOR",
+          [(i.level, "at least 508" in i.message)
+           for i in validate(between, generate_job(between))
+           if "into the door" in i.message], [("critical", True)])
 
     print("\ntwo ways a blind corner is not one, both of them blocking")
     for why, c, phrase in (

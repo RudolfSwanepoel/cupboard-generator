@@ -447,6 +447,13 @@ def _boards_and_tapes(job: Job):
                           c.drawer_edge_board or c.door_edge_board or c.exterior_board,
                           c.drawer_edge_kind or c.door_edge_kind or c.exterior_tape,
                           "its drawer faces"))
+        # The blind panel names its own board and its own thickness, so it is
+        # asked the same question as everything else: does that board sell that
+        # edging. Its one banded edge is the one reached past every time the
+        # cupboard is opened, so going out unedged in silence is not an option.
+        if c.corner_kind == "blind" and c.blind_width:
+            wants.append(("blind_edge", None, c.blind_panel_board,
+                          c.blind_edge_thickness, "its blind panel"))
         for field, override, board, thickness, bands in wants:
             if override is not None:
                 continue                   # this cabinet was told what to use
@@ -495,6 +502,8 @@ def _thin_boards(job: Job):
         if c.is_panel or c.template == "none":
             continue    # bespoke is specified by hand; a panel may be any thickness
         wants = [(c.carcass_board, "carcass board"), (c.exterior_board, "exterior board")]
+        if c.blind_board:
+            wants.append((c.blind_board, "blind panel board"))
         for i, b in enumerate(c.door_boards or []):
             if b:
                 wants.append((b, f"door leaf {i + 1} board"))
@@ -964,6 +973,16 @@ def _blind_clearance(job: Job, std):
     nothing else. No handle clearance is added (ruled 22 September 2026) — if a
     real job needs one it belongs in Standard, not guessed at here.
 
+    What it is measured against is the DOOR, and that is the re-read the inset
+    blind panel asked for (22 September 2026). Moving the panel inside the
+    carcass moved the clear OPENING one board further from the corner — it now
+    starts at t + B rather than at B — but the door in front of it did not move:
+    its corner-end edge still stands `B + door_single_gap / 2` from the corner,
+    lapping the panel's face. A return run reaching between B and B + t clears
+    the opening and still stops the door opening, so the threshold stays at B,
+    which is half a gap inside the door edge and therefore the safe side of it.
+    Testing the opening instead would be wrong in the unsafe direction.
+
     Nothing is checked unless the unit actually sits flush in a corner, because
     `corner_shadow` is what says which wall the return run is on, and until it
     does there is no return run to be in the way of.
@@ -1002,7 +1021,7 @@ def _blind_clearance(job: Job, std):
                              f"cabinet {cab.number}: cabinet {other.number} on wall {wall_id} "
                              f"reaches {reach} mm off that wall (its {og.depth} mm depth"
                              + (f" and a {std.board_t} mm door front" if og.door_widths else "")
-                             + f"), past the {b} mm blind panel and across the door opening — "
+                             + f"), past the {b} mm blind panel and into the door — "
                              f"the blind panel has to be at least {reach} mm, or the return "
                              f"run shallower"))
     return out

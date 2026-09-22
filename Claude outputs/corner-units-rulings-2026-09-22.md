@@ -74,21 +74,28 @@ There are three types: **Mitre**, **Ell** and **Blind**. Every type takes a **Le
 
 A straight carcass with a large flush **blind panel** at the corner end and **one door** at the far end. The return run is ordinary cabinets and panels, not part of this unit.
 
+> **Superseded in part.** `blind-corner-inset-brief-2026-09-22.md` (22 Sept 2026, final) is the ruling for the blind panel's construction: it sits INSIDE the carcass between the top and the bottom, it names its own board and its own edging thickness, and it carries one banded edge. The opening and the door below are unchanged.
+
 - **Inputs** (all in the Corner Unit section): carcass width W, height H, depth D, blind panel width B, and the hand.
 - **Opening** O = W − 2t − B, where t is the carcass board thickness, never a hardcoded 16.
 - **Door:** derived from the opening **exactly like any other door**, with the same adjustments. Door = O + 2t − `door_single_gap` = W − B − 3.
   - Worked example: W 1000, B 500 → opening 468, door 497, blind panel 500.
   - Default hinge at the far (outer) end; changeable.
-- **Blind panel:** exactly **B** wide ("the board size is the board size"), door height, exterior board, grain as a door, edged like a door.
+- **Blind panel:** exactly **B** wide ("the board size is the board size"), and **INSIDE the carcass** — superseded in detail by `blind-corner-inset-brief-2026-09-22.md`, which is the final ruling. In short:
+  - It sits between the corner-end side panel and the opening, front face flush with the carcass front edges, and runs between the top and the bottom: **(H − 2t) × B**. A base unit has no top and is the same figure — it runs up to the underside of the front support, which is the same 16 mm board.
+  - The door is an ordinary **overlay** door on the outside, unchanged at `W − B − 3`. It overlays the blind panel's face by `t − door_single_gap / 2` = 14.5 mm, the same as it overlays the far side panel.
+  - **Board is selectable** (`Cabinet.blind_board`, blank = the exterior board, which is the default because the visible strip sits beside the doors). It is in `Cabinet._board_slots`.
+  - **Edging is ONE long edge** — the vertical edge facing the opening, the one rubbed when reaching in. Grain vertical, so `edge_l = 1`, `edge_w = 0`. Thickness is selectable 1 mm / 2 mm (`Cabinet.blind_edge_kind`, None = the doors'); colour is the panel's own board's edging.
   - **Code 08, role "Blind Panel"**, suffixed by `born_distinct` if the cabinet also has an 08.
   - **Never drilled:** no pot holes, no hinges.
   - It is **not a filler** (filler is code 11). Never call it a filler anywhere.
 - **Carcass:** back, supports and shelves follow the standard engine path. Drawers are greyed, and Doors is fixed at 1.
 - **Plan:** a rectangle W × D. It casts a shadow on the return wall so the return run starts at its depth and Gaps proposes no filler there.
 - **Critical if:**
-  - the return run's first cabinet, including its door front, covers the door opening;
+  - the return run's first cabinet, including its door front, reaches past **B** — the threshold stays at B after the inset ruling, because what has to clear is the DOOR, whose corner-end edge still stands `B + door_single_gap / 2` from the corner, not the opening, which now starts at `t + B`;
   - the door is ≤ 0 wide;
-  - B ≥ W − 2t.
+  - B ≥ W − 2t;
+  - the panel's board does not offer the edging kind asked for (the standard EDGING critical).
 
 ## 6. Ell
 

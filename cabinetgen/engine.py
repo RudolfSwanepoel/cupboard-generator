@@ -8,9 +8,10 @@ from typing import List
 
 from .model import (BLIND_CODE, MATERIALS, PANEL_CODE, Cabinet, Job, Panel,
                     grain_of, resolve_board, tape_for)
-from .room import (arm_shelf_depth, arm_shelf_length, blind_door_width, gaps,
-                   mitre_blank, mitre_legs, mitre_inner_span, plinth_butt_wall,
-                   plinth_choice_for, plinth_deduction, plinth_lengths, runs)
+from .room import (arm_shelf_depth, arm_shelf_length, blind_door_width,
+                   blind_panel_height, gaps, mitre_blank, mitre_legs,
+                   mitre_inner_span, plinth_butt_wall, plinth_choice_for,
+                   plinth_deduction, plinth_lengths, runs)
 from .standard import Standard, STANDARD
 
 SUPPORT_W = 100          # a support spans the internal width at this height
@@ -371,17 +372,28 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
                            pot_holes=std.hinges(h), grain=grain_of(mats, board)))
 
     # ---- the blind corner's flush panel -------------------------------------
-    # Exactly B wide: the board size is the board size (ruled 22 September 2026).
-    # Cut from the exterior board, the same height as the door beside it, edged
-    # like that door and with its grain running the same way. It is fixed, so it
-    # takes no pot holes. Code 08 with the role "Blind Panel" (Q3) — see
-    # model.BLIND_CODE for why it is not a code of its own.
+    # INSIDE the carcass at the corner end, between the corner-end side panel and
+    # the opening, with its face flush with the carcass front edges so the unit
+    # reads as one flush front (ruled 22 September 2026, replacing a panel that
+    # stood across the corner end at door height). So it runs between the top and
+    # the bottom — `blind_panel_height`, H - 2t — and is exactly B wide: the
+    # board size is the board size. The door in front of it is an ordinary
+    # overlay door and did not move.
+    #
+    # Its own board (blank = the exterior board, so the strip the door does not
+    # cover matches the doors) and its own edging thickness, on ONE long edge:
+    # the vertical edge facing the opening, which is the one seen and rubbed
+    # when the door is open. Grain runs up the height, as on a door, which is
+    # why that edge is a LONG one. It is fixed, so it takes no pot holes. Code 08
+    # with the role "Blind Panel" (Q3) — see model.BLIND_CODE for why it is not a
+    # code of its own.
     if blind and cab.blind_width:
-        P.append(Panel(n, BLIND_CODE, "Blind Panel", ext,
-                       cab.door_height or (cab.height - std.door_height_gap),
+        blind_board = R(cab.blind_panel_board)
+        P.append(Panel(n, BLIND_CODE, "Blind Panel", blind_board,
+                       blind_panel_height(cab, std) or 0,
                        int(cab.blind_width), 1,
-                       edge_l=2, edge_w=2, edge_material=door_tape,
-                       grain=ext_grain))
+                       edge_l=1, edge_w=0, edge_material=cab.blind_tape(mats),
+                       grain=grain_of(mats, blind_board)))
 
     # ---- exposed end panels ------------------------------------------------
     if cab.exposed_sides > 0:

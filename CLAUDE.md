@@ -55,6 +55,32 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
+**A blind corner's panel is INSET, selectable, and edged on one robust edge
+(22 September 2026, Rudolf's final ruling; brief in
+`Claude outputs/blind-corner-inset-brief-2026-09-22.md`).** The door and the
+opening did not move — the panel's construction did. It sits inside the carcass
+between the corner-end side and the opening, face flush with the front edges, so
+the unit reads as one flush front, and it runs between the top and the bottom:
+**(H − 2t) × B**. W 1000 / H 2400 / B 500 cuts **2368 × 500**, beside the same
+**2397 × 497** door over the same **468** opening. A base unit is the same
+figure and it was checked rather than assumed — its front support is the same
+16 mm board lying flat with its face flush with the carcass top edge, which is
+also the figure the engine already takes as a divider's default height; H 790 →
+758. The panel names its own board (`blind_board`, blank = the exterior board,
+because the strip beside the door is seen from the room) and its own edging
+thickness (`blind_edge_kind`, None = the doors'), and it carries **one** banded
+edge: the vertical one facing the opening, the one rubbed when reaching in.
+`room.blind_spans` is the one place the layout along the wall is worked out, and
+the wall elevation and the Corner Unit plan diagram both read it. See **Corner
+units → A blind corner** below, and spec items 25 and 29.
+
+Benchmark unchanged (272 / 59 / 30, 92 pot holes, R28,363.50, 22 cabinets
+reproduce), all fifteen `check_*.py` pass, and every job file on disk still
+round-trips byte for byte. Exercised in the running app, not only in Python:
+the two new controls, the readout, the plan diagram, the wall elevation and the
+cut-list line were all driven in a headless browser against
+`jobs/Corner Unit Test.json`.
+
 **Corner units made usable (22 September 2026, Cowork, after Rudolf reported
 the corner unit "doesn't work, nothing is right").** The engine side built
 earlier the same day was sound; what failed was everything the operator sees.
@@ -379,7 +405,8 @@ tools/check_examples.py    verifies the worked examples in docstrings are true
 tools/check_room.py        room geometry: closure, corners, to_world
 tools/check_fillers.py     gap detection, taper, scribe, filler panels
 tools/check_plinth.py      runs, butt joints, long-run splits, plinth panels
-tools/check_drag.py        overlaps, snap targets both axes, swings, pull-outs
+tools/check_drag.py        overlaps, snap targets both axes, swings, pull-outs;
+                           and what a corner unit cuts, mitre and blind
 tools/check_elevation.py   per-wall elevations: chains close, plinth heights, hinges
 tools/check_edging.py      Has Edging, the kinds a board offers, its colour
 tools/check_single_source.py  the one list of which cabinet fields hold a board
@@ -523,6 +550,9 @@ job written before them cuts exactly what it was quoted:
   from different boards come out as two cut-list lines, told apart by
   `born_distinct` because the material is part of the signature it reads
   (`107a` / `107b`).
+- `blind_board` — a blind corner's flush panel (08), `""` for the exterior
+  board, which is the default because the strip beside the door is seen from
+  the room (22 September 2026). See **A blind corner** under **Corner units**.
 
 **The back board is chosen, not reached for.** The engine used to type `"BACK"`
 onto the backing panel, so a project could cut a board it had never selected and
@@ -1425,7 +1455,7 @@ too (ruled 22 September 2026, after the question was asked).
 
 ### A blind corner is a straight cupboard
 
-A carcass W × H × D with a flush panel across the corner end and **one door**,
+A carcass W × H × D with a flush panel INSIDE the corner end and **one door**,
 always, at the far end. The run on the return wall is ordinary cabinets and is no
 part of this unit.
 
@@ -1433,12 +1463,55 @@ part of this unit.
 opening  O = W - 2t - B
 door     derived from the opening exactly as any other door is:
          (O + 2t) - door_single_gap = W - B - door_single_gap
-blind    exactly B wide - the board size is the board size - the same height
-         as the door, exterior board, grain as a door, edged like the door,
+blind    exactly B wide - the board size is the board size - and (H - 2t) long,
          fixed, no pot holes
+
+along the wall, from the far end (right-handed):
+         side t | opening O | blind B | side t
+         door   from door_single_gap / 2, W - B - 3 wide
 ```
 
-W 1000, B 500, t 16 → **opening 468, door 497, blind panel 500**.
+W 1000, B 500, t 16 → **opening 468, door 497, blind panel 500 wide**; at
+H 2400 the panel cuts **2368 × 500** beside a **2397 × 497** door.
+
+**The panel sits INSIDE the carcass** (ruled 22 September 2026, replacing a panel
+that stood across the corner end at door height): between the corner-end side
+panel and the opening, front face flush with the carcass front edges like the
+sides, the top and the bottom, so the unit reads as one flush front. So it runs
+between the top and the bottom — `room.blind_panel_height`, **H − 2t**.
+
+**A base unit has no top and it is the same figure, and that was checked rather
+than assumed.** The panel stands on the bottom and runs up to the underside of
+the front support, which is cut from the same board at the same thickness and
+lies flat with its face flush with the carcass top edge. It is also the figure
+the engine already takes as a divider's default height (`H - 2 * std.board_t`),
+so the two agree by construction. H 790 → 758.
+
+**The door is an ordinary overlay door and did not move.** It overlays the far
+side panel and the blind panel's face by `t − door_single_gap / 2` = 14.5 mm
+each. `room.blind_spans` is the one place that layout is worked out — `(side,
+blind, door)`, each a `(start, end)` in cabinet-local mm — and the wall elevation
+and the Corner Unit plan diagram both read it rather than laying the unit out for
+themselves.
+
+**The panel names its own board and its own edging thickness.**
+`Cabinet.blind_board` is blank for "the exterior board", which is the default
+because the strip of panel the door does not cover is seen from the room beside
+the doors. It is in `Cabinet._board_slots`, so the swap, the un-select, the
+rename and the library scan all find it, and `check_single_source.py` is what
+says so. `Cabinet.blind_edge_kind` is 1mm or 2mm, None meaning the doors' —
+offered separately because reaching into the cupboard rubs against that one
+edge.
+
+**Edging is ONE long edge**: the vertical one facing the opening. Grain runs up
+the height as on a door, which is why that edge is a long one — `edge_l = 1`,
+`edge_w = 0`. The colour is the panel's **own** board's edging, through the same
+`tape_for` chain as everything else; a kind that board does not offer is the
+ordinary `EDGING` critical, and no edging name is stated anywhere but the Boards
+record.
+
+Both new fields are in `store.LATE_CABINET_FIELDS`, so every job file on disk
+round-trips byte for byte.
 
 **Its plan is a plain rectangle**, so it has no derived outline and
 `room.corner_outline` returns None for one *by design* — the validator's
@@ -1471,11 +1544,20 @@ there is something to do about it. Widening the arms is the other way out and th
 message says so, but it resolves to no single figure: bigger arms move the face
 further into the room and widen the derived door at the same time.
 
-**A blind unit whose door opening the return run reaches across blocks for the
-same reason** (`validate._blind_clearance`, Q4). The unit exists for exactly that
+**A blind unit whose door the return run reaches across blocks for the same
+reason** (`validate._blind_clearance`, Q4). The unit exists for exactly that
 clearance. What reaches is the return cabinet's own depth plus its door front,
 and **no handle clearance** is added — if a real job needs one it belongs in
 Standard, not guessed at here.
+
+**The threshold is B, and it stays B now the panel is inset.** That is the
+re-read the inset construction asked for, and the answer is that nothing moves:
+the clear OPENING is a board further from the corner than it was — `t + B` — but
+the DOOR is what the return run blocks, and the door did not move. Its
+corner-end edge still stands `B + door_single_gap / 2` from the corner, lapping
+the panel's face. A return run reaching between B and B + t clears the opening
+and still stops the door opening, so measuring against the opening would be
+wrong in the unsafe direction. `check_drag.py` pins the discriminating case.
 
 ### An ell is shape only
 
@@ -1610,7 +1692,9 @@ units**.
 - **Corner Unit** is the type, the hand and every dimension the unit has. A
   mitre or an ell turns Drawers and Supports off outright and greys Structure's
   back fixing and shelves, each saying why; a blind corner is a straight box and
-  only its Drawers go, with its Doors fixed at one. Off, not emptied, as
+  only its Drawers go, with its Doors fixed at one. A blind corner also carries
+  the blind panel's own board and its own edging thickness, under the panel
+  width, and the readout states the line it cuts. Off, not emptied, as
   everywhere else. See **Corner units**.
 
 Six tabs over one `POST /api/compute`. The handlers in `app/api.py` decide no
