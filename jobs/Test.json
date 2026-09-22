@@ -477,16 +477,16 @@
           "face_board": null
         },
         {
-          "face_height": 192,
+          "face_height": 208,
           "box_height": 150,
           "base": "board",
-          "mode": "share",
+          "mode": "fixed",
           "share": 1,
           "box_board": "WHITEMEL",
           "face_board": null
         },
         {
-          "face_height": 187,
+          "face_height": 171,
           "box_height": 150,
           "base": "board",
           "mode": "fixed",
@@ -837,6 +837,62 @@
       "face_a": null,
       "face_b": null,
       "corner_unit": null
+    },
+    {
+      "number": 13,
+      "width": 600,
+      "height": 2400,
+      "depth": 500,
+      "kind": "tall",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": true,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "BROOKHILL",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "mitre",
+      "arm_a": 1000,
+      "arm_b": 1000,
+      "face_a": 600,
+      "face_b": 600,
+      "corner_hand": "L",
+      "arm_shelves": 6,
+      "arm_shelf_depth": 450,
+      "corner_unit": true
     }
   ],
   "loose": [],
@@ -868,7 +924,7 @@
     {
       "cabinet": 1,
       "wall": "A",
-      "x": 16,
+      "x": 213,
       "z": 0,
       "flip": false,
       "layer": null
@@ -876,7 +932,7 @@
     {
       "cabinet": 2,
       "wall": "A",
-      "x": 632,
+      "x": 829,
       "z": 0,
       "flip": false,
       "layer": null
@@ -884,7 +940,7 @@
     {
       "cabinet": 3,
       "wall": "A",
-      "x": 1082,
+      "x": 1279,
       "z": 0,
       "flip": false,
       "layer": null
@@ -892,7 +948,7 @@
     {
       "cabinet": 4,
       "wall": "A",
-      "x": 1482,
+      "x": 1679,
       "z": 0,
       "flip": false,
       "layer": null
@@ -900,7 +956,7 @@
     {
       "cabinet": 5,
       "wall": "A",
-      "x": 632,
+      "x": 829,
       "z": 1400,
       "flip": false,
       "layer": null
@@ -908,7 +964,7 @@
     {
       "cabinet": 6,
       "wall": "A",
-      "x": 1882,
+      "x": 2079,
       "z": 0,
       "flip": false,
       "layer": null
@@ -916,7 +972,7 @@
     {
       "cabinet": 7,
       "wall": "A",
-      "x": 2432,
+      "x": 2629,
       "z": 0,
       "flip": false,
       "layer": null
@@ -924,7 +980,7 @@
     {
       "cabinet": 8,
       "wall": "A",
-      "x": 2782,
+      "x": 2979,
       "z": 100,
       "flip": false,
       "layer": null
@@ -932,7 +988,7 @@
     {
       "cabinet": 9,
       "wall": "A",
-      "x": 0,
+      "x": 197,
       "z": 100,
       "flip": false,
       "layer": null
@@ -940,24 +996,32 @@
     {
       "cabinet": 10,
       "wall": "A",
-      "x": 616,
+      "x": 813,
       "z": 100,
       "flip": false,
       "layer": null
     },
     {
       "cabinet": 11,
-      "wall": "A",
-      "x": 2798,
+      "wall": "B",
+      "x": 1000,
       "z": 0,
       "flip": false,
       "layer": null
     },
     {
       "cabinet": 12,
-      "wall": "A",
-      "x": 3398,
+      "wall": "B",
+      "x": 1600,
       "z": 100,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 13,
+      "wall": "B",
+      "x": 0,
+      "z": 0,
       "flip": false,
       "layer": null
     }
