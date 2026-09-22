@@ -4065,25 +4065,47 @@ $("plan").addEventListener("pointerdown", async (e) => {
     // layer is one of the ones being shown solid.
     return;
   }
-
-  const model = await post("/api/drag", {job: S.job, cabinet: number});
-  if (!model.ok) { toast(model.error, true); return; }
-
   const p = S.job.placements.find((x) => x.cabinet === number);
   if (!p) return;
-  DRAG = {model: model, poly: poly, place: p, from: {wall: p.wall, x: p.x},
-          tracks: tracks(), moved: false};
+
+  // Everything that has to happen on the press happens now, before the snap
+  // model is fetched: the wall tracks read off the drawing as it stands, the
+  // drawing stopped from selecting its own text, and the release listened for.
+  // Waiting for the reply first meant a quick drag could let go before anything
+  // was listening, and the cabinet then stuck to the pointer — the same fault
+  // the elevation drag was cured of, and the same cure.
+  e.preventDefault();
+  const d = {model: null, poly: poly, place: p, from: {wall: p.wall, x: p.x},
+             tracks: tracks(), moved: false, last: null, released: false};
+  DRAG = d;
   poly.classList.add("dragging");
   // On the window, not the element: a drag that runs off the plan must still
   // finish rather than stick to the pointer.
   window.addEventListener("pointermove", onDragMove);
   window.addEventListener("pointerup", endDrag);
   window.addEventListener("pointercancel", endDrag);
-  e.preventDefault();
+
+  const model = await post("/api/drag", {job: S.job, cabinet: number});
+  if (DRAG !== d && !d.released) return;        // superseded by a newer press
+  if (!model.ok) { toast(model.error, true); d.moved = false; finishDrag(d); return; }
+  d.model = model;
+  // Replay what happened while the model was on its way: the last position the
+  // pointer reached, and the release if it has already come.
+  if (d.last) moveDrag(d, d.last);
+  if (d.released) finishDrag(d);
 });
 
 function onDragMove(e) {
-  if (!DRAG) return;
+  const d = DRAG;
+  if (!d) return;
+  // Before the snap model has arrived there is nothing to snap to: keep where
+  // the pointer is, and move there as soon as it comes.
+  if (!d.model) { d.last = {clientX: e.clientX, clientY: e.clientY}; return; }
+  moveDrag(d, e);
+}
+
+function moveDrag(d, e) {
+  const DRAG = d;                          // this drag, whatever the global says now
   const pt = svgPoint(e);
   let best = null;
   for (const t of DRAG.tracks) {
@@ -4125,9 +4147,19 @@ function onDragMove(e) {
 }
 
 function endDrag() {
-  if (!DRAG) return;
   const d = DRAG;
-  DRAG = null;
+  if (!d) return;
+  window.removeEventListener("pointermove", onDragMove);
+  window.removeEventListener("pointerup", endDrag);
+  window.removeEventListener("pointercancel", endDrag);
+  // Let go before the snap model arrived: the press handler finishes it, with
+  // the last position replayed, once the model is here.
+  if (!d.model) { d.released = true; return; }
+  finishDrag(d);
+}
+
+function finishDrag(d) {
+  if (DRAG === d) DRAG = null;
   window.removeEventListener("pointermove", onDragMove);
   window.removeEventListener("pointerup", endDrag);
   window.removeEventListener("pointercancel", endDrag);

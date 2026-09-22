@@ -256,13 +256,6 @@ is deliberately not here. Isolate covers the case it was meant to solve —
 getting at something that has landed out of reach — without a second way to
 place things.
 
-Open and not a question — a known bug, **not fixed**: the **plan** drag's
-`pointerdown` awaits `/api/drag` before it attaches its listeners, so a quick
-drag can let go before anything is listening and the cabinet sticks to the
-pointer. Reproduces at 100 % zoom, so it is nothing to do with Part E's zoom;
-the elevation drag was given the fix on 18 September 2026 and the plan's never
-was (found 21 September 2026).
-
 Open and not a fault — **`baseline.json` is stale, and deliberately not
 regenerated** (22 September 2026). It is per-machine and gitignored, and
 `snapshot.py --compare baseline.json` reports Test differing: `jobs/Test.json`
@@ -1737,11 +1730,12 @@ hand (the UI has no test harness): its press does all its synchronous work —
 listeners, `preventDefault` — *before* awaiting `/api/drag`, and replays the last
 pointer position and the release once the model arrives. Awaiting first meant a
 quick drag let go before anything listened, and the cabinet stuck to the pointer.
-**Only the elevation's press was changed; the plan's still awaits first** — see
-the open item above. And the floor snap is compared where a standing carcass
-really is (its underside on the legs), not at `z = 0`; an underside below leg
-height is "on the floor". Before, a sideways drag with a 2 px wobble hung a base
-unit 86 mm up.
+**The plan's press does the same, and does it the same way** — one shape, not
+two pipelines; it was fixed on 22 September 2026, having been found on the 21st
+and missed by the 18 September fix. And the floor snap is compared where a
+standing carcass really is (its underside on the legs), not at `z = 0`; an
+underside below leg height is "on the floor". Before, a sideways drag with a
+2 px wobble hung a base unit 86 mm up.
 
 **Lining up, not only stacking** (18 September 2026). Besides "on top of" and
 "under", which only apply over or under the other cabinet, `z_snap_points` offers
@@ -1962,6 +1956,17 @@ Drag listeners live on `window`, not on the element — a drag that runs off the
 plan has to finish rather than stick to the pointer. Ghosted layers are not
 draggable, so a wall unit only moves while the wall layer is the one shown
 solid.
+
+**The press listens before it asks** (22 September 2026). It attaches those
+listeners and calls `preventDefault` first, and only then awaits `/api/drag`;
+while the model is in flight a move is remembered as `d.last` and a release as
+`d.released`, and both are replayed the moment it lands. Awaiting first — which
+is what the plan did, and the elevation did until 18 September — meant a quick
+drag could let go before anything was listening, and the cabinet then stuck to
+the pointer: measured on 21 September with an instant synthetic drag at 100 %
+zoom, the cabinet did not move at all, while the same drag with a 700 ms pause
+after the press worked. One shape for both drawings, `moveDrag`/`finishDrag`
+beside `moveElevDrag`/`finishElevDrag`, not a second pipeline.
 
 **Overlaps are critical; clashes are warnings.** Two carcasses cannot share a
 stretch of wall, and a cut list built on that is wrong however good it looks. A
