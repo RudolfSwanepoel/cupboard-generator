@@ -965,6 +965,72 @@ def main() -> int:
         fouls += [(kind, d, str(i)) for i in validate(bj, bp) if "fouls the back" in i.message]
     check("not one fouls the back", fouls, [])
 
+    # Placed panels are dragged in the PLAN, along their wall and off it (22
+    # September 2026). The browser picks between candidates the engine names and
+    # writes back one thing: the panel's Placement. Built here, not read from
+    # jobs/Test.json — a check never pins a fact on live workshop data.
+    print("\na panel dragged in the plan: its depth targets, and it writes only its placement")
+    import copy                                                          # noqa: E402
+    from app import api                                                  # noqa: E402
+    from cabinetgen.model import PanelSpec                               # noqa: E402
+    from cabinetgen.render import plan_svg                               # noqa: E402
+    from cabinetgen.room import rectangular as _rect, y_snap_points      # noqa: E402
+    from cabinetgen.store import job_from_dict                           # noqa: E402
+    pj = Job("pd", room=_rect(4000, 3000, ceiling=2600), cabinets=[
+        Cabinet(number=1, width=600, height=720, depth=570, kind="base", doors=1),
+        Cabinet(number=2, width=600, height=720, depth=570, kind="base", doors=1),
+        Cabinet(number=5, width=600, height=300, depth=16, kind="panel",
+                panel=PanelSpec(board="MEL", orientation="upright", a=600, b=300)),
+        Cabinet(number=6, width=586, height=780, depth=16, kind="panel",
+                panel=PanelSpec(board="MEL", orientation="end", a=586, b=780))],
+        placements=[Placement(1, "A", 0), Placement(2, "A", 600),
+                    Placement(5, "A", 200, z=1500, y=600), Placement(6, "A", 1200, z=0)])
+    ys = {(s_["y"], s_["why"]) for s_ in y_snap_points(pj, 5, "A")}
+    check("against the wall, in front of each cabinet, front level with it",
+          {(0, "against the wall"), (570, "in front of 1"), (554, "front level with 1"),
+           (570, "in front of 2")} <= ys, True)
+    check("and a neighbouring panel's back", (0, "back level with 6") in ys, True)
+    check("nothing into the wall", min(y for y, _w in ys), 0)
+    check("a carcass has no depth to drag", y_snap_points(pj, 1, "A"), [])
+
+    wire = job_to_dict(pj)
+    posted = copy.deepcopy(wire)
+    model = api.drag({"job": posted, "cabinet": 5})
+    check("/api/drag hands a panel its depth targets and where it stands",
+          (model["panel"], model["y"], bool(model["walls"]["A"]["y_snaps"])), (True, 600, True))
+    check("and a cabinet none", api.drag({"job": copy.deepcopy(wire), "cabinet": 1})
+          ["walls"]["A"]["y_snaps"], [])
+    check("asking changes nothing it was sent", posted == wire, True)
+
+    # what the browser does on drop: x and y of that one placement, nothing else
+    moved = copy.deepcopy(wire)
+    for q in moved["placements"]:
+        if q["cabinet"] == 5:
+            q["x"], q["y"] = 900, 570
+    before = generate_job(job_from_dict(copy.deepcopy(wire)))
+    after = generate_job(job_from_dict(copy.deepcopy(moved)))
+    again = job_to_dict(job_from_dict(copy.deepcopy(moved)))
+    check("the job differs in placements only",
+          sorted(k for k in set(wire) | set(again) if wire.get(k) != again.get(k)),
+          ["placements"])
+    check("and only in that panel's x and y",
+          sorted((a["cabinet"], k) for a, b in zip(wire["placements"], again["placements"])
+                 for k in set(a) | set(b) if a.get(k) != b.get(k)), sorted([(5, "x"), (5, "y")]))
+    check("the cut list does not move", [(q.label, q.length, q.width, q.material) for q in after],
+          [(q.label, q.length, q.width, q.material) for q in before])
+
+    svg = plan_svg(pj, show=("base", "wall", "tall", "panels"))
+    hits = re.findall(r'<polygon class="cab panhit" data-cab="(\d+)"', svg)
+    check("every shown panel has a grab area in the plan, and no cabinet has one",
+          sorted(hits), ["5", "6"])
+    check("a thin panel's grab area goes over the cabinets",
+          svg.index('panhit" data-cab="5"') > svg.index('<polygon class="cab" data-cab="2"'), True)
+    check("with the Panels toggle off, none",
+          'panhit' in plan_svg(pj, show=("base", "wall", "tall"), ghost=("panels",)), False)
+    check("each track says which way is into the room",
+          re.findall(r'class="track" data-wall="A" data-len="4000" data-nx="([-\d.]+)" '
+                     r'data-ny="([-\d.]+)"', svg), [("0.000000", "1.000000")])
+
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0
 

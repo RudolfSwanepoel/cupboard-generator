@@ -1009,6 +1009,7 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
 
     out += _plan_walls(rm, corners, T, scale)
     out += _plan_gaps(job, show, T)
+    under_at = len(out)          # a wide panel's grab area goes here, under the cabinets
     # ghosted first so the selected layers sit on top of them
     if isolate is None:
         solid = [i for i in items if i[2] in show]
@@ -1030,14 +1031,25 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     # visible against the thing it fouls
     out += _plan_fronts(job, solid, clashing, T, std)
     # Panels over the cabinets, thin and in their own board's colour: a bulkhead
-    # front is in front of the units it caps. Not draggable here — a panel is
-    # placed by typing, and the plan drag knows nothing about y.
+    # front is in front of the units it caps. Draggable here since 22 September
+    # 2026, along the wall and off it, through a grab area of their own — see
+    # `_plan_panel_hit`. A THIN one's grab area goes on top; a wide one (a
+    # bulkhead underside over the run) was spliced in under the cabinets above,
+    # so it never takes a press from a cabinet it lies over.
     bad_panels = {c.panel for c in panel_clashes(job, std)}
+    live = [(cab, p) for cab, p in pans
+            if (cab.number == isolate if isolate is not None else "panels" in show)]
     for cab, p in pans:
         out += _plan_panel(job, rm, cab, p, T, std,
                            faint=(cab.number != isolate if isolate is not None
                                   else "panels" not in show),
                            bad=cab.number in bad_panels)
+    for cab, p in live:
+        hit, thin = _plan_panel_hit(job, rm, cab, p, T, std, scale)
+        if thin or cab.number == isolate:
+            out += hit
+        else:
+            out[under_at:under_at] = hit
     # labels after every shape: an overhead sits over the base run it belongs to,
     # and a number you cannot read is worse than no number
     for cab, p, lay in solid:
@@ -1178,10 +1190,16 @@ def _plan_tracks(rm, corners, T):
     The browser projects the pointer onto one of these. Every number it needs —
     the wall's ends and its length — comes from here, computed by the engine.
     """
+    frames = wall_frames(rm)
     out = ['<g id="tracks" style="pointer-events:none">']
     for i, w in enumerate(rm.walls):
         (ax, ay), (bx, by) = T(corners[i]), T(corners[i + 1])
+        # The unit direction INTO THE ROOM off this wall, on the drawing. The
+        # plan maps world onto the page with one scale and no flip, so it is the
+        # wall's own normal; a panel's drag reads its depth off the wall with it.
+        _s, _d, (nx, ny) = frames[w.id]
         out.append(f'<line class="track" data-wall="{escape(w.id)}" data-len="{w.length}" '
+                   f'data-nx="{nx + 0.0:.6f}" data-ny="{ny + 0.0:.6f}" '
                    f'x1="{ax:.2f}" y1="{ay:.2f}" x2="{bx:.2f}" y2="{by:.2f}" '
                    f'stroke="none"/>')
     out.append("</g>")
@@ -1262,14 +1280,12 @@ def _plan_panel(job, rm, cab, p, T, std, faint=False, bad=False):
     """One panel's footprint: a thin rectangle in the board it is cut from.
 
     16 mm on plan is under a pixel at most scales, so the outline is what is
-    actually seen and the fill is there for the colour. It carries no `.cab`
-    class and no drag: a panel is placed by typing, and the plan drag has no
-    idea what `y` is.
+    actually seen and the fill is there for the colour.
 
-    And it takes no pointer events at all. A bulkhead underside is 570 deep on
-    plan and covers the whole run beneath it, so left grabbable it would have
-    put an undraggable sheet over every cabinet it caps — the plan drag looks
-    for `.cab` under the pointer and would have found the panel instead.
+    It takes no pointer events itself. A panel is picked up by its grab area,
+    `_plan_panel_hit`, which is placed so that a bulkhead underside 570 deep on
+    plan never puts a sheet over the cabinets it caps. `data-panel` is what the
+    drag moves with it.
     """
     fp = [T(q) for q in cabinet_footprint(rm, p, cab, std, job.materials)]
     pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in fp)
@@ -1279,6 +1295,31 @@ def _plan_panel(job, rm, cab, p, T, std, faint=False, bad=False):
             f'fill="{"#f6e0e3" if bad else colour}" fill-opacity="0.9" '
             f'stroke="{CRIT if bad else INK}" pointer-events="none" '
             f'stroke-width="{"2" if bad else "1.3"}"{op}/>']
+
+
+def _plan_panel_hit(job, rm, cab, p, T, std, scale):
+    """The invisible area a panel is picked up by in the plan, and whether the
+    panel is THIN there (either extent under `PANEL_GRAB` pixels).
+
+    A 16 mm panel is under three pixels on plan, so, as in the elevation (E4),
+    its footprint is grown about its middle to at least `PANEL_GRAB` pixels each
+    way, in the wall's own frame so it turns with the wall. It carries `.cab` —
+    one press handler, one `/api/drag` — with `data-layer="panels"`, which is the
+    toggle that says whether it is live, and `data-panel` so the drag knows to
+    move it off the wall as well as along it.
+    """
+    g = geometry(cab, std, job.materials)
+    grow = PANEL_GRAB / max(scale, 1e-9)            # PANEL_GRAB pixels, in mm
+    w, d = max(g.width, grow), max(g.depth, grow)
+    x0 = p.x + g.width / 2 - w / 2
+    y0 = int(getattr(p, "y", 0) or 0) + g.depth / 2 - d / 2
+    pts = [T(to_world(rm, p.wall, x, y)[:2])
+           for x, y in ((x0, y0), (x0 + w, y0), (x0 + w, y0 + d), (x0, y0 + d))]
+    thin = min(g.width, g.depth) * scale < PANEL_GRAB
+    return ([f'<polygon class="cab panhit" data-cab="{cab.number}" '
+             f'data-panel="{cab.number}" data-layer="panels" '
+             f'points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in pts)}" '
+             f'fill="none" stroke="none" pointer-events="all"/>'], thin)
 
 
 def _plan_label(rm, cab, p, T, std: Standard = STANDARD, materials: dict = None):

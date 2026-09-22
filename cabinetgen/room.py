@@ -1177,6 +1177,50 @@ def snap_points(job, number: int, wall_id: str, std: Standard = STANDARD):
     return keep
 
 
+def y_snap_points(job, number: int, wall_id: str, std: Standard = STANDARD):
+    """How far off a wall a PANEL may come to rest, and why — `Placement.y`.
+
+    The depth twin of `snap_points`, for the plan drag (22 September 2026). Only
+    a panel has a y: a carcass stands against the wall it is placed on. The
+    candidates are the wall itself and every face of what already stands on that
+    wall, carcass or panel (`_on_wall`), whatever its height — a bulkhead front
+    lines up with the fronts of the base units two metres below it, which is
+    exactly why it is not filtered by height the way the sideways snap is:
+
+        against the wall            y = 0, the back of every carcass
+        in front of N               its back on N's front face
+        front level with N          its front face on N's front face
+        behind N / back level with N    against another panel's back
+
+    Each carries the stretch of wall N stands on (`x0`/`x1`), so the browser
+    can prefer the neighbour nearest along the wall when two share a depth; it
+    never limits where the target applies. Sorted by depth. Nothing negative:
+    a panel cannot go into the wall.
+    """
+    rm = job.room
+    cab = next((c for c in job.cabinets if c.number == number), None)
+    if rm is None or cab is None or not cab.is_panel:
+        return []
+    mine = geometry(cab, std, job.materials).depth
+    out = [(0, "against the wall", None, None)]
+    for other, op, og, lay, _z in _on_wall(job, wall_id, std, exclude=number):
+        span = (op.x, op.x + og.width)
+        oy = int(getattr(op, "y", 0) or 0) if lay == "panel" else 0
+        front = oy + og.depth
+        out.append((front, f"in front of {other.number}") + span)
+        out.append((front - mine, f"front level with {other.number}") + span)
+        if lay == "panel":
+            out.append((oy, f"back level with {other.number}") + span)
+            out.append((oy - mine, f"behind {other.number}") + span)
+    keep, seen = [], set()
+    for y, why, x0, x1 in sorted(out, key=lambda t: (t[0], t[1])):
+        if y < 0 or (y, why) in seen:
+            continue
+        seen.add((y, why))
+        keep.append({"y": int(y), "why": why, "x0": x0, "x1": x1})
+    return keep
+
+
 def _gap_along(mine, span) -> int:
     """How far apart two stretches of one wall are, 0 where they touch or overlap.
 

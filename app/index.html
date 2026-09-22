@@ -4085,8 +4085,17 @@ function tracks() {
     const x1 = +t.getAttribute("x1"), y1 = +t.getAttribute("y1");
     const x2 = +t.getAttribute("x2"), y2 = +t.getAttribute("y2");
     return {wall: t.dataset.wall, len: +t.dataset.len,
-            x1: x1, y1: y1, dx: x2 - x1, dy: y2 - y1};
+            x1: x1, y1: y1, dx: x2 - x1, dy: y2 - y1,
+            nx: +t.dataset.nx || 0, ny: +t.dataset.ny || 0};
   });
+}
+
+// How far a point stands off a wall INTO THE ROOM, in mm — the engine's normal
+// for that wall, read off the drawing. Only a panel's drag asks: its y.
+function offWall(track, px, py) {
+  const len = Math.hypot(track.dx, track.dy);
+  if (!len) return 0;
+  return ((px - track.x1) * track.nx + (py - track.y1) * track.ny) * track.len / len;
 }
 
 // Where a point falls along a wall: how far along it in mm, and how far off it.
@@ -4134,16 +4143,26 @@ $("plan").addEventListener("pointerdown", async (e) => {
   // was listening, and the cabinet then stuck to the pointer — the same fault
   // the elevation drag was cured of, and the same cure.
   e.preventDefault();
-  const d = {model: null, poly: poly, place: p, from: {wall: p.wall, x: p.x},
-             tracks: tracks(), moved: false, last: null, released: false, grab: null};
+  // A PANEL moves along its wall and off it (22 September 2026): its drawn
+  // footprint and its grab area both carry data-panel, and both move together.
+  const panel = !!poly.dataset.panel;
+  const shapes = panel
+    ? [...document.querySelectorAll(`#plan [data-panel="${number}"]`)] : [poly];
+  const d = {model: null, poly: poly, shapes: shapes, panel: panel, place: p,
+             from: {wall: p.wall, x: p.x, y: p.y || 0}, at: {x: p.x, y: p.y || 0},
+             tracks: tracks(), moved: false, last: null, released: false,
+             grab: null, grabY: 0};
   // Where along the cabinet it was grabbed, so it does not jump to put its
   // middle under the pointer — the elevation drag's rule, read off the same
   // track the drag projects onto. Null until known; the middle is the fallback.
+  // A panel keeps how far off its back it was grabbed, for the same reason.
   const own = d.tracks.find((t) => t.wall === p.wall);
-  const at = own && project(own, svgPoint(e).x, svgPoint(e).y);
+  const sp = svgPoint(e);
+  const at = own && project(own, sp.x, sp.y);
   if (at) d.grab = at.mm - p.x;
+  if (own && panel) d.grabY = offWall(own, sp.x, sp.y) - (p.y || 0);
   DRAG = d;
-  poly.classList.add("dragging");
+  shapes.forEach((el) => el.classList.add("dragging"));
   // On the window, not the element: a drag that runs off the plan must still
   // finish rather than stick to the pointer.
   window.addEventListener("pointermove", onDragMove);
@@ -4170,6 +4189,7 @@ function onDragMove(e) {
 }
 
 function moveDrag(d, e) {
+  if (d.panel) { movePanelDrag(d, e); return; }
   const DRAG = d;                          // this drag, whatever the global says now
   const pt = svgPoint(e);
   let best = null;
@@ -4216,6 +4236,59 @@ function moveDrag(d, e) {
   }
 }
 
+// A panel in the plan: along its OWN wall and off it, never onto another wall
+// and never up or down — its z is the elevation's business. Both axes pick the
+// nearest candidate the engine named (`snaps`, `y_snaps`), within tolerance.
+function movePanelDrag(d, e) {
+  const t = d.tracks.find((k) => k.wall === d.from.wall);
+  const wall = t && d.model.walls[t.wall];
+  if (!wall) return;
+  const pt = svgPoint(e);
+  const pr = project(t, pt.x, pt.y);
+  if (!pr) return;
+  const tol = d.model.tolerance;
+  const grab = d.grab !== null && d.grab >= 0 && d.grab <= d.model.width
+    ? d.grab : d.model.width / 2;
+  let x = Math.max(0, Math.min(Math.round(pr.mm - grab), wall.max_x));
+  let why = "", pick = null, near = tol + 1;
+  for (const sn of wall.snaps) {
+    const off = Math.abs(sn.x - x);
+    if (off < near) { near = off; pick = sn; }
+  }
+  if (pick) { x = pick.x; why = pick.why; }
+
+  let y = Math.max(0, Math.round(offWall(t, pt.x, pt.y) - d.grabY));
+  // Several faces can share one depth — a run of base units all 570 deep. The
+  // one nearest along the wall at the panel's LIVE position is the one named,
+  // the elevation's tie-break; it picks between candidates, it invents none.
+  const w = d.model.width;
+  const away = (sn) => sn.x0 === null || sn.x0 === undefined ? 0
+    : Math.max(0, sn.x0 - (x + w), x - sn.x1);
+  let whyY = "", yPick = null, yNear = tol + 1, yAway = 0;
+  for (const sn of (wall.y_snaps || [])) {
+    const off = Math.abs(sn.y - y), gap = away(sn);
+    if (off < yNear || (off === yNear && gap < yAway)) { yNear = off; yAway = gap; yPick = sn; }
+  }
+  if (yPick) { y = yPick.y; whyY = yPick.why; }
+
+  d.moved = true;
+  d.at = {x: x, y: y};
+  const unit = Math.hypot(t.dx, t.dy) || 1;
+  const along = (x - d.from.x) * pr.pxPerMm, off = (y - d.from.y) * pr.pxPerMm;
+  const tx = t.dx / unit * along + t.nx * off, ty = t.dy / unit * along + t.ny * off;
+  d.shapes.forEach((el) => el.setAttribute("transform",
+    `translate(${tx.toFixed(2)} ${ty.toFixed(2)})`));
+
+  const out = $("dragreadout");
+  if (out) {
+    out.style.display = "block";
+    out.style.left = (e.clientX - pt.rect.left + 14) + "px";
+    out.style.top = (e.clientY - pt.rect.top + 14) + "px";
+    out.textContent = `panel ${d.place.cabinet} · wall ${t.wall} · ${x} mm` +
+      (why ? ` (${why})` : "") + ` · ${y} mm off the wall` + (whyY ? ` (${whyY})` : "");
+  }
+}
+
 function endDrag() {
   const d = DRAG;
   if (!d) return;
@@ -4233,12 +4306,24 @@ function finishDrag(d) {
   window.removeEventListener("pointermove", onDragMove);
   window.removeEventListener("pointerup", endDrag);
   window.removeEventListener("pointercancel", endDrag);
-  d.poly.classList.remove("dragging");
-  d.poly.removeAttribute("transform");
-  d.poly.removeAttribute("opacity");
+  (d.shapes || [d.poly]).forEach((el) => {
+    el.classList.remove("dragging");
+    el.removeAttribute("transform");
+    el.removeAttribute("opacity");
+  });
   const out = $("dragreadout");
   if (out) out.style.display = "none";
   if (!d.moved) return;
+  if (d.panel) {
+    // Only the placement moves: x along the wall and y off it. z, the wall and
+    // every dimension stay exactly as they were.
+    if (d.at.x === d.from.x && d.at.y === d.from.y) return;
+    d.place.x = d.at.x;
+    d.place.y = d.at.y;
+    placesSig = null;            // the placements table shows the new numbers
+    compute();
+    return;
+  }
   if (d.place.wall !== d.from.wall) placesSig = null;   // the table's shape changed
   compute();
 }

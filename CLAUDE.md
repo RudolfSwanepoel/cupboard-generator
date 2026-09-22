@@ -56,6 +56,16 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
+**Placed panels drag in the plan (22 September 2026, follow-up brief).** Along
+their wall and off it, z untouched, through the same `/api/drag` and a new depth
+snap, `room.y_snap_points`. See **Dragging a panel in the plan** under **Placing
+a panel**. Exercised with a real mouse in headless Chromium on Test.json's end
+panel 8 and an upright panel: grabbed on its grab area and not its number, no
+jump off-centre, nearest snap on both axes (y 19 lands on 14 "front level with
+1", not on the wall), a quick drag, z unchanged, the elevation at the new x
+straight after, the reverse, and cabinets dragging exactly as before. Benchmark
+and every check unchanged.
+
 **Plan drag, accepting criticals, wall elevations on one rule, Line / Finish
 view (22 September 2026, brief `claude-code-brief` of that date, items 1-5).**
 Benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50);
@@ -87,12 +97,17 @@ only Test.json's drawings, which is the point of items 3 and 4.
    against a 3 mm back the mitre does not have (its back is the melamine wall
    panels; `back` stays "four" in the file). Derived shelves on blind corners —
    base 600, wall 600 and 350, tall 1000 — never trip it, pinned in
-   `check_drag.py`. **Not fixed, awaiting Rudolf**: it is the check applied to a
-   construction it was not written for, not an arithmetic mismatch.
+   `check_drag.py`. **Left as is — ruled** (below).
 
 Also: `check_edging.py` was failing on `Test.json` cabinet 13 before any of
 this — a mitre keeps its support rows and cuts none, exactly as a panel does,
 and the check now skips it the same way.
+
+**Ruled on these results the same day:** the classification of criticals is
+accepted as proposed — **tip-up is the only acceptable critical**, and every
+other one blocks, above-ceiling, ceiling-measured, wall-length and room-closure
+included. And **`shelf-fouls-back` on a mitre stays as it is**: Rudolf ruled
+against skipping it when no back panel is cut. Do not change it.
 
 Rulings recorded with this brief: **blind corners are intended mainly for base
 and wall-hung units; tall corners are mitres. External corners** (outside
@@ -1211,11 +1226,37 @@ rectangle at least `render.PANEL_GRAB` (16) px across** with `pointer-events`
 on. Without it a bulkhead front cannot be picked up at all.
 
 **In the plan a panel is a thin rectangle in its own board's colour, drawn over
-the cabinets and taking no pointer events.** `y` is visible there and nowhere
-else. It is not draggable in the plan — a panel is placed by typing, and the
-plan drag knows nothing about y — and a bulkhead underside is 570 deep on plan,
-so left grabbable it would have put an undraggable sheet over every cabinet it
-caps.
+the cabinets.** `y` is visible there and nowhere else. The drawn rectangle takes
+no pointer events; the panel is picked up by its own grab area — see **Dragging
+a panel in the plan** below.
+
+**Dragging a panel in the plan** (22 September 2026, replacing E5's "not
+built"). Along its OWN wall (x) and off it (y); never onto another wall and never
+up or down — z is the elevation's. One press handler and one `/api/drag`, as for
+a cabinet:
+
+- `render._plan_panel_hit` is the grab area: the footprint grown about its middle
+  to at least `PANEL_GRAB` px each way, in the wall's frame, class `cab panhit`,
+  `data-layer="panels"` so the Panels toggle decides whether it is live. A THIN
+  panel's goes over the cabinets (E4, as in the elevation); a WIDE one — a
+  bulkhead underside over the run — goes under them, so it never takes a press
+  from a cabinet it lies over, and is reached where it is clear or by isolating
+  it. Plan text takes no pointer events, so its number never catches the press.
+- `room.y_snap_points` is the depth twin of `snap_points`: the wall (0), each
+  carcass or panel's front ("in front of N"), fronts level ("front level with
+  N"), and another panel's back ("back level with N", "behind N"). NOT filtered
+  by height — a bulkhead front lines up with base-unit fronts far below it. Each
+  carries N's stretch of wall only for the tie-break. `/api/drag` hands it over
+  per wall as `y_snaps`, and a carcass gets none.
+- Each track carries `data-nx`/`data-ny`, the wall's own normal into the room;
+  the plan is one scale and no flip, so that IS the direction on the page. The
+  browser reads y off it and works out no dimension.
+- Both axes keep the grab offset and take the NEAREST candidate within
+  tolerance, ties to the nearest along the wall at the live position.
+- The drop writes `Placement.x` and `Placement.y` of that panel and nothing
+  else, then recomputes: the clash warnings, the plan and the elevation all come
+  from that one compute. `check_drag.py` pins that only placements move and the
+  cut list does not.
 
 **Grain lines on a panel run the way the cut list cuts it, or not at all.**
 `render._panel_grain_vertical` maps the grain direction onto the drawing through
@@ -1259,8 +1300,8 @@ which is also why cabinet 6 is 570 deep rather than 500. `check_panels.py` and
 `check_edging`'s support-row comparison skips panels, because a panel keeps its
 support rows in the file and the engine cuts none of them.
 
-**Not built, and not asked for: dragging a panel in the plan, and `PanelSpec.anchor`.**
-A panel still stays where it is put and does not follow a cabinet.
+**Not built, and not asked for: `PanelSpec.anchor`.** A panel still stays where it
+is put and does not follow a cabinet. (Dragging one in the plan is built — above.)
 
 ## Zoom
 
@@ -1367,9 +1408,9 @@ The thing that is hidden is hidden UNDER something, and that something would
 still swallow the click. Only isolate does this — a layer ghosted by the toggle
 keeps its events, which is what reveals its door swing on hover.
 
-**A panel isolates exactly as a cabinet does**: it is occluded the same way. It
-is still not draggable in the plan, isolated or not — that is the existing
-ruling, unchanged.
+**A panel isolates exactly as a cabinet does**: it is occluded the same way, and
+isolated its grab area goes on top whatever its size, so a bulkhead underside
+lying over the run can always be got at and dragged.
 
 **`plan_svg(isolate=...)` falls back to the ordinary plan when the number names
 nothing it draws**, rather than greying out the whole room for nothing. A newly

@@ -42,7 +42,7 @@ from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth,
                              panel_clashes as room_panel_clashes, placed_panels,
                              placement_for, plinth_choice_for, plinth_lengths,
                              rectangular, runs as room_runs, snap_points,
-                             z_snap_points)
+                             y_snap_points, z_snap_points)
 from cabinetgen.standard import STANDARD
 from cabinetgen.store import (job_from_dict, job_to_dict, load, next_number,
                               room_from_dict, room_to_dict, save)
@@ -1548,6 +1548,8 @@ def drag(payload):
         "depth": g.depth,
         "layer": layer_of(cab, here),
         "leg_lift": lift,
+        # where it stands off the wall now — 0 for every carcass
+        "y": int(getattr(here, "y", 0) or 0) if here else 0,
         "tolerance": job.std.snap_tolerance,
         "ceiling": ceiling,
         # How high the underside may go. 0 is the floor, where the carcass stands
@@ -1564,7 +1566,10 @@ def drag(payload):
                          # every height, each with the stretch of wall it
                          # applies over — the cabinet crosses several on the way
                          "z_snaps": z_snap_points(job, number, w.id, job.std,
-                                                  spans=True)}
+                                                  spans=True),
+                         # how far off the wall a PANEL may rest, for the plan
+                         # drag; a carcass has no y, and gets none
+                         "y_snaps": y_snap_points(job, number, w.id, job.std)}
                   for w in job.room.walls},
     }
 
