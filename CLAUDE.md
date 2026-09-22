@@ -30,6 +30,7 @@ python tools/check_single_source.py
 python tools/check_swap.py
 python tools/check_colour.py
 python tools/check_panels.py
+python tools/check_pictures.py
 python tools/snapshot.py --compare baseline.json
 ```
 
@@ -100,6 +101,15 @@ floor rather than the plinth top, which is a leg height out and is why
 a cabinet given a wall can land underneath one already there, with nothing to
 click on, so it is now reached from the LIST instead. See **Vertical snap** and
 **Isolate** below.
+
+**A second standalone fix, not a lettered Part (22 September 2026): board
+pictures, and `out/` renamed `output/`.** A board picture had never once
+displayed, and the reason was not the path: the server had no static route at
+all, so an `<img src>` naming a Windows path resolved against
+`http://127.0.0.1:<port>/` and 404'd. There is a `/pictures/<name>` route now,
+a picture is chosen with Browse… or dropped on the swatch rather than typed,
+and whichever way it arrives the server copies it into `Pictures/` and stores a
+path relative to the repo. `Pictures/` is in git. See **Board pictures** below.
 
 Also done since Part C, and not in the brief:
 
@@ -199,6 +209,8 @@ drawn side by side, not a view of the room.
 cabinetgen/standard.py     every construction constant. Start here.
 cabinetgen/boards.py       the board library: load, save, tape names, job usage
 boards.json                the library itself, shared through the repo
+cabinetgen/pictures.py     board pictures: Pictures/, what is stored, what is served
+Pictures/                  the board pictures themselves, shared through the repo
 cabinetgen/model.py        Panel, Drawer, Cabinet, Job
 cabinetgen/engine.py       cabinet -> panels
 cabinetgen/drawers.py      drawer stacks: equal, graduated, pinned or exact
@@ -226,6 +238,7 @@ tools/check_single_source.py  the one list of which cabinet fields hold a board
 tools/check_swap.py        a swap moves every use of a board, and says what it does
 tools/check_colour.py      board colour in the drawings, and the ink that reads on it
 tools/check_panels.py      independent panels: the line they cut, and what they stay out of
+tools/check_pictures.py    board pictures: what is stored, what is served
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
@@ -436,6 +449,78 @@ the case that proves it: a GREY carcass with three white-edged rows, which still
 come out `PVC WHITE`. `board` and `kind` are written to the job file only when a
 row actually names them, so a file saved before the control round-trips byte for
 byte.
+
+### Board pictures
+
+**A board picture had never once displayed, and the path was never the problem**
+(22 September 2026). The server served `/` and the API routes and 404'd
+everything else, so `<img src="C:\Dev\CupboardApp\Pictures\Storm Grey.jpg">`
+resolved against `http://127.0.0.1:<port>/` and came back 404. Taking the stray
+quote characters out of the path changed nothing, because nothing was ever
+being fetched. A `file:` src would not have helped either — every engine blocks
+a `file:` sub-resource on an `http:` page.
+
+**`cabinetgen/pictures.py` is the one answer to all three halves of it.** Where
+a picture lives (`Pictures/`, flat), what is stored (`Pictures/Storm Grey.jpg`,
+relative to the repo) and what a page asks for (`/pictures/Storm%20Grey.jpg`,
+through `url_for`). No colour-literal rule as such, but the same shape: the
+browser is handed `picture_url` off `/api/boards` as a derived field beside
+`tapes` and `offered`, and never works one out from a stored path.
+
+**It is copied in, not pointed at.** `boards.json` is shared through git, so an
+absolute path in it is one machine's answer written down as if it were
+everybody's — and a path typed by hand is a path somebody can mistype, which is
+exactly how the quotes got in. Browse… and a drop both end at `install` /
+`install_bytes`, which put the file into `Pictures/` — suffixing `-2` rather
+than overwriting a different file of the same name — and hand back the relative
+path. The field in the editor is **read-only**: there is nothing to type any
+more.
+
+**Two ways in, one route back.** Browse… is pywebview's native Open dialog,
+opened by `/api/pick-picture` on the window `run_app.py` hands to
+`api.set_window`. Under `--no-window` or in the browser fallback there is no
+window, so the reply says `no_window` and the browser's own file input takes
+over; that and a drop both go to `/api/drop-picture`. **A drop carries the
+file's CONTENTS and no path** — WebView2 does not expose `File.path` the way
+Electron does, and pywebview 6.2.1 has no file-drop event — so the bytes are
+what is sent, and that is not a limitation worth working around. Cancelling the
+dialog is `cancelled`, not an error, and says nothing.
+
+**A stray drop anywhere else on the window is swallowed.** The browser's default
+is to navigate to the dropped file, which would throw the app and the unsaved
+job away.
+
+**The route is a basename lookup into one flat folder.** The name comes from a
+file somebody can edit, so it may not name a parent, a drive or anything outside
+`Pictures/`, and the extension has to be one of `pictures.TYPES` — which also
+keeps the route from becoming a way to read the repo. `safe_name` flattens a
+traversal rather than refusing it.
+
+**On save, a picture that names no readable image is refused, and says so.** Not
+dropped quietly: a picture that silently does not arrive is the whole bug. A
+stored absolute path inside `Pictures/` is squared up to the relative form on
+the way through, so an old record migrates the first time it is saved — and
+**`url_for` draws it either way**, so a saved job carrying the old absolute form
+still shows its picture without being rewritten. Files on disk change only when
+saved.
+
+**A `data:` URI passes through all of it untouched.** It is already the picture
+rather than a pointer at one.
+
+`tools/check_pictures.py` holds the lot: the cleaning, the URL, the traversal,
+the refusals, and that `boards.json` names nothing absolute. A saved job is
+reported on and never failed — it is a price capture, and it is not rewritten
+under the operator.
+
+### Where the exports land
+
+**`output/`, one folder per job** (renamed from `out/` on 22 September 2026).
+`/api/export` already wrote `out/<job name>/`; `tools/regen_check.py` was the
+one thing dropping loose `nest_*.svg` at the root, and it writes
+`output/wardrobe_oct2025/` now. So one job's files can never land on another's.
+`api._safe_name` is still what keeps a job called `../x` from writing outside
+it. The old `out/` stays in `.gitignore` so a stale folder left on a machine
+does not turn up as untracked.
 
 ### A support row: cut from, and edged in
 
@@ -1092,7 +1177,7 @@ about 0.3 s) and keeps the fewest sheets. On the October job it lands on
 Grain-locked panels are never rotated. `NEST_CHOICE` records which heuristic
 won per material; `NEST_REJECTS` lists panels too big for a bare board.
 
-Sheet layouts render to `out/nest_<material>.svg` — open in any browser.
+Sheet layouts render to `output/<job>/nest_<material>.svg` — open in any browser.
 
 Worth trying if more yield is wanted: cross-sheet offcut reuse (keep a stock of
 leftovers between jobs), and simulated annealing over the panel order. The
@@ -1517,7 +1602,7 @@ because laying out elsewhere and walking it in is normal practice.
 
 Names from the job file — wall ids, opening and obstruction kinds — go into SVG
 escaped, and into export file names through `api._safe_name`, so a job called
-`../x` cannot write outside `out/`.
+`../x` cannot write outside `output/`.
 
 Still open, and **not to be guessed into `Standard`**:
 
