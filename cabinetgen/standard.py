@@ -42,6 +42,25 @@ class Standard:
     box_height_default: int = 150   # the box height a new drawer row starts at
     graduated_step: float = 0.5     # each face's share, going down, over the one above
 
+    # ---- corner units ------------------------------------------------------
+    # Ruled by Rudolf, 22 September 2026. A mitre's shape falls out of its four
+    # measurements and nothing else (spec item 12); these three are the
+    # clearances that do not, and they hold for every mitre whatever its angle.
+    mitre_shelf_clear: int = 3   # a mitred shelf's cut edge sits this far behind
+                                 # the closed door's inside face, measured
+                                 # perpendicular to it. No edging thickness is
+                                 # deducted — this app deducts no tape anywhere,
+                                 # here included (ruled 22 September 2026).
+    hinge_clearance: int = 50    # how far short of the open-face side panel's
+                                 # front edge an arm shelf must stop, leaving the
+                                 # concealed hinge's mounting plate its room.
+                                 # Applied whichever side the door is hinged,
+                                 # because the hinge side can be changed.
+    arm_shelf_step: int = 5      # the arm shelf's derived maximum depth is
+                                 # rounded DOWN to a multiple of this before it is
+                                 # offered. A depth typed by hand is taken as
+                                 # typed and need not be a multiple of it.
+
     # ---- exposed panels ----------------------------------------------------
     exposed_extra: int = 16     # exposed side depth = carcass depth + this (finishes flush with the door)
 

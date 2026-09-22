@@ -29,9 +29,13 @@ import json                                                                 # no
 
 from cabinetgen.engine import generate_job                                  # noqa: E402
 from cabinetgen.model import Cabinet, Drawer, Job, Opening, Panel, Placement  # noqa: E402
-from cabinetgen.room import (_gap_along, clashes, convex_overlap,          # noqa: E402
+from cabinetgen.engine import generate_cabinet, mitre_door_width           # noqa: E402
+from cabinetgen.room import (_gap_along, arm_shelf_max_depth,              # noqa: E402
+                             blind_door_width, blind_opening,
+                             clashes, convex_overlap,
                              corner_outline,
                              corner_shadow, gaps as room_gaps, geometry,
+                             mitre_blank, mitre_inner_span, mitre_legs,
                              overlaps, polygons_overlap, pullout_envelope,
                              rectangular, runs as room_runs, snap_points,
                              swing_envelopes, triangulate, z_snap_points)
@@ -84,6 +88,225 @@ def corner_cab(number, arm_a=850, arm_b=850, face_a=500, face_b=500,
                    kind="tall", back="none", template="none",
                    corner_style=style, arm_a=arm_a, arm_b=arm_b,
                    face_a=face_a, face_b=face_b, bespoke=bespoke)
+
+
+def template_mitre(number=7, hand="", **kw):
+    """Cabinet 7's measurements as a TEMPLATE cabinet, which is what Part C
+    generates. The real cabinet 7 is bespoke and stays that way so the October
+    benchmark cannot move; this is the same box, generated."""
+    kw.setdefault("kind", "tall")
+    return Cabinet(number=number, width=850, height=2400, depth=500,
+                   back="none", supports=0, doors=1,
+                   corner_unit=True, corner_style="mitre", corner_hand=hand,
+                   arm_a=850, arm_b=850, face_a=500, face_b=500, **kw)
+
+
+def blind_cab(number=1, width=1000, blind=500, hand="", depth=560, **kw):
+    """The worked blind example: W 1000, B 500, t 16 -> opening 468, door 497."""
+    kw.setdefault("kind", "base")
+    kw.setdefault("back", "none")
+    kw.setdefault("supports", 0)
+    return Cabinet(number=number, width=width, height=720, depth=depth,
+                   corner_unit=True, corner_style="blind",
+                   corner_hand=hand, blind_width=blind, **kw)
+
+
+def sizes(panels, role):
+    return sorted((p.length, p.width, p.qty) for p in panels if p.role == role)
+
+
+def corner_checks():
+    """Part C and Part D: what a corner unit actually cuts, and which end of it
+    stands in the corner. Ruled 22 September 2026.
+
+    Before this, ticking Corner unit on a template cabinet reshaped the plan and
+    changed nothing on the cut list - the box still came out W x D square, and
+    nothing said so. Cabinet 7 only ever "worked" because its panels are typed
+    out by hand in the job file.
+    """
+    std = STANDARD
+    print("\na mitre is generated from its four measurements")
+    m = template_mitre()
+    P = generate_cabinet(m)
+    check("sides: the two open faces, then the two wall sides one wrapping the other",
+          sizes(P, "Side"), [(2400, 500, 2), (2400, 818, 1), (2400, 834, 1)])
+    check("top and bottom are the square blank, both of them",
+          (sizes(P, "Top"), sizes(P, "Bottom")),
+          ([(818, 818, 1)], [(818, 818, 1)]))
+    check("the door is cut to the inner span, rounded down, with no gap taken off",
+          (mitre_inner_span(m), sizes(P, "Door")), (472.35, [(2397, 472, 1)]))
+    check("which is cabinet 7's real door, and not the 495 outline face less 3",
+          [p.width for p in P if p.role == "Door"], [472])
+    check("pot holes follow the door length exactly as on any other door",
+          [p.pot_holes for p in P if p.role == "Door"], [4])
+    check("no backing panel and no supports on a mitre (RULES W13)",
+          [p.role for p in P if p.role in ("Backing", "Support")], [])
+
+    print("\na BASE mitre still gets its top - that is what braces it")
+    base_m = template_mitre(kind="base")
+    check("a straight base cabinet has no top",
+          [p.role for p in generate_cabinet(cab(1, 600, kind="base")) if p.role == "Top"],
+          [])
+    check("but a base mitre does, and it is the same square blank",
+          sizes(generate_cabinet(base_m), "Top"), [(818, 818, 1)])
+    check("and an upper mitre is the same box again",
+          sizes(generate_cabinet(template_mitre(kind="upper")), "Top"), [(818, 818, 1)])
+
+    print("\nthe two mitre shelves, and where the mitre cut falls on each")
+    check("the blank every one of them is cut from", mitre_blank(m), (818, 818))
+    check("the top and bottom mitre flush with the inner line",
+          mitre_legs(m), (334, 334))
+    check("a mitred shelf sits mitre_shelf_clear behind the closed door",
+          mitre_legs(m, std, std.mitre_shelf_clear), (338, 338))
+    check("an arm shelf runs wall side to wall side along its arm",
+          [(p.length, p.width, p.qty) for p in
+           generate_cabinet(template_mitre(arm_shelves=6, arm_shelf_depth=350))
+           if p.role == "Shelve"], [(818, 350, 6)])
+    check("cabinet 7's own 350 is under the maximum, so it is accepted",
+          (arm_shelf_max_depth(m), 350 <= arm_shelf_max_depth(m)), (430, True))
+    over = template_mitre(arm_shelves=1, arm_shelf_depth=470)
+    check("deeper than the maximum is a critical that names the maximum",
+          [(i.level, "430" in i.message) for i in validate(Job(name="x", cabinets=[over]), [])
+           if "arm shelf" in i.message], [("critical", True)])
+    check("a blank depth takes the maximum rather than nothing",
+          [(p.length, p.width) for p in
+           generate_cabinet(template_mitre(arm_shelves=1)) if p.role == "Shelve"],
+          [(818, 430)])
+    both = generate_cabinet(template_mitre(arm_shelves=2, arm_shelf_depth=350,
+                                           mitred_shelves=1))
+    check("both kinds at once come out as two distinct designations",
+          sorted((p.label, p.length, p.width, p.qty) for p in both if p.role == "Shelve"),
+          [("705a", 818, 350, 2), ("705b", 818, 818, 1)])
+
+    print("\nthe hand mirrors the unit, and nothing else about it")
+    left = template_mitre(hand="L")
+    check("a right-handed outline is what this app always drew",
+          geometry(m).footprint, corner_outline("mitre", 850, 850, 500, 500))
+    check("and a left-handed one is its mirror image",
+          geometry(left).footprint, corner_outline("mitre", 850, 850, 500, 500, "L"))
+    check("both read as the same 45 degree mitre - a mirrored 45 is not a 135",
+          (geometry(m).mitre_deg, geometry(left).mitre_deg), (45.0, 45.0))
+    check("the same front face, the same inner span and the same door",
+          (geometry(left).face_lengths, mitre_inner_span(left), mitre_door_width(left)),
+          (geometry(m).face_lengths, mitre_inner_span(m), mitre_door_width(m)))
+    check("and the very same panels: mirroring a box does not resize it",
+          sorted((p.label, p.length, p.width, p.qty) for p in generate_cabinet(left)),
+          sorted((p.label, p.length, p.width, p.qty) for p in P))
+    check("a blank hand reads as R, so every job written before it is unmoved",
+          geometry(template_mitre(hand="")).footprint, geometry(m).footprint)
+
+    print("\nand it decides which corner the unit is standing in")
+    room = rectangular(4000, 3000, ceiling=2700)
+    check("right-handed: flush at the wall's END, turning onto the NEXT wall",
+          corner_shadow(room, m, Placement(7, "A", 3150), std), ("B", 0, 850, 500))
+    check("and nothing at the wall's start, which is the other corner",
+          corner_shadow(room, m, Placement(7, "A", 0), std), None)
+    check("left-handed: flush at the wall's START, turning onto the PREVIOUS wall",
+          corner_shadow(room, left, Placement(7, "B", 0), std), ("A", 3150, 850, 500))
+    check("and nothing at the wall's end",
+          corner_shadow(room, left, Placement(7, "B", 2150), std), None)
+
+    print("\na mitre door that cannot open BLOCKS the export - the one exception")
+    deep = cab(2, 600, d=900, h=2400, kind="tall", doors=1)
+    clash = job([template_mitre(1, hand="L", door_hinges=["L"]), deep],
+                [Placement(1, "B", 0), Placement(2, "B", 900)], room=room)
+    said = [i for i in validate(clash, generate_job(clash)) if "door swing" in i.message]
+    check("it is a critical, not the warning an ordinary door gets",
+          [i.level for i in said], ["critical"])
+    check("and it says the widest door that would clear",
+          [("widest that clears" in i.message) for i in said], [True])
+    ordinary = job([cab(1, 600, doors=1), cab(3, 600)],
+                   [Placement(1, "A", 3000, flip=True), Placement(3, "B", 0)], room=room)
+    check("the same foul on an ordinary door is still only a warning",
+          sorted({i.level for i in validate(ordinary, [])
+                  if "door swing fouls" in i.message}), ["warning"])
+
+    print("\nan ell is shape only, and says so rather than cutting nothing quietly")
+    ell = template_mitre(3)
+    ell.corner_style = "ell"
+    check("it still has a shape, and two front faces",
+          (geometry(ell).source, geometry(ell).face_lengths), ("corner", [350, 350]))
+    check("but it cuts nothing at all", generate_cabinet(ell), [])
+    check("and that is a critical naming what to do about it",
+          [(i.level, "construction not decided" in i.message)
+           for i in validate(Job(name="x", cabinets=[ell]), []) if "ell corner" in i.message],
+          [("critical", True)])
+    hand_typed = corner_cab(4, style="ell")
+    check("an ell with its own bespoke panels is untouched by that",
+          (len(generate_cabinet(hand_typed)) > 0,
+           [i for i in validate(Job(name="x", cabinets=[hand_typed]), [])
+            if "ell corner" in i.message]), (True, []))
+
+    print("\nticked with no type chosen is what 'it does nothing' looked like")
+    silent = Cabinet(number=5, width=850, height=2400, depth=500, kind="tall",
+                     corner_unit=True, arm_a=850, arm_b=850, face_a=500, face_b=500)
+    check("it really does cut a straight box",
+          sizes(generate_cabinet(silent), "Side"), [(2400, 500, 2)])
+    check("and now it says so, rather than saying nothing",
+          [(i.level, "no type is chosen" in i.message)
+           for i in validate(Job(name="x", cabinets=[silent]), [])
+           if "Corner unit is ticked" in i.message], [("warning", True)])
+
+    print("\na blind corner: a straight box, one door, and a flush panel")
+    b = blind_cab(shelves=1)
+    BP = generate_cabinet(b)
+    check("the worked example: W 1000, B 500, t 16",
+          (blind_opening(b), blind_door_width(b)), (468, 497))
+    check("the door is derived from the opening exactly as any other door is",
+          sizes(BP, "Door"), [(717, 497, 1)])
+    check("the blind panel is cut at exactly B, the width it was measured at",
+          sizes(BP, "Blind Panel"), [(717, 500, 1)])
+    check("and it is code 08 with its own role, so the cut list can tell it apart",
+          sorted({(p.label, p.role) for p in BP if p.role == "Blind Panel"}),
+          [("108", "Blind Panel")])
+    check("it is edged like the door beside it and takes no pot holes",
+          [(p.edge_l, p.edge_w, p.pot_holes) for p in BP if p.role == "Blind Panel"],
+          [(2, 2, 0)])
+    check("the carcass is the ordinary path: back, supports and shelves all cut",
+          sorted({p.role for p in generate_cabinet(blind_cab(back="four", supports=4,
+                                                             shelves=1))}
+                 & {"Backing", "Support", "Shelve"}),
+          ["Backing", "Shelve", "Support"])
+    check("its plan is a plain rectangle, not a derived corner shape",
+          (geometry(b).source, geometry(b).width, geometry(b).depth),
+          ("panels", 1000, 560))
+    check("two doors are never cut on one: it is one door, always",
+          len([p for p in generate_cabinet(blind_cab(doors=2)) if p.role == "Door"]), 1)
+
+    print("\nand a blind unit fills the return wall the same way a mitre does")
+    check("right-handed, flush at the wall's end",
+          corner_shadow(room, b, Placement(1, "A", 3000), std), ("B", 0, 560, 560))
+    check("left-handed, at the end of the previous wall",
+          corner_shadow(room, blind_cab(hand="L"), Placement(1, "B", 0), std),
+          ("A", 3440, 560, 560))
+    ret = cab(2, 600, d=600, doors=1)
+    tight = job([blind_cab(1, blind=500), ret],
+                [Placement(1, "A", 3000), Placement(2, "B", 560)], room=room)
+    check("a return run reaching past the blind panel BLOCKS the export",
+          [(i.level, "at least 616" in i.message) for i in validate(tight, generate_job(tight))
+           if "across the door opening" in i.message], [("critical", True)])
+    roomy = job([blind_cab(1, blind=700), ret],
+                [Placement(1, "A", 3000), Placement(2, "B", 560)], room=room)
+    check("and a blind panel wide enough for it clears",
+          [i for i in validate(roomy, generate_job(roomy))
+           if "across the door opening" in i.message], [])
+
+    print("\ntwo ways a blind corner is not one, both of them blocking")
+    for why, c, phrase in (
+            ("no blind panel width", blind_cab(1, blind=0), "no blind panel width"),
+            ("a panel wider than the carcass", blind_cab(1, blind=980), "no opening at all")):
+        check(why, [i.level for i in validate(Job(name="x", cabinets=[c]), [])
+                    if phrase in i.message], ["critical"])
+    # The limit is W - 2t, and it is where it says it is: a panel one millimetre
+    # under it still leaves an opening and cuts a door. Anything that would leave
+    # no door at all is already over that limit, which is why the "door <= 0"
+    # critical is a guard and not something the editor can reach.
+    edge = blind_cab(1, blind=967)
+    check("one millimetre under the limit still leaves an opening and a door",
+          (blind_opening(edge), blind_door_width(edge)), (1, 30))
+    check("and nothing blocks it",
+          [i.level for i in validate(Job(name="x", cabinets=[edge]), [])
+           if "blind" in i.message], [])
 
 
 def main() -> int:
@@ -591,6 +814,8 @@ def main() -> int:
                                    "data-x0=", "data-y0=", 'data-ceiling="2700"')), True)
     check("and one group per cabinet, so a drag moves the whole thing",
           sorted(re.findall(r'<g class="ecabg" data-cab="(\d+)"', svg)), ["1", "2"])
+
+    corner_checks()
 
     print("\na job with no room is untouched by all of it")
     plain = Job(name="x", cabinets=[cab(1, 900, doors=2)])

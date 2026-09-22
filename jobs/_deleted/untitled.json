@@ -1,0 +1,202 @@
+{
+  "name": "untitled",
+  "boards": [
+    "WHITEMEL",
+    "BACK",
+    "GREY"
+  ],
+  "materials": {
+    "WHITEMEL": {
+      "board": "SUPER WHITE MELAMINE 16MM",
+      "name": "SUPER WHITE MELAMINE 16MM",
+      "tape": "WHITE",
+      "thickness": 16,
+      "grain": "plain",
+      "price": 575,
+      "picture": "",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#ffffff"
+    },
+    "BACK": {
+      "board": "WHITE MASONITE BACKING 3MM",
+      "name": "WHITE MASONITE BACKING 3MM",
+      "tape": "WHITE",
+      "thickness": 3,
+      "grain": "plain",
+      "price": 310,
+      "picture": "",
+      "has_edging": false,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#ffffff"
+    },
+    "GREY": {
+      "board": "STORMGREY",
+      "name": "STORMGREY",
+      "tape": "Grey",
+      "thickness": 16,
+      "grain": "plain",
+      "price": 1100,
+      "picture": "Pictures/Storm Grey.jpg",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#504f4e"
+    }
+  },
+  "cabinets": [
+    {
+      "number": 1,
+      "width": 1000,
+      "height": 2400,
+      "depth": 500,
+      "kind": "tall",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 2,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": true,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "panel": {
+        "board": "",
+        "orientation": "upright",
+        "a": 0,
+        "b": 0,
+        "grain_along": "b",
+        "edge_kind": "",
+        "edge_board": "",
+        "edge_long": 0,
+        "edge_short": 0
+      },
+      "footprint": [],
+      "corner_style": "ell",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": false
+    },
+    {
+      "number": 2,
+      "width": 600,
+      "height": 2400,
+      "depth": 500,
+      "kind": "tall",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": false,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    }
+  ],
+  "loose": [],
+  "room": {
+    "name": "Main Bed",
+    "ceiling": 2600,
+    "offset_depth": 600,
+    "closed": false,
+    "walls": [
+      {
+        "id": "A",
+        "length": 4000,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "B",
+        "length": 3000,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      }
+    ]
+  }
+}

@@ -4,20 +4,23 @@ Every rule here exists because a real job got it wrong. The finding reference
 in each message points at docs/RULES.md so the reason is never lost.
 """
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List
 
-from .engine import front_stack_check, generate_cabinet
+from .engine import front_stack_check, generate_cabinet, mitre_door_width
 from .export_plaza import effective_price
 from .model import (PANEL_ORIENTATIONS, TAPE_PREFIX, WHITE_TOKEN, Cabinet, Job,
                     Panel, grain_of, is_thin, material_board, material_offers,
                     material_thickness, material_token, tape_for)
-from .room import (above_ceiling, blocked_openings, cab_corner_outline,
+from .room import (above_ceiling, arm_shelf_depth, arm_shelf_max_depth,
+                   blind_door_width, blind_opening, blocked_openings,
+                   cab_corner_outline, corner_shadow,
                    clashes as room_clashes, closure_error, corner_offset,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
                    panel_clashes as room_panel_clashes, placed,
-                   plinth_choice_for, runs as room_runs, tip_problems,
+                   plinth_choice_for, run_key, runs as room_runs, tip_problems,
                    triangulate)
+from .engine import mitre_door_width
 from .standard import Standard, STANDARD
 
 CRITICAL = "critical"
@@ -74,10 +77,12 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     out += _board_prices(job, panels)
     out += _supports(job.cabinets)
     out += _support_edging(job)
+    out += _corners(job, std)
     out += _room(job, std)
     out += _gaps(job, std)
     out += _plinth(job, std)
     out += _placement_clashes(job, std)
+    out += _blind_clearance(job, std)
     out += _room_heights(job, std)
     out += _outlines(job, std)
     return sorted(out, key=lambda i: (i.level != CRITICAL, i.where))
@@ -666,11 +671,27 @@ def _room(job: Job, std):
             out.append(Issue(CRITICAL, str(p.cabinet),
                              f"placed on wall {p.wall!r}, which the room does not have"))
             continue
-        end = p.x + by_number[p.cabinet].width
+        cab = by_number[p.cabinet]
+        # its real reach along the wall, never the declared width (hard rule 1):
+        # a mitre declared 1200 wide with a 1000 arm used to be reported as
+        # running 200 mm past the end of a wall it was sitting flush against
+        reach = geometry(cab, std).width
+        end = p.x + reach
         if p.x < 0 or end > lengths[p.wall]:
             out.append(Issue(WARNING, str(p.cabinet),
                              f"sits {p.x}-{end} on wall {p.wall}, which is "
                              f"{lengths[p.wall]} long"))
+        # A corner unit stands in a corner. The editor moves it there whenever
+        # its type, hand or length changes; this catches one dragged back out.
+        if cab.corner_on and cab.corner_kind in ("mitre", "ell", "blind") \
+                and geometry(cab, std).source in ("corner", "panels") \
+                and corner_shadow(rm, cab, p, std) is None:
+            want = 0 if cab.hand == "L" else lengths[p.wall] - reach
+            out.append(Issue(WARNING, str(p.cabinet),
+                             f"corner unit {cab.number} is not standing in a corner: "
+                             f"its {'left' if cab.hand == 'L' else 'right'}-hand end "
+                             f"belongs at the {'start' if cab.hand == 'L' else 'end'} "
+                             f"of wall {p.wall} (x = {want}), and it is at x = {p.x}"))
     return out
 
 
@@ -751,6 +772,96 @@ def _plinth(job: Job, std):
     return out
 
 
+
+def _corners(job: Job, std):
+    """What only a corner unit can get wrong. Ruled 22 September 2026.
+
+    This runs over every cabinet, placed or not, because all of it is about what
+    the unit CUTS rather than where it stands — and a corner unit that cuts the
+    wrong thing is wrong on the bench whether or not it has been given a wall.
+
+    The first two are what "the corner unit does nothing" looked like from the
+    outside. Ticking Corner unit left the Style dropdown on its blank option, so
+    `corner_on` stayed false and a straight W x D box went on the cut list with
+    nothing said; and an ell has no ruled construction, so it must say so rather
+    than quietly cutting nothing.
+    """
+    out = []
+    for cab in job.cabinets:
+        if cab.is_panel:
+            continue
+        where = str(cab.number)
+        if cab.corner_ticked and not cab.corner_style:
+            out.append(Issue(WARNING, where,
+                             f"cabinet {cab.number}: Corner unit is ticked but no type is "
+                             f"chosen, so it is being cut as a straight "
+                             f"{cab.width}x{cab.depth} box — choose Mitre, Ell or Blind"))
+            continue
+        kind = cab.corner_kind
+        if kind == "ell":
+            # Rudolf has never built one and has deferred the construction, so
+            # the shape is all there is. Nothing is invented: it cuts nothing,
+            # and this says so rather than letting an empty cabinet cost R0.
+            if cab.template != "none" and not cab.bespoke:
+                out.append(Issue(CRITICAL, where,
+                                 f"cabinet {cab.number}: ell corner — construction not decided "
+                                 f"yet, so this unit cuts nothing. Add bespoke panels in the "
+                                 f"job file or change the type"))
+        elif kind == "mitre":
+            out += _mitre(cab, where, std)
+        elif kind == "blind":
+            out += _blind(cab, where, std)
+    return out
+
+
+def _mitre(cab, where: str, std):
+    """A mitre's own measurements, against what they have to describe."""
+    out = []
+    if cab.template == "none":
+        return out                      # hand-typed panels; the job is the answer
+    if cab.arm_shelves > 0:
+        top = arm_shelf_max_depth(cab, std, cab.arm_shelf_arm)
+        depth = arm_shelf_depth(cab, std)
+        if top is not None and depth is not None and depth > top:
+            arm = cab.arm_shelf_arm.upper()
+            out.append(Issue(CRITICAL, where,
+                             f"cabinet {cab.number}: arm shelf is {depth} mm deep on arm {arm}, "
+                             f"and the deepest that clears both the closed door "
+                             f"({std.mitre_shelf_clear} mm) and the hinge plate "
+                             f"({std.hinge_clearance} mm) is {top} mm"))
+    return out
+
+
+def _blind(cab, where: str, std):
+    """A blind corner's three ways of not being a blind corner (Q4 ruling).
+
+    All three are CRITICAL, because each of them means the door on the cut list
+    cannot be the door that gets fitted.
+    """
+    out = []
+    if cab.template == "none":
+        return out
+    if not cab.blind_width:
+        out.append(Issue(CRITICAL, where,
+                         f"cabinet {cab.number}: blind corner with no blind panel width — "
+                         f"nothing says how much of the {cab.width} mm carcass the panel "
+                         f"covers, so neither the panel nor the door can be cut"))
+        return out
+    b, t = int(cab.blind_width), std.board_t
+    if b >= cab.width - 2 * t:
+        out.append(Issue(CRITICAL, where,
+                         f"cabinet {cab.number}: blind panel is {b} mm in a {cab.width} mm "
+                         f"carcass, which leaves no opening at all (the two sides take "
+                         f"{2 * t} mm) — the panel has to be under {cab.width - 2 * t} mm"))
+        return out
+    if (blind_door_width(cab, std) or 0) <= 0:
+        out.append(Issue(CRITICAL, where,
+                         f"cabinet {cab.number}: blind corner leaves a door "
+                         f"{blind_door_width(cab, std)} mm wide — check the carcass width "
+                         f"against the {b} mm blind panel"))
+    return out
+
+
 def _placement_clashes(job: Job, std):
     """Two cabinets in the same place, and fronts that cannot open.
 
@@ -765,19 +876,135 @@ def _placement_clashes(job: Job, std):
     carcass is a judgement about how the job is built. A panel is cut and
     costed whether or not it is placed, so its position moves no figure on the
     order and must not block one.
+
+    A CORNER UNIT'S DOOR IS THE ONE EXCEPTION, and it is a deliberate one
+    (ruled 22 September 2026). An ordinary door that fouls something can be
+    rehung, moved or lived with, and which way it hangs is the fitter's
+    judgement. A mitre's door cannot: it hangs on the mitre face, there is no
+    other edge to hang it from, and its width is derived from the arms rather
+    than chosen — so a swing that fouls the runs either side of it is a unit
+    that cannot be built as drawn, not a preference. It blocks the export, and
+    the message says the widest door that would clear so there is something to
+    do about it.
+
+    Ordinary doors stay WARNINGS. Do not "tidy" this into one rule.
     """
     out = []
+    by_number = {c.number: c for c in job.cabinets}
     for o in room_overlaps(job):
         out.append(Issue(CRITICAL, f"{o.a}/{o.b}",
                          f"cabinets {o.a} and {o.b} overlap by {o.mm} mm on "
                          f"wall {o.wall}"))
     for c in room_clashes(job, std):
         thing = "door swing" if c.kind == "door" else "drawer pull-out"
+        cab = by_number.get(c.cabinet)
+        if c.kind == "door" and cab is not None and cab.corner_kind == "mitre":
+            out.append(Issue(CRITICAL, str(c.cabinet),
+                             f"corner unit {c.cabinet}: its door swing fouls {c.against}, "
+                             f"and a mitre door hangs on the mitre face or nowhere — "
+                             f"{_door_that_clears(job, cab, std)}"))
+            continue
         out.append(Issue(WARNING, str(c.cabinet),
                          f"{thing} fouls {c.against}"))
     for c in room_panel_clashes(job, std):
         out.append(Issue(WARNING, str(c.panel),
                          f"panel stands in {c.against} on wall {c.wall}"))
+    return out
+
+
+
+def _door_that_clears(job: Job, cab, std) -> str:
+    """The widest this mitre's door could be cut and still swing clear.
+
+    Said out loud because a critical that only says "it fouls" leaves nothing to
+    do. The answer is found by trying widths against the real swing check rather
+    than by a formula: `Cabinet.corner_door_width` is the override the operator
+    would set, so the trial sets exactly that and asks `room.clashes` again. The
+    search only runs when a corner door has already fouled something, which is
+    rare, and it costs about nine passes.
+
+    Widening the arms is the other way out, and the message says so, but there
+    is no single figure for it: bigger arms move the face further into the room
+    and widen the derived door at the same time, so the two do not resolve to
+    one number the way a door width does.
+    """
+    def fouls(width):
+        trial = replace(cab, corner_door_width=width)
+        rest = [trial if c.number == cab.number else c for c in job.cabinets]
+        return any(x.cabinet == cab.number and x.kind == "door"
+                   for x in room_clashes(replace(job, cabinets=rest), std))
+
+    top = max(1, mitre_door_width(cab, std))
+    if fouls(1):
+        return ("no door width clears it at all — the arms have to grow or "
+                "whatever it fouls has to move")
+    lo, hi = 1, top                     # lo always clears, hi always fouls
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if fouls(mid):
+            hi = mid
+        else:
+            lo = mid
+    return (f"the widest that clears is {lo} mm against the {top} mm derived from "
+            f"the arms — set the door width override, or grow the arms")
+
+
+
+def _blind_clearance(job: Job, std):
+    """A return run standing across a blind unit's door opening.
+
+    CRITICAL, ruled 22 September 2026 (Q4) — the same exception as a mitre's
+    door swing, for the same reason. A blind corner exists for exactly one
+    purpose: to hold its door far enough from the corner that the run on the
+    return wall does not block it. A return run that reaches past the blind
+    panel defeats the whole unit, and no amount of fitting will fix it, so it
+    blocks rather than warns.
+
+    What reaches: the return cabinet's own depth, plus its door front, and
+    nothing else. No handle clearance is added (ruled 22 September 2026) — if a
+    real job needs one it belongs in Standard, not guessed at here.
+
+    Nothing is checked unless the unit actually sits flush in a corner, because
+    `corner_shadow` is what says which wall the return run is on, and until it
+    does there is no return run to be in the way of.
+    """
+    rm = job.room
+    if rm is None:
+        return []
+    out = []
+    items = placed(job)
+    for cab, p, lay in items:
+        if cab.corner_kind != "blind" or not cab.blind_width:
+            continue
+        shadow = corner_shadow(rm, cab, p, std)
+        if shadow is None:
+            continue
+        wall_id, _at, _w, _d = shadow
+        # Everything else standing on the same wall in the same run. A wall unit
+        # over the return run is not what blocks a base unit's door.
+        same = [(o, op) for o, op, ol in items
+                if o.number != cab.number and op.wall == wall_id
+                and run_key(ol) == run_key(lay)]
+        if not same:
+            continue
+        # The one nearest the corner. The shadow starts at the corner end, and
+        # which end that is follows the hand: a right-handed unit turns onto the
+        # START of the next wall, a left-handed one onto the END of the previous.
+        if cab.hand == "L":
+            other, _op = max(same, key=lambda t: t[1].x + geometry(t[0], std).width)
+        else:
+            other, _op = min(same, key=lambda t: t[1].x)
+        og = geometry(other, std)
+        reach = og.depth + (std.board_t if og.door_widths else 0)
+        b = int(cab.blind_width)
+        if reach > b:
+            out.append(Issue(CRITICAL, str(cab.number),
+                             f"cabinet {cab.number}: cabinet {other.number} on wall {wall_id} "
+                             f"reaches {reach} mm off that wall (its {og.depth} mm depth"
+                             + (f" and a {std.board_t} mm door front" if og.door_widths else "")
+                             + f"), past the {b} mm blind panel and across the door opening — "
+                             f"the blind panel has to be at least {reach} mm, or the return "
+                             f"run shallower"))
     return out
 
 
@@ -823,7 +1050,11 @@ def _outlines(job: Job, std):
     for cab, _p, _lay in placed(job):
         g = geometry(cab, std)
         where = str(cab.number)
-        if cab.corner_on and cab_corner_outline(cab) is None:
+        # A BLIND corner is deliberately shapeless here: its plan is a plain
+        # rectangle W x D like any other cabinet, so `cab_corner_outline` gives
+        # None for one by design and that is not a fault (ruled 22 Sept 2026).
+        if (cab.corner_on and cab.corner_kind != "blind"
+                and cab_corner_outline(cab) is None):
             out.append(Issue(CRITICAL, where,
                              f"cabinet {cab.number}: corner parameters do not resolve to a "
                              f"shape — check corner_style, arm_a/arm_b and face_a/face_b"))

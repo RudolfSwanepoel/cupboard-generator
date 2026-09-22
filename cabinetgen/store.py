@@ -20,8 +20,26 @@ def panel_from_dict(d: dict) -> Panel:
     return Panel(**{k: v for k, v in d.items() if k in known})
 
 
+# Cabinet fields added after the job file format had settled. Each is written
+# only when it is NOT at its default, so a job saved before it existed reads and
+# writes byte for byte — which is what check_panels.py pins on Test.json and
+# Test_Build.json, and the same discipline as `panel`, a support row's `board`
+# and a placement's `y` below.
+#
+# A field added to Cabinet and not added here is what makes every job file on
+# disk grow a key the next time it is saved.
+LATE_CABINET_FIELDS = (
+    "corner_hand", "blind_width", "arm_shelves", "arm_shelf_arm",
+    "arm_shelf_depth", "mitred_shelves", "corner_door_width",
+)
+
+
 def cabinet_to_dict(c: Cabinet) -> dict:
     d = asdict(c)
+    defaults = {f.name: f.default for f in fields(Cabinet)}
+    for name in LATE_CABINET_FIELDS:
+        if d.get(name) == defaults[name]:
+            d.pop(name, None)
     d["drawers"] = [asdict(x) for x in c.drawers]
     # `board` and `kind` are written only when a row actually names them, so a
     # job saved before the control round-trips byte for byte and is still read

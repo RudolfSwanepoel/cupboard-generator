@@ -6,10 +6,11 @@ except panel codes and the 100 mm support width, which is a fixed detail.
 from dataclasses import replace
 from typing import List
 
-from .model import (MATERIALS, PANEL_CODE, Cabinet, Job, Panel, grain_of,
-                    resolve_board, tape_for)
-from .room import (gaps, plinth_butt_wall, plinth_choice_for, plinth_deduction,
-                   plinth_lengths, runs)
+from .model import (BLIND_CODE, MATERIALS, PANEL_CODE, Cabinet, Job, Panel,
+                    grain_of, resolve_board, tape_for)
+from .room import (arm_shelf_depth, arm_shelf_length, blind_door_width, gaps,
+                   mitre_blank, mitre_legs, mitre_inner_span, plinth_butt_wall,
+                   plinth_choice_for, plinth_deduction, plinth_lengths, runs)
 from .standard import Standard, STANDARD
 
 SUPPORT_W = 100          # a support spans the internal width at this height
@@ -62,6 +63,134 @@ def panel_of(cab: Cabinet, materials: dict = None) -> Panel:
                  grain=grain, note=cab.note)
 
 
+def mitre_door_width(cab: Cabinet, std: Standard = STANDARD) -> int:
+    """How wide a mitre's door leaf is cut.
+
+    Ruled 22 September 2026, and it replaces "the outline face less a gap". The
+    door is cut to the INNER SPAN — the line between the two open-face side
+    panels' inner front corners, which is the surface its inside face rests on —
+    rounded DOWN to the whole millimetre, with no gap deducted. It sits within
+    that span rather than overlaying the side edges, because the sides meet it at
+    an angle and there is nothing there to overlay.
+
+    Cabinet 7 is the check: its inner span is 472.35, and its door as really cut
+    is 472. The outline's own face is 495, which is a different measurement and
+    is not what a door is cut to.
+
+    A pair divides the same span, less `door_pair_gap`. `Cabinet.corner_door_width`
+    overrides the lot, and is blank on every cabinet that has not been overridden.
+    """
+    if cab.corner_door_width:
+        return int(cab.corner_door_width)
+    span = mitre_inner_span(cab, std)
+    if not span:
+        return 0
+    leaves = max(1, cab.door_count)
+    if leaves == 1:
+        return int(span)
+    return int((span - std.door_pair_gap) // leaves)
+
+
+def mitre_panels(cab: Cabinet, std: Standard = STANDARD,
+                 materials: dict = None) -> List[Panel]:
+    """A mitre corner unit's panels, off its four measurements and nothing else.
+
+    Ruled 22 September 2026, and it is one construction for tall, base and wall
+    alike: a melamine top AND bottom, two melamine open-face sides, and a
+    melamine back that is the two wall panels themselves — one wrapping the
+    other, exactly as cabinet 7 is built. So:
+
+    * a base mitre DOES get a top. That overrides the standing base rule, for
+      corners only, and straight cabinets are untouched. It is what braces the
+      box, which is why there is no bracing warning;
+    * there is no 3 mm backing board and no groove. `Cabinet.back` is not read;
+    * there are no supports. `Cabinet.support_rows` stays in the job file and
+      nothing is cut from it (RULES W13);
+    * an upper mitre hangs by fixing through its melamine wall panels, so it
+      needs no hanging warning either.
+
+    The wall panels are coded as SIDES, as cabinet 7 codes them. Nothing is
+    renamed: `born_distinct` gives 01a / 01b / 01c at the moment they are made.
+
+    The two shelf kinds are `Cabinet.arm_shelves` and `Cabinet.mitred_shelves`,
+    and a mitre may carry both. `shelves` / `fixed_shelves` are NOT read here: a
+    mitre's interior is not a rectangle, so a straight shelf size would be wrong
+    in the unsafe direction.
+    """
+    mats = MATERIALS if materials is None else materials
+    blank = mitre_blank(cab, std)
+    legs = mitre_legs(cab, std)
+    if blank is None or legs is None:
+        # The measurements do not describe a box. The validator says so by name;
+        # inventing a shape here would put a real panel on a real order.
+        return []
+    t, n = std.board_t, cab.number
+    bl, bw = blank
+    carc = resolve_board(mats, cab.carcass_board)
+    carc_tape = cab.carcass_tape(mats)
+    carc_grain = grain_of(mats, carc)
+    P: List[Panel] = []
+
+    def side(width, qty, what):
+        P.append(Panel(n, "01", "Side", carc, cab.height, width, qty,
+                       edge_l=1, edge_material=carc_tape, grain=carc_grain,
+                       note=what))
+
+    # ---- sides: the two open faces, then the two wall panels ---------------
+    # The open faces are each the depth of the run that butts onto them, and the
+    # wall panels are one board short of one arm and two short of the other,
+    # because one wraps the other. Which one wraps is a construction choice, not
+    # a consequence of the hand: mirroring the unit mirrors the joint with it, so
+    # both hands cut the same two figures. Wall A wraps, as cabinet 7 does it.
+    faces = [(int(cab.face_a), "open face, wall-A side"),
+             (int(cab.face_b), "open face, wall-B side")]
+    if faces[0][0] == faces[1][0]:
+        side(faces[0][0], 2, "open faces")
+    else:
+        for width, what in faces:
+            side(width, 1, what)
+    side(int(cab.arm_a) - t, 1, "wall A side, wraps the wall B side")
+    side(int(cab.arm_b) - 2 * t, 1, "wall B side")
+
+    # ---- top and bottom: the square blank, mitred on site ------------------
+    # Plazaboard cut guillotine only, so the mitre never leaves the factory cut:
+    # the blank goes out square and the note carries the two legs to mark it by.
+    cut = f"mitre on site: legs {legs[0]} along arm A and {legs[1]} along arm B"
+    for code, role in (("02", "Top"), ("03", "Bottom")):
+        P.append(Panel(n, code, role, carc, bl, bw, 1, edge_l=1,
+                       edge_material=carc_tape, grain=carc_grain, note=cut))
+
+    # ---- shelves -----------------------------------------------------------
+    if cab.arm_shelves > 0:
+        arm = cab.arm_shelf_arm
+        length = arm_shelf_length(cab, std, arm)
+        depth = arm_shelf_depth(cab, std)
+        if length and depth:
+            P.append(Panel(n, "05", "Shelve", carc, length, depth, cab.arm_shelves,
+                           edge_l=1, edge_material=carc_tape, grain=carc_grain,
+                           note=f"arm shelf, along arm {arm.upper()}"))
+    if cab.mitred_shelves > 0:
+        back = mitre_legs(cab, std, std.mitre_shelf_clear)
+        P.append(Panel(n, "05", "Shelve", carc, bl, bw, cab.mitred_shelves,
+                       edge_l=1, edge_material=carc_tape, grain=carc_grain,
+                       note=(f"mitred shelf, mitre on site: legs {back[0]} along arm A "
+                             f"and {back[1]} along arm B, which holds it "
+                             f"{std.mitre_shelf_clear} mm clear of the closed door")))
+
+    # ---- door --------------------------------------------------------------
+    leaves = cab.door_count
+    if leaves > 0:
+        h = cab.door_height or (cab.height - std.door_height_gap)
+        w = mitre_door_width(cab, std)
+        door_tape = cab.door_tape(mats)
+        leaf_boards = [resolve_board(mats, cab.door_board(i)) for i in range(leaves)]
+        for board in _dedupe(leaf_boards):
+            P.append(Panel(n, "07", "Door", board, h, w, leaf_boards.count(board),
+                           edge_l=2, edge_w=2, edge_material=door_tape,
+                           pot_holes=std.hinges(h), grain=grain_of(mats, board)))
+    return P
+
+
 def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
                     materials: dict = None) -> List[Panel]:
     """One cabinet in, its full panel list out.
@@ -80,6 +209,22 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     bespoke = resolved(cab.bespoke, mats)
     if cab.template == "none":
         return bespoke
+    # A corner unit is its own construction, not a straight box wearing a
+    # different outline. Before this branch existed, ticking Corner unit on a
+    # template cabinet reshaped the plan and changed not one line of the cut
+    # list — the box still came out W x D square.
+    #
+    # A BLIND corner is deliberately not here: it IS a straight box, so it takes
+    # the whole path below unchanged and differs only in its door and its one
+    # extra panel (ruled 22 September 2026).
+    if cab.corner_kind == "mitre":
+        return born_distinct(mitre_panels(cab, std, mats), bespoke)
+    if cab.corner_kind == "ell":
+        # Rudolf has never built one and the construction is not decided, so
+        # nothing is invented: it cuts nothing and the validator raises a
+        # critical saying so. An ell with template="none" and its own bespoke
+        # panels returns above, exactly as cabinet 7 does.
+        return born_distinct([], bespoke)
 
     def R(board):
         return resolve_board(mats, board)
@@ -198,10 +343,21 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     # ---- doors -------------------------------------------------------------
     # cab.door_count, never cab.doors: with "Has doors" unticked the count stays
     # in the job file and nothing is built from it.
-    leaves = cab.door_count
-    if leaves > 0:
+    #
+    # A blind corner is the one exception, and it is a ruling rather than a
+    # convenience (22 September 2026): it has exactly one door, at the far end
+    # from the corner, and that door is cut to the opening the blind panel
+    # leaves — W - B - door_single_gap — not to the carcass width. Its own
+    # `doors` count stays in the job file and is not read.
+    blind = cab.corner_kind == "blind"
+    leaves = 1 if blind else cab.door_count
+    # A blind unit with no blind panel width typed yet has no opening to cut a
+    # door into. The validator names it; a zero-width door does not reach a saw.
+    w = 0 if leaves <= 0 else (
+        (blind_door_width(cab, std) or 0) if blind
+        else std.door_width(cab.width, leaves))
+    if w > 0:
         h = cab.door_height or (cab.height - std.door_height_gap)
-        w = std.door_width(cab.width, leaves)
         # One line per board the leaves are cut from, in leaf order. Where they
         # all take the same board — the usual case — that is one line of qty
         # `leaves`, exactly as it always was. Where two differ, born_distinct
@@ -213,6 +369,19 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
             P.append(Panel(n, "07", "Door", board, h, w, count,
                            edge_l=2, edge_w=2, edge_material=door_tape,
                            pot_holes=std.hinges(h), grain=grain_of(mats, board)))
+
+    # ---- the blind corner's flush panel -------------------------------------
+    # Exactly B wide: the board size is the board size (ruled 22 September 2026).
+    # Cut from the exterior board, the same height as the door beside it, edged
+    # like that door and with its grain running the same way. It is fixed, so it
+    # takes no pot holes. Code 08 with the role "Blind Panel" (Q3) — see
+    # model.BLIND_CODE for why it is not a code of its own.
+    if blind and cab.blind_width:
+        P.append(Panel(n, BLIND_CODE, "Blind Panel", ext,
+                       cab.door_height or (cab.height - std.door_height_gap),
+                       int(cab.blind_width), 1,
+                       edge_l=2, edge_w=2, edge_material=door_tape,
+                       grain=ext_grain))
 
     # ---- exposed end panels ------------------------------------------------
     if cab.exposed_sides > 0:

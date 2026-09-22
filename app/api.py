@@ -18,7 +18,7 @@ from cabinetgen import nest as N
 from cabinetgen import pictures as PIC
 from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
                                 opening_for, remainder, split_pair, stack)
-from cabinetgen.engine import generate_job, panel_of
+from cabinetgen.engine import generate_job, mitre_door_width, panel_of
 from cabinetgen.export_plaza import (effective_price, estimate_cost, summarise,
                                      write_csvs)
 from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
@@ -31,9 +31,13 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
                               material_record, material_thickness, tape_for)
 from cabinetgen.render import (elevation_svg, pictures_drawn, plan_svg,
                                wall_elevation_svg)
-from cabinetgen.room import (LAYERS, add_wall, carcass_z, clashes as room_clashes,
+from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth,
+                             arm_shelf_length, arm_shelf_max_depth,
+                             blind_door_width, blind_opening, carcass_z,
+                             clashes as room_clashes,
                              closure_error, free_x, gaps as room_gaps, geometry,
-                             layer_of, overlaps as room_overlaps,
+                             layer_of, mitre_blank, mitre_inner_span, mitre_legs,
+                             overlaps as room_overlaps,
                              panel_clashes as room_panel_clashes, placed_panels,
                              placement_for, plinth_choice_for, plinth_lengths,
                              rectangular, runs as room_runs, snap_points,
@@ -141,7 +145,36 @@ def defaults(payload):
                      "that closes a bulkhead"},
         ],
         "panel_code": PANEL_CODE,
-        "corner_styles": ["", "mitre", "ell"],
+        "corner_styles": ["", "mitre", "ell", "blind"],
+        # Each type said in the words the editor shows, with what it asks for.
+        # The browser labels its fields from this and holds no copy of its own,
+        # the same discipline as panel_orientations above.
+        "corner_types": [
+            {"key": "mitre", "name": "Mitre",
+             "hint": "one straight front face across the corner, at whatever "
+                     "angle the two runs make. The angle is worked out from the "
+                     "four measurements \u2014 there is nothing to type."},
+            {"key": "ell", "name": "Ell",
+             "hint": "two front faces meeting at a right angle, leaving the "
+                     "notch that takes two doors. Shape only: the construction "
+                     "is not decided, so it cuts nothing yet."},
+            {"key": "blind", "name": "Blind",
+             "hint": "a straight cupboard with a flush panel across the corner "
+                     "end and one door at the far end. The run on the return "
+                     "wall is ordinary cabinets and is no part of this unit."},
+        ],
+        # Which end of the unit stands in the corner, as you face it in the room.
+        # Wall-local x runs left to right on the wall elevation, and 'L'/'R' here
+        # mean the same thing they mean on a door leaf (model.hinge_side).
+        "corner_hands": [
+            {"key": "R", "name": "Right",
+             "hint": "the right-hand end is in the corner \u2014 the wall\u2019s far "
+                     "end, and the unit turns onto the NEXT wall"},
+            {"key": "L", "name": "Left",
+             "hint": "the left-hand end is in the corner \u2014 the wall\u2019s start, "
+                     "and the unit turns onto the PREVIOUS wall"},
+        ],
+        "corner_arms": ["a", "b"],
         "hinge_sides": ["L", "R"],
         "face_modes": ["share", "fixed"],
         "face_presets": ["equal", "graduated"],
@@ -211,6 +244,10 @@ def _geometry_info(job, cab, std):
             # what the two tickboxes actually resolve to, so the browser reads
             # the state back rather than working the rule out a second time
             "corner_on": cab.corner_on,
+            # The corner unit, as the engine reads it. Every figure here is
+            # derived — the editor shows them and works out none of them, which
+            # is why the Size fields can be greyed and still say something true.
+            "corner": _corner_info(cab, std),
             "drawers_on": bool(cab.drawer_list),
             "doors_on": bool(cab.door_count),
             "door_count": cab.door_count,
@@ -284,6 +321,103 @@ def _geometry_info(job, cab, std):
             # everything else, which is how the editor knows what to show.
             "is_panel": cab.is_panel,
             "panel": _panel_info(job, cab) if cab.is_panel else None}
+
+
+
+def corner_field_problems(cab, std) -> dict:
+    """What is wrong with each Corner Unit field, in words, keyed by field.
+
+    The editor puts each message directly under the field it is about, in red,
+    so the operator is told which number to change and what it has to be -
+    rather than one engineer's sentence in the Validation tab about parameters
+    that "do not resolve to a shape". Empty when every field is usable.
+    """
+    kind = cab.corner_kind
+    out = {}
+
+    def need(key, label):
+        v = getattr(cab, key)
+        if v in (None, "") or int(v) <= 0:
+            out[key] = f"Enter the {label}."
+            return None
+        return int(v)
+
+    if kind in ("mitre", "ell"):
+        a = need("arm_a", "length along this wall")
+        b = need("arm_b", "length along the return wall")
+        fa = need("face_a", "open end on this wall")
+        fb = need("face_b", "open end on the return wall")
+        if b and fa and fa >= b:
+            out["face_a"] = (f"Must be less than the length along the return wall "
+                             f"({b}) \u2014 it is the depth of the run this unit "
+                             f"meets, usually the same depth as the cupboards beside it.")
+        if a and fb and fb >= a:
+            out["face_b"] = (f"Must be less than the length along this wall ({a}) "
+                             f"\u2014 it is the depth of the run on the return wall.")
+        if not (cab.height or 0) > 0:
+            out["height"] = "Enter the height."
+    elif kind == "blind":
+        w = need("width", "carcass width")
+        need("depth", "depth")
+        bw = need("blind_width", "blind panel width")
+        if not (cab.height or 0) > 0:
+            out["height"] = "Enter the height."
+        t = std.board_t
+        if w and bw and bw >= w - 2 * t:
+            out["blind_width"] = (f"Must be less than {w - 2 * t} (the carcass width "
+                                  f"less its two sides), or there is no room for a door.")
+    return out
+
+
+def _corner_info(cab, std):
+    """What the engine makes of this cabinet's corner measurements.
+
+    `ticked` and `kind` are the two halves of the question the Corner unit
+    tickbox asks: ticked with no type chosen is a cabinet that looks like a
+    corner on screen and cuts a straight box, and the editor says so rather than
+    leaving it silent, which is exactly what "the corner unit does nothing"
+    was.
+
+    Everything below `kind` is derived in cabinetgen and read back here. The
+    browser computes no dimension, so a greyed Size field can still show the
+    real figure and a shelf can still be offered its true maximum depth.
+    """
+    if not cab.corner_ticked or cab.is_panel:
+        return None
+    out = {"ticked": True, "kind": cab.corner_kind, "hand": cab.hand,
+           "style": cab.corner_style,
+           "problems": corner_field_problems(cab, std)}
+    if cab.corner_kind == "mitre":
+        blank = mitre_blank(cab, std)
+        legs = mitre_legs(cab, std)
+        shelf_legs = mitre_legs(cab, std, std.mitre_shelf_clear)
+        out.update({
+            "blank": list(blank) if blank else None,
+            "inner_span": mitre_inner_span(cab, std),
+            "door_width": mitre_door_width(cab, std),
+            "door_width_set": cab.corner_door_width,
+            "legs": list(legs) if legs else None,
+            "shelf_legs": list(shelf_legs) if shelf_legs else None,
+            "arm_shelves": cab.arm_shelves,
+            "arm_shelf_arm": cab.arm_shelf_arm,
+            "arm_shelf_depth": cab.arm_shelf_depth,
+            "arm_shelf_depth_eff": arm_shelf_depth(cab, std),
+            "arm_shelf_max": arm_shelf_max_depth(cab, std, cab.arm_shelf_arm),
+            # both arms, so the editor can show the maximum change as the arm does
+            "arm_shelf_max_a": arm_shelf_max_depth(cab, std, "a"),
+            "arm_shelf_max_b": arm_shelf_max_depth(cab, std, "b"),
+            "arm_shelf_length": arm_shelf_length(cab, std, cab.arm_shelf_arm),
+            "mitred_shelves": cab.mitred_shelves,
+            "shelf_clear": std.mitre_shelf_clear,
+            "hinge_clearance": std.hinge_clearance,
+        })
+    elif cab.corner_kind == "blind":
+        out.update({
+            "blind_width": cab.blind_width,
+            "opening": blind_opening(cab, std),
+            "door_width": blind_door_width(cab, std),
+        })
+    return out
 
 
 def _board_payload(job, key):

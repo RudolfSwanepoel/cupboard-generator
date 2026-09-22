@@ -627,3 +627,174 @@ cut list is worse than a form that produces a right one.
     browser reads the drag back into millimetres from the span the SVG carries
     in both mm and pixels, exactly as a plan drag projects onto a wall track;
     `drawers.split_pair` does the dividing.
+
+## Ruled — 22 Sept 2026 (corner units: mitre, ell, blind)
+
+21. **A corner unit has a TYPE and a HAND, and until it has both it is not one.**
+    The type is `mitre`, `ell` or `blind` — `corner_style` gains the third. The
+    hand is `corner_hand`, `'L'` or `'R'`, and it says which end of the unit
+    stands in the corner **as you face it in the room**.
+
+    Right is the wall's far end: cabinet-local `x = arm_a` lands on the wall's
+    length, and the unit turns onto the **next** wall in the chain. Left is the
+    wall's start, and it turns onto the **previous** one. That is not a
+    convention invented here — wall-local x runs left to right as you face a
+    wall, which is already what `model.hinge_side` means by 'L' and 'R'
+    (`room.swing_envelopes` hinges 'L' at the low-x end) and what
+    `render.wall_elevation_svg` draws. A blank hand reads as R, which is what
+    this app did before the field existed, so cabinet 7 and every job written
+    before it are unchanged.
+
+    A left-handed unit is the right-handed one mirrored: the outline, the front
+    faces, the hinge rule and the shadow all reflect, and **nothing resizes**.
+    Its panels are the same panels. `room.corner_shadow` returns `(wall, x,
+    width, depth)` now rather than assuming x = 0, because a left-handed unit's
+    shadow lands at the far end of the previous wall.
+
+    **Ticking Corner unit with no type chosen is what "the corner unit does
+    nothing" actually was.** `corner_on` needs a style, the Style dropdown
+    defaulted to blank, and a template cabinet with the box ticked went on cutting
+    a straight W × D box with nothing said about it. The editor now shows
+    "Choose a corner type" and the validator warns, naming the box it is really
+    cutting.
+
+22. **A mitre is ONE construction for tall, base and wall alike.** Melamine top
+    AND bottom, two melamine open-face sides, and a melamine back that is the two
+    wall panels themselves — one wrapping the other, `arm_a - t` and
+    `arm_b - 2t`, exactly as cabinet 7 is built. No 3 mm backing board, no
+    groove, no supports (RULES W13).
+
+    So a **base mitre does get a top**, overriding the standing base rule for
+    corners only. That top is what braces the box, which is why there is no
+    bracing warning to raise. An upper mitre hangs by fixing through its melamine
+    wall panels, so it needs no hanging warning either. Straight cabinets are
+    untouched by all of it. The wall panels stay coded as **sides**, as cabinet 7
+    codes them, and nothing is renamed: `engine.born_distinct` gives 01a / 01b /
+    01c at the moment the panels are made.
+
+23. **A mitre door is cut to the INNER SPAN, rounded down, with no gap
+    deducted.** The inner span is the line between the two open-face side
+    panels' inner front corners — the surface the closed door's inside face
+    actually rests on. It is **not** the outline's mitre face: the outline runs
+    corner to corner of the carcass, and the blank the top, bottom and shelves
+    are cut from is already a board thickness inside it on both edges.
+
+    The door sits *within* that span rather than overlaying the side edges,
+    because the sides meet it at an angle and there is nothing there to overlay.
+    A pair divides the same span less `door_pair_gap`. Height is `H - 3` as on
+    any door, and `Cabinet.corner_door_width` overrides the lot.
+
+    Cabinet 7 is the proof: its inner span is **472.35** and its door, as really
+    cut, is **472**. Spec item 14 calls that a "23 mm reveal" against the 495
+    outline face — it is not a reveal, it is a different measurement, and 495 is
+    not what a door is cut to. The swing check and the arm shelf's door clearance
+    both read this same line.
+
+24. **A mitre takes TWO kinds of shelf and may carry both.** `shelves` and
+    `fixed_shelves` are not read on one: a mitre's interior is not a rectangle,
+    so a straight shelf size would be wrong in the unsafe direction.
+
+    - **Arm shelf** — a rectangle running along one arm, behind the mitre. Its
+      length is that arm's internal span (`arm - 2t`); its depth is typed, and
+      `room.arm_shelf_max_depth` is the most it may be. Two things bound that and
+      the tighter wins: the closed door, which it must stay `mitre_shelf_clear`
+      behind, and the concealed hinge's mounting plate on the open-face side
+      panel it ends against, which it must stop `hinge_clearance` short of.
+      Both measure from `face - t`. The answer is rounded **down** to a multiple
+      of `arm_shelf_step`; a depth typed by hand is taken as typed and only has
+      to come under it. Over it is a CRITICAL naming the maximum. On cabinet 7
+      the maximum is 430, and its own 350 is accepted.
+    - **Mitred shelf** — the same square blank as the top and bottom, mitred on
+      site, but set back `mitre_shelf_clear` perpendicular from the inner line so
+      the door closes on it. On cabinet 7 that is legs of 338 against the top and
+      bottom's 334. The panel note carries both legs, because the fitter marks to
+      them.
+
+    **Nothing is said or generated about how a shelf is fixed** — that is the
+    assembler's choice. Nothing is said about hinges on a mitred shelf either:
+    shelf heights are not modelled anywhere in this app, `Standard.hinge_positions`
+    stays drawing-only (`check_elevation.py` fails if the engine, the export, the
+    nester or the validator reads it), and the assembler places shelves clear of
+    the hinges. Shelf heights are a separate piece of work and nothing here is
+    built towards them.
+
+    Three new constants, and they are the only figures a mitre needs that its
+    four measurements do not give: `mitre_shelf_clear` 3, `hinge_clearance` 50,
+    `arm_shelf_step` 5. **No edging thickness is deducted** in working the
+    clearance out — this app deducts no tape anywhere, and that holds here.
+
+25. **A blind corner is a straight cupboard, not a shaped one.** A carcass W × H
+    × D with a flush panel across the corner end and **one door**, always, at the
+    far end. The run on the return wall is ordinary cabinets and is no part of
+    this unit.
+
+        opening  O = W - 2t - B
+        door     derived from the opening exactly as any other door is,
+                 (O + 2t) - door_single_gap = W - B - door_single_gap
+        blind    exactly B wide - the board size is the board size - the same
+                 height as the door, cut from the exterior board, grain as a
+                 door, edged like the door, fixed, no pot holes
+
+    W 1000, B 500, t 16 → opening 468, door 497, blind panel 500.
+
+    Its plan is a plain rectangle, so it has no derived outline and
+    `room.corner_outline` returns None for one **by design** — the validator's
+    "parameters do not resolve to a shape" critical skips it. Everything else in
+    Structure — back, supports, shelves — is the ordinary engine path, unchanged.
+    The blind panel is **code 08 with the role "Blind Panel"** (`model.BLIND_CODE`),
+    on the same reasoning as a panel's 08: Plazaboard write the Component column
+    from `Panel.label`, so a code of its own would need their sign-off and would
+    say nothing on the order that 08 does not.
+
+    It casts a shadow on the return wall like any corner unit, its own depth wide,
+    so `gaps` does not offer a filler for the space it is standing in.
+
+26. **A corner unit's door swing that fouls something BLOCKS the export.** This
+    is a deliberate exception to the house rule in `validate._room`, which keeps
+    an ordinary door-swing foul a WARNING, and ordinary doors stay that way.
+
+    The reason it is different: an ordinary door can be rehung, moved or lived
+    with, and which way it hangs is the fitter's judgement. A mitre's door cannot
+    — it hangs on the mitre face or nowhere, and its width is derived from the
+    arms rather than chosen — so a swing that fouls the runs either side of it is
+    a unit that cannot be built as drawn. The message says **the widest door that
+    would clear**, found by trying widths against the real swing check rather
+    than by a formula, so there is something to do about it. Widening the arms is
+    the other way out and the message says so, but it resolves to no single
+    figure: bigger arms move the face further into the room and widen the derived
+    door at the same time.
+
+    A **blind** unit whose door opening the return run reaches across blocks for
+    the same reason and in the same words: the unit exists for exactly that
+    clearance, and no amount of fitting will fix it. What reaches is the return
+    cabinet's own depth plus its door front, and **no handle clearance** is added
+    — if a real job needs one it belongs in Standard, not guessed at.
+
+    Do not tidy either of these back into one rule.
+
+27. **Every dimension a corner unit has is entered in the Corner Unit section,
+    and the Size fields are greyed.** Same rule as a panel, whose dimensions all
+    live in Panel design, and for the same reason: it must be obvious to somebody
+    who has not read the code where a number goes.
+
+    A greyed field shows the **engine's** figure, never the declared one — hard
+    rule 1 says declared width, height and depth are labels and no check reads
+    them, so echoing a stale declared figure back into a field that looks
+    authoritative would be showing the wrong number. Kind, Number and Note stay
+    live throughout; Kind because a corner can be top-hung, base or tall.
+
+    The **Outline** is greyed for a mitre and an ell, where `geometry` genuinely
+    ignores an entered footprint. It stays live on a **blind** unit, because
+    there the footprint IS read like any other cabinet's, and greying a field
+    that is still being read would be a lie.
+
+    Nothing is thrown away by any of it: switching the type or the tick back
+    brings every value with it, the same bargain the tickboxes strike (item 16).
+
+28. **An ell is shape only, and says so.** Rudolf has never built one and has
+    deferred the construction, so the outline, the hand, the plan drawing,
+    overlaps, the shadow, the gaps and the face-length readout all work, and the
+    engine generates **nothing**. That is a CRITICAL naming what to do about it —
+    add bespoke panels in the job file, or change the type — rather than an empty
+    cabinet quietly costing R0. An ell with `template="none"` and its own bespoke
+    panels works exactly as cabinet 7 does and is untouched by it.

@@ -21,7 +21,8 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from .model import MATERIALS, Room, Wall, hinge_side, material_thickness
+from .model import (MATERIALS, Cabinet, Room, Wall, hinge_side,
+                    material_thickness)
 from .standard import STANDARD, Standard
 
 Point = Tuple[float, float]
@@ -37,9 +38,23 @@ def rectangular(length: int, width: int, name: str = "room", **kw) -> Room:
     ], **kw)
 
 
-# The fixture the worked examples below are checked against by
+# The fixtures the worked examples below are checked against by
 # tools/check_examples.py. A 4 x 3 m square room, walls A-D clockwise.
 EXAMPLE_ROOM = rectangular(4000, 3000)
+
+# Cabinet 7 of the October 2025 job by its measured figures (spec item 14), but
+# as a TEMPLATE cabinet: the real one is bespoke and stays that way, so that the
+# benchmark cannot move. Every mitre worked example is checked against it, which
+# is what ties the derived figures to a unit that was actually built.
+EXAMPLE_MITRE = Cabinet(number=7, width=850, height=2400, depth=500,
+                        back="none", supports=0, doors=1,
+                        corner_unit=True, corner_style="mitre",
+                        arm_a=850, arm_b=850, face_a=500, face_b=500)
+# The worked blind example from the 22 September 2026 ruling: W 1000, B 500,
+# t 16 -> opening 468, door 497, blind panel 500.
+EXAMPLE_BLIND = Cabinet(number=1, width=1000, height=720, depth=560,
+                        doors=1, corner_unit=True, corner_style="blind",
+                        blind_width=500)
 
 
 def next_wall_id(rm: Room) -> str:
@@ -224,11 +239,18 @@ class CabinetGeometry:
     @property
     def mitre_deg(self) -> Optional[float]:
         """A mitre's angle to wall A. An output of the four measurements, never an
-        input, and nothing compares it with 45 (spec item 12). None unless a mitre."""
+        input, and nothing compares it with 45 (spec item 12). None unless a mitre.
+
+        The ANGLE, not the direction the face happens to run in: a left-handed
+        unit is the right-handed one mirrored, and a mitre a joiner would call 45
+        does not become 135 because the unit was turned round. Right-handed units
+        always run up and to the right (both extents are positive by the validity
+        check above), so taking the magnitude changes nothing for them.
+        """
         if self.source != "corner" or len(self.footprint) != 5:
             return None
         (x0, y0), (x1, y1) = self.front_faces[0]
-        return round(math.degrees(math.atan2(y1 - y0, x1 - x0)), 1)
+        return round(math.degrees(math.atan2(abs(y1 - y0), abs(x1 - x0))), 1)
 
 
 def rect_outline(width: int, depth: int) -> List[Tuple[int, int]]:
@@ -237,28 +259,50 @@ def rect_outline(width: int, depth: int) -> List[Tuple[int, int]]:
     return [(0, depth), (width, depth), (width, 0), (0, 0)]
 
 
-def corner_outline(style: str, arm_a, arm_b, face_a, face_b) -> Optional[List[Tuple[int, int]]]:
+def corner_outline(style: str, arm_a, arm_b, face_a, face_b,
+                   hand: str = "R") -> Optional[List[Tuple[int, int]]]:
     """The plan outline of a parametric corner unit (ruled 14 Sept 2026, spec
-    item 11), derived from its four measurements and a style. None when they do
-    not describe a real shape — the caller falls back, and the validator raises
-    a critical rather than let a bad shape through quietly.
+    item 11), derived from its four measurements, a style and a hand. None when
+    they do not describe a real shape — the caller falls back, and the validator
+    raises a critical rather than let a bad shape through quietly.
 
     Frame: x runs along wall A from the cabinet's start corner, y out from wall
-    A. Wall A is the face at y = 0; wall B the face at x = arm_a. There is no
-    angle input — a mitre's angle is an output of these four numbers, 45° only
-    when arm_a - face_b == arm_b - face_a.
+    A. Wall A is the face at y = 0. There is no angle input — a mitre's angle is
+    an output of these four numbers, 45° only when arm_a - face_b == arm_b - face_a.
+
+    The HAND says which end of the unit stands in the corner, as you face it in
+    the room (ruled 22 Sept 2026). 'R' is the right-hand end, which is what this
+    app drew before the field existed: wall B is the face at x = arm_a, and
+    `corner_shadow` turns onto the NEXT wall in the chain. 'L' is the mirror of
+    it about the unit's own centre line — wall B at x = 0, the shadow on the
+    PREVIOUS wall. Mirroring reverses a polygon's winding, so the points are
+    reversed and rotated as well as reflected: `front_faces` reads the mitre off
+    indices 3 and 4 and an ell off 3, 4 and 5, and it must keep reading them
+    left to right as seen from the room whichever hand it is.
 
         corner_outline("mitre", 850, 850, 500, 500)  ->  [(0, 0), (850, 0), (850, 850), (350, 850), (0, 500)]
         corner_outline("ell", 850, 850, 500, 500)  ->  [(0, 0), (850, 0), (850, 850), (350, 850), (350, 500), (0, 500)]
+        corner_outline("mitre", 850, 850, 500, 500, "L")  ->  [(0, 850), (0, 0), (850, 0), (850, 500), (500, 850)]
+        corner_outline("ell", 850, 850, 500, 500, "L")  ->  [(0, 850), (0, 0), (850, 0), (850, 500), (500, 500), (500, 850)]
 
     A face measured wider than the arm it would have to fit inside describes no
     shape at all — `corner_outline("mitre", 850, 850, 900, 500)` is `None` —
     which check_drag.py checks, since this pattern only verifies list results.
+
+    A BLIND corner is deliberately not here: its plan is a plain rectangle W x D
+    like any other cabinet (ruled 22 Sept 2026), so it has no derived outline and
+    `geometry` reads the rectangle its panels make, exactly as it always did. Its
+    one corner-specific piece of plan geometry is its shadow — see `corner_shadow`.
     """
     if style not in ("mitre", "ell") or None in (arm_a, arm_b, face_a, face_b):
         return None
     if not (0 < face_b < arm_a and 0 < face_a < arm_b):
         return None
+    if hand == "L":
+        if style == "mitre":
+            return [(0, arm_b), (0, 0), (arm_a, 0), (arm_a, face_a), (face_b, arm_b)]
+        return [(0, arm_b), (0, 0), (arm_a, 0), (arm_a, face_a),
+                (face_b, face_a), (face_b, arm_b)]
     if style == "mitre":
         return [(0, 0), (arm_a, 0), (arm_a, arm_b), (arm_a - face_b, arm_b), (0, face_a)]
     return [(0, 0), (arm_a, 0), (arm_a, arm_b), (arm_a - face_b, arm_b),
@@ -273,7 +317,197 @@ def cab_corner_outline(cab) -> Optional[List[Tuple[int, int]]]:
     """
     if not cab.corner_on:
         return None
-    return corner_outline(cab.corner_style, cab.arm_a, cab.arm_b, cab.face_a, cab.face_b)
+    return corner_outline(cab.corner_style, cab.arm_a, cab.arm_b,
+                          cab.face_a, cab.face_b, cab.hand)
+
+
+# ---- what a mitre actually measures ----------------------------------------
+#
+# Ruled 22 September 2026, and every figure below is derived from the four
+# measurements and the board thickness. Nothing here is typed and nothing is
+# guessed. The one line all of it hangs off is the INNER LINE: the surface a
+# closed door's inside face rests on. That is not the outline's mitre face --
+# the outline runs corner to corner of the carcass, and the blank the top, the
+# bottom and the shelves are cut from is already a board thickness inside it on
+# both edges. Cabinet 7 is the proof: its inner line is 472.35 long and its
+# door, as really cut, is 472.
+
+
+def _mitre_parts(cab, std: Standard = STANDARD):
+    """(t, arm_a, arm_b, face_a, face_b) for a live mitre, or None.
+
+    Every helper below starts here, so "is this a mitre with usable numbers" is
+    answered in one place rather than five.
+    """
+    if cab.corner_kind != "mitre":
+        return None
+    if None in (cab.arm_a, cab.arm_b, cab.face_a, cab.face_b):
+        return None
+    t = std.board_t
+    a_a, a_b = int(cab.arm_a), int(cab.arm_b)
+    f_a, f_b = int(cab.face_a), int(cab.face_b)
+    if not (0 < f_b < a_a and 0 < f_a < a_b):
+        return None
+    if a_a <= 2 * t or a_b <= 2 * t or f_a <= t or f_b <= t:
+        return None
+    return t, a_a, a_b, f_a, f_b
+
+
+def mitre_blank(cab, std: Standard = STANDARD) -> Optional[Tuple[int, int]]:
+    """The square blank the top, the bottom and every mitred shelf is cut from.
+
+    (arm_a - 2t) x (arm_b - 2t): the interior the four side panels leave.
+
+        mitre_blank(EXAMPLE_MITRE)  ->  (818, 818)
+    """
+    p = _mitre_parts(cab, std)
+    if p is None:
+        return None
+    t, a_a, a_b, _f_a, _f_b = p
+    return a_a - 2 * t, a_b - 2 * t
+
+
+def mitre_inner_corners(cab, std: Standard = STANDARD):
+    """The two ends of the inner line, in the cabinet frame, left to right.
+
+    Each is the inner front corner of one open-face side panel. That panel is
+    `face` deep measured from the wall, so its front edge is `face` from the
+    carcass outside, and the blank meets it a board thickness in.
+
+        mitre_inner_corners(EXAMPLE_MITRE)  ->  ((16, 500), (350, 834))
+    """
+    p = _mitre_parts(cab, std)
+    if p is None:
+        return None
+    t, a_a, a_b, f_a, f_b = p
+    if cab.hand == "L":
+        return (f_b, a_b - t), (a_a - t, f_a)
+    return (t, f_a), (a_a - f_b, a_b - t)
+
+
+def mitre_inner_span(cab, std: Standard = STANDARD) -> Optional[float]:
+    """How long the inner line is - the span a mitre door is cut to.
+
+        mitre_inner_span(EXAMPLE_MITRE)  ->  472.35
+    """
+    ends = mitre_inner_corners(cab, std)
+    if ends is None:
+        return None
+    return round(math.dist(*ends), 2)
+
+
+def mitre_legs(cab, std: Standard = STANDARD, setback: int = 0):
+    """(leg along arm A, leg along arm B) of the mitre cut on the blank.
+
+    Measured from the blank's own cut-off corner along its two edges, which is
+    what the fitter marks. `setback` moves the cut line back from the inner line,
+    perpendicular to it, which is how a mitred shelf clears the closed door; at 0
+    the cut is flush with the inner line, which is what the top and bottom get.
+
+    The hand mirrors which corner of the blank comes off, and mirrors both legs
+    with it, so the two figures are the same either way round.
+
+        mitre_legs(EXAMPLE_MITRE)  ->  (334, 334)
+        mitre_legs(EXAMPLE_MITRE, STANDARD, 3)  ->  (338, 338)
+    """
+    p = _mitre_parts(cab, std)
+    if p is None:
+        return None
+    t, a_a, a_b, f_a, f_b = p
+    dx = (a_a - f_b) - t                 # the inner line's extent along arm A
+    dy = (a_b - t) - f_a                 # and along arm B
+    if dx <= 0 or dy <= 0:
+        return None
+    span = math.hypot(dx, dy)
+    return round(dx + setback * span / dy), round(dy + setback * span / dx)
+
+
+def arm_shelf_max_depth(cab, std: Standard = STANDARD, arm: str = "a") -> Optional[int]:
+    """The deepest an arm shelf along `arm` may be cut, rounded DOWN to a step.
+
+    Two things bound it, and the tighter one wins (ruled 22 September 2026):
+
+    (a) the closed door. The shelf stays behind the inner line by
+        `Standard.mitre_shelf_clear`, and over the shelf's whole length that
+        line comes nearest at the open-face end, where it is `face` from the
+        carcass outside.
+    (b) the hinge. The shelf ends against an open-face side panel, and the
+        concealed hinge's mounting plate is fixed to that panel's inside face
+        behind its front edge, so the shelf stops `Standard.hinge_clearance`
+        short of it. Applied whichever side the door is hinged, because that can
+        be changed without the shelf being recut.
+
+    Both are measured from the wall side's inner face, a board thickness in, so
+    both start from `face - t`. The answer is rounded DOWN to a multiple of
+    `Standard.arm_shelf_step` before it is offered; a depth typed by hand is
+    taken as typed and only has to come under it.
+
+        arm_shelf_max_depth(EXAMPLE_MITRE)  ->  430
+    """
+    p = _mitre_parts(cab, std)
+    if p is None:
+        return None
+    t, _a_a, _a_b, f_a, f_b = p
+    face = f_b if arm == "b" else f_a
+    limit = min((face - t) - std.mitre_shelf_clear,
+                (face - t) - std.hinge_clearance)
+    step = max(1, std.arm_shelf_step)
+    return max(0, limit // step * step)
+
+
+def arm_shelf_length(cab, std: Standard = STANDARD, arm: str = "a") -> Optional[int]:
+    """How long an arm shelf is: that arm's internal span, wall side to wall side.
+
+        arm_shelf_length(EXAMPLE_MITRE)  ->  818
+    """
+    blank = mitre_blank(cab, std)
+    if blank is None:
+        return None
+    return blank[1] if arm == "b" else blank[0]
+
+
+def arm_shelf_depth(cab, std: Standard = STANDARD) -> Optional[int]:
+    """The depth an arm shelf is actually cut at: what was typed, or the maximum.
+
+    A blank depth is not an error - the maximum is the sensible default and is
+    what the editor offers. A depth OVER the maximum is a critical, raised by the
+    validator, and is never silently clamped here: quietly cutting something
+    other than what was typed is the one thing this app must not do.
+    """
+    top = arm_shelf_max_depth(cab, std, cab.arm_shelf_arm)
+    if top is None:
+        return None
+    typed = cab.arm_shelf_depth
+    return int(typed) if typed else top
+
+
+# ---- what a blind corner measures ------------------------------------------
+
+
+def blind_opening(cab, std: Standard = STANDARD) -> Optional[int]:
+    """The clear opening a blind unit's door closes over: W - 2t - B.
+
+        blind_opening(EXAMPLE_BLIND)  ->  468
+    """
+    if cab.corner_kind != "blind" or not cab.blind_width:
+        return None
+    return int(cab.width) - 2 * std.board_t - int(cab.blind_width)
+
+
+def blind_door_width(cab, std: Standard = STANDARD) -> Optional[int]:
+    """A blind unit's door, derived exactly as any other door is.
+
+    An ordinary door covers its opening plus the two sides, less the single-door
+    gap, so here that is (O + 2t) - door_single_gap = W - B - door_single_gap.
+    The blind panel is no part of it: that is cut at exactly B, the width it was
+    measured at, because the board size is the board size (ruled 22 Sept 2026).
+
+        blind_door_width(EXAMPLE_BLIND)  ->  497
+    """
+    opening = blind_opening(cab, std)
+    if opening is None:
+        return None
+    return opening + 2 * std.board_t - std.door_single_gap
 
 
 def panel_geometry(cab, std: Standard = STANDARD,
@@ -366,32 +600,64 @@ def cabinet_footprint(rm: Room, placement, cab, std: Standard = STANDARD,
 
 
 def corner_shadow(rm: Room, cab, p, std: Standard = STANDARD):
-    """(next wall, width, depth) the far arm of a flush corner unit fills on
-    the wall it turns onto — or None.
+    """(wall, x, width, depth) that a flush corner unit fills on the wall it
+    turns onto — or None.
 
     A corner unit's `arm_a` runs along the wall it is placed on; its `arm_b`
-    then runs on, physically, along whatever wall comes next in the chain,
-    because that is where wall B is in the cabinet's own frame. Gaps and runs
-    are still found one wall at a time, and neither would otherwise know that
-    space is filled — a straight run started flush against the corner would
-    see nothing there and propose a filler for a gap that is not a gap. This
-    is None unless the unit actually sits flush in that corner: cabinet-local
-    x = arm_a has to land exactly on the wall's end.
+    then runs on, physically, along whatever wall meets that one at the corner
+    it stands in, because that is where wall B is in the cabinet's own frame.
+    Gaps and runs are still found one wall at a time, and neither would
+    otherwise know that space is filled — a straight run started flush against
+    the corner would see nothing there and propose a filler for a gap that is
+    not a gap. This is None unless the unit actually sits flush in that corner.
+
+    The HAND says which corner that is (ruled 22 September 2026), and it decides
+    both halves of the answer:
+
+    * 'R' — the unit's right-hand end is in the corner, so cabinet-local
+      x = `reach` has to land on the wall's END, wall B is the NEXT wall in the
+      chain, and the shadow starts at its x = 0. That is what this function did
+      before the hand existed, so a job written before it is unchanged.
+    * 'L' — the left-hand end is in the corner, so the unit has to start at the
+      wall's x = 0, wall B is the PREVIOUS wall, and the shadow sits at the END
+      of it.
+
+    A BLIND unit casts one too (ruled 22 September 2026). It is a plain
+    rectangle, so its far arm is simply its own depth: it fills the first
+    `depth` mm of the return wall, and the run there starts past it. Without
+    this, `gaps` would offer a filler for the space the blind unit is standing
+    in, which is exactly what a blind corner exists to avoid.
     """
-    g = geometry(cab, std)
-    if g.source != "corner":
+    if not cab.corner_on:
+        return None
+    if cab.corner_kind == "blind":
+        g = geometry(cab, std)
+        # The unit's own footprint, never its declared figures: hard rule 1.
+        reach, width, depth = g.width, g.depth, g.depth
+    else:
+        if geometry(cab, std).source != "corner":
+            return None
+        reach, width, depth = cab.arm_a, cab.arm_b, cab.face_b
+    if not reach or not width or not depth:
         return None
     try:
         w = _wall(rm, p.wall)
     except ValueError:
         return None
-    if p.x + cab.arm_a != w.length:
-        return None
     wall_ids = [x.id for x in rm.walls]
     i = wall_ids.index(p.wall)
+    if cab.hand == "L":
+        if p.x != 0:
+            return None
+        if not rm.closed and i == 0:
+            return None
+        prev_id = wall_ids[(i - 1) % len(wall_ids)]
+        return prev_id, max(0, _wall(rm, prev_id).length - width), width, depth
+    if p.x + reach != w.length:
+        return None
     if not rm.closed and i == len(wall_ids) - 1:
         return None
-    return wall_ids[(i + 1) % len(wall_ids)], cab.arm_b, cab.face_b
+    return wall_ids[(i + 1) % len(wall_ids)], 0, width, depth
 
 
 def _shadow_geometry(cab, width: int, depth: int, std: Standard) -> CabinetGeometry:
@@ -674,6 +940,13 @@ class Overlap:
     wall: str
     layer: str
     mm: int
+
+    @property
+    def across(self) -> bool:
+        """Whether the two stand on different walls (wall reads 'A/B'). The wall
+        elevation read this and it did not exist, so any overlap at all made the
+        elevation fail with an AttributeError (found 22 Sept 2026)."""
+        return "/" in self.wall
 
 
 def _z_span(cab, p, g, std) -> Tuple[int, int]:
@@ -1332,9 +1605,9 @@ def runs(job, std: Standard = STANDARD) -> List[Run]:
         shadow = corner_shadow(rm, cab, p, std)
         if shadow is None:
             continue
-        next_id, width, depth = shadow
+        next_id, at, width, depth = shadow
         grouped.setdefault((next_id, run_key(lay)), []).append(
-            (0, cab, p, _shadow_geometry(cab, width, depth, std)))
+            (at, cab, p, _shadow_geometry(cab, width, depth, std)))
 
     out: List[Run] = []
     for (wid, lay), items in sorted(grouped.items()):
@@ -1647,9 +1920,9 @@ def gaps(job, std: Standard = STANDARD) -> List[Gap]:
         shadow = corner_shadow(rm, cab, p, std)
         if shadow is None:
             continue
-        next_id, width, depth = shadow
+        next_id, at, width, depth = shadow
         runs.setdefault((next_id, run_key(lay)), []).append(
-            (0, cab, _shadow_geometry(cab, width, depth, std)))
+            (at, cab, _shadow_geometry(cab, width, depth, std)))
 
     out: List[Gap] = []
     for (wall_id, lay), items in sorted(runs.items()):

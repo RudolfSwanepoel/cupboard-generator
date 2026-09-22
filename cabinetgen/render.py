@@ -15,7 +15,8 @@ from .room import (LAYERS, cabinet_footprint, carcass_z, clashes, corner_points,
                    gap_outline, gaps, geometry, layer_of, overlaps,
                    panel_clashes, placed, placed_panels, plinth_choice_for,
                    plinth_lengths, pullout_envelope, return_profiles, run_key,
-                   runs, swing_envelopes, to_world, wall_frames)
+                   runs, swing_envelopes, to_world, wall_frames,
+                   blind_door_width)
 from .standard import Standard, STANDARD
 
 INK = "#191c1a"
@@ -440,6 +441,11 @@ def elevation_svg(job: Job, max_width: int = 1100,
     `pictures` is where a board picture is fetched from — see `Fills`.
     """
     cabs = [c for c in job.cabinets if not c.is_panel]
+    # A corner unit's width along its wall is its geometry, never the declared
+    # label (hard rule 1): a mitre drawn at its declared 1200 when its arm is 1000
+    # was one of the things that made the corner unit look broken.
+    gw = {c.number: (geometry(c, job.std, job.materials).width if c.corner_on else c.width)
+          for c in cabs}
     if not cabs:
         return ('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60">'
                 f'<text x="10" y="34" font-size="13" fill="{MUTED}" '
@@ -447,7 +453,7 @@ def elevation_svg(job: Job, max_width: int = 1100,
 
     std = job.std
     gap_mm = 20
-    total_w = sum(c.width for c in cabs) + gap_mm * (len(cabs) - 1)
+    total_w = sum(gw[c.number] for c in cabs) + gap_mm * (len(cabs) - 1)
     max_h = max(c.height for c in cabs)
     pad = 46
     scale = min((max_width - pad * 2) / total_w, 520 / max_h)
@@ -467,7 +473,7 @@ def elevation_svg(job: Job, max_width: int = 1100,
     for c in cabs:
         look = board_look(job, c.carcass_board)
         stroke, sw, dash = _layer_outline(layer_of(c))
-        w = c.width * scale
+        w = gw[c.number] * scale
         h = c.height * scale
         y = floor - h
         # One group per cabinet, carrying its number — the run has no wall to
@@ -481,7 +487,7 @@ def elevation_svg(job: Job, max_width: int = 1100,
         out.append(f'<text x="{x + w / 2:.1f}" y="{floor + 16:.1f}" font-size="11" '
                    f'text-anchor="middle" fill="{INK}">{c.number}</text>')
         out.append(f'<text x="{x + w / 2:.1f}" y="{floor + 29:.1f}" font-size="9.5" '
-                   f'text-anchor="middle" fill="{MUTED}">{c.width}x{c.height}x{c.depth}</text>')
+                   f'text-anchor="middle" fill="{MUTED}">{_size_label(job, c)}</text>')
         out.append("</g>")
         x += w + gap_mm * scale
 
@@ -492,6 +498,17 @@ def elevation_svg(job: Job, max_width: int = 1100,
     out[defs_at] = f"<defs>{fills.defs()}</defs>"
     out.append("</svg>")
     return "\n".join(out)
+
+
+def _size_label(job, c) -> str:
+    """The W x H x D under a cabinet in the Run. A corner unit's is its
+    geometry and its type, never the declared figures, which it does not have."""
+    if not c.corner_on:
+        return f"{c.width}x{c.height}x{c.depth}"
+    g = geometry(c, job.std, job.materials)
+    if c.corner_kind in ("mitre", "ell") and g.source != "corner":
+        return f"{c.corner_kind} {c.hand} · measurements incomplete"
+    return f"{c.corner_kind} {c.hand} · {g.width}x{g.height}x{g.depth}"
 
 
 def _note_svg(text: str, w: int = 260) -> str:
@@ -1279,6 +1296,8 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
     picks a position along a span the engine gave it, and the engine re-divides
     the stack on drop.
     """
+    if c.corner_on and c.corner_kind in ("mitre", "ell", "blind"):
+        return _corner_interior(c, x, y, w, h, scale, std, flip, materials, fills)
     out = []
     mats = materials or {}
     fills = fills or _FLAT
@@ -1373,6 +1392,123 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
         out.append(f'<line x1="{x + w / 2:.1f}" y1="{y + 4:.1f}" x2="{x + w / 2:.1f}" '
                    f'y2="{y + h - 4:.1f}" stroke="{inside}" stroke-width="1.2" '
                    f'stroke-opacity="0.55"/>')
+    return out
+
+
+def _corner_interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
+                     materials=None, fills=None):
+    """A corner unit's front, seen square on to the wall it is placed on.
+
+    Before 22 September 2026 a corner unit went through the straight-cabinet
+    drawing and came out as one door the full declared width ("1 x 1197" on a
+    mitre whose real door is 543). What is drawn now:
+
+    * MITRE - the door where it really is, seen at its angle: across the stretch
+      of wall the mitre face covers, which is shorter than the door itself. It is
+      labelled with its REAL width and cross-hatched lightly, the drafting sign
+      for a face that is not square on to you. Beyond it, the unit's open-face
+      side on the return wall, plain carcass.
+    * BLIND - the blind panel at the corner end and the one door beside it, each
+      at the width it is cut.
+    * ELL - the box only: its construction is not decided, so there is no front
+      to draw, and it says so.
+
+    Every millimetre is the engine's (`geometry`, `blind_door_width`); `w` is
+    already the unit's real reach along the wall, so x is scaled off it.
+    """
+    out = []
+    mats = materials or {}
+    fills = fills or _FLAT
+    g = geometry(c, std, mats)
+    kind, hand = c.corner_kind, c.hand
+    t = std.board_t
+    door_h = c.door_height or (c.height - std.door_height_gap)
+    dh = door_h * scale
+    top = y + h - dh
+    px = lambda mm: x + mm * scale          # noqa: E731 - cabinet-local mm to svg x
+    door_edge = (board_look(mats, c.door_edge_colour_board)["colour"]
+                 if c.door_tape(mats) else "")
+
+    def leaf(x0, x1, i, angled, text):
+        look = board_look(mats, c.door_board(i))
+        lw = max(x1 - x0, 1)
+        out.append(f'<rect class="edoor" data-cab="{c.number}" data-door="{i}" '
+                   f'x="{x0:.1f}" y="{top:.1f}" width="{lw:.1f}" height="{dh:.1f}" '
+                   f'fill="{fills.of(look, True)}" stroke="{RULE}" stroke-width="0.8"/>')
+        if door_edge:
+            out.extend(_edge_band(x0, top, lw, dh, door_edge))
+        ink = muted_on(look["colour"])
+        if angled:
+            step = 9.0
+            k = 0.0
+            while k < lw + dh:
+                ax0, ay0 = x0 + max(0.0, k - dh), top + min(dh, k)
+                ax1, ay1 = x0 + min(lw, k), top + max(0.0, k - lw)
+                out.append(f'<line x1="{ax0:.1f}" y1="{ay0:.1f}" x2="{ax1:.1f}" '
+                           f'y2="{ay1:.1f}" stroke="{ink}" stroke-width="0.5" '
+                           f'stroke-opacity="0.35"/>')
+                k += step
+        if text and dh > 20:
+            out.append(f'<text x="{x0 + lw / 2:.1f}" y="{top + dh / 2 + 3.5:.1f}" '
+                       f'font-size="9" text-anchor="middle" fill="{ink}" '
+                       f'paint-order="stroke" stroke="{look["colour"]}" stroke-width="3">'
+                       f'{escape(text)}</text>')
+        return lw
+
+    if kind == "mitre" and g.source == "corner":
+        a, fb = int(c.arm_a), int(c.face_b)
+        # where the door's inside line runs, projected onto this wall
+        s0, s1 = (t, a - fb) if hand == "R" else (fb, a - t)
+        doors = g.door_widths if c.door_count else []
+        n = len(doors)
+        if n:
+            span = (s1 - s0) * scale / n
+            for i in range(n):
+                x0 = px(s0) + i * span
+                leaf(x0, x0 + span, i, True, f"{doors[i]}")
+            if flip is not None:
+                out += _hinge_marks(c, px(s0), top, span, dh, door_h, flip, std, mats)
+        # the open-face side on the return wall, square on to this one
+        e0, e1 = (a - fb, a) if hand == "R" else (0, fb)
+        out.append(f'<line x1="{px(e0 if hand == "R" else e1):.1f}" y1="{y:.1f}" '
+                   f'x2="{px(e0 if hand == "R" else e1):.1f}" y2="{y + h:.1f}" '
+                   f'stroke="{RULE}" stroke-width="0.8"/>')
+        if (e1 - e0) * scale > 40:
+            body = board_look(mats, c.carcass_board)
+            out.append(f'<text x="{px((e0 + e1) / 2):.1f}" y="{y + h / 2:.1f}" '
+                       f'font-size="8.5" text-anchor="middle" '
+                       f'fill="{muted_on(body["colour"])}">side on the</text>'
+                       f'<text x="{px((e0 + e1) / 2):.1f}" y="{y + h / 2 + 11:.1f}" '
+                       f'font-size="8.5" text-anchor="middle" '
+                       f'fill="{muted_on(body["colour"])}">return wall</text>')
+    elif kind == "blind":
+        W = g.width
+        B = int(c.blind_width or 0)
+        dw = blind_door_width(c, std)
+        if B > 0 and dw and dw > 0:
+            b0, b1 = (W - B, W) if hand == "R" else (0, B)
+            gap = std.door_single_gap / 2
+            d0 = gap if hand == "R" else B + gap
+            look = board_look(mats, c.exterior_board)
+            out.append(f'<rect class="eblind" x="{px(b0):.1f}" y="{top:.1f}" '
+                       f'width="{B * scale:.1f}" height="{dh:.1f}" '
+                       f'fill="{fills.of(look, True)}" stroke="{INK}" stroke-width="0.9"/>')
+            if door_edge:
+                out.extend(_edge_band(px(b0), top, B * scale, dh, door_edge))
+            if dh > 20 and B * scale > 30:
+                out.append(f'<text x="{px((b0 + b1) / 2):.1f}" y="{top + dh / 2 + 3.5:.1f}" '
+                           f'font-size="9" text-anchor="middle" '
+                           f'fill="{muted_on(look["colour"])}">blind {B}</text>')
+            if c.door_count:
+                leaf(px(d0), px(d0 + dw), 0, False, f"1 x {dw}")
+                if flip is not None:
+                    out += _hinge_marks(c, px(d0), top, dw * scale + 1, dh, door_h,
+                                        flip, std, mats)
+    else:
+        why = ("ell corner: construction not decided yet" if kind == "ell"
+               else "fix the corner measurements")
+        out.append(f'<text x="{x + w / 2:.1f}" y="{y + h / 2:.1f}" font-size="9" '
+                   f'text-anchor="middle" fill="{CRIT}">{escape(why)}</text>')
     return out
 
 

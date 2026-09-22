@@ -330,6 +330,14 @@ def white_edge_board(materials: dict, prefer: str = "") -> str:
 # they do sign off later is one edit.
 PANEL_CODE = "08"
 
+# A blind corner's flush panel, ruled 22 September 2026 (Q3), on exactly the
+# reasoning above: Plazaboard's CSV writes the Component column from
+# `Panel.label`, so a code of its own would need their sign-off as 10 and 11
+# still do, and would say nothing on the order that 08 does not. The role is
+# what tells it from an exposed end in the app's own cut list. One constant, so
+# a code they do sign off later is one edit.
+BLIND_CODE = "08"
+
 PANEL_ORIENTATIONS = ("upright", "flat", "end")
 
 
@@ -520,11 +528,47 @@ class Cabinet:
     # front faces. Frame: x along wall A from the cabinet's start, y out from wall
     # A; wall A is the face at y = 0, wall B the face at x = arm_a. There is no
     # angle field — a mitre's angle is an output of these four numbers.
-    corner_style: str = ""               # '' | 'mitre' | 'ell'
+    corner_style: str = ""               # '' | 'mitre' | 'ell' | 'blind'
     arm_a: Optional[int] = None          # how far the box runs along wall A
     arm_b: Optional[int] = None          # how far it runs along wall B
     face_a: Optional[int] = None         # open face on the wall-A side: depth of the run butting it
     face_b: Optional[int] = None         # open face on the wall-B side: likewise
+    # Which end of the unit stands in the corner, as you face it in the room:
+    # 'R' the right-hand end, 'L' the left. '' means the answer this app gave
+    # before the field existed, which is R — the corner at the wall's END, wall B
+    # the NEXT wall in the chain (room.corner_shadow has always read it that way),
+    # so cabinet 7 and every job written before this reads exactly as it did.
+    # 'L' mirrors the outline, the front faces, the hinge rule and the shadow onto
+    # the PREVIOUS wall. Wall-local x runs left to right as you face the wall —
+    # that is not an assumption: it is what model.hinge_side already means by
+    # 'L'/'R' (room.swing_envelopes hinges 'L' at the low-x end) and what
+    # render.wall_elevation_svg draws.
+    corner_hand: str = ""                # '' (= 'R') | 'L' | 'R'
+
+    # ---- blind corner ------------------------------------------------------
+    # A blind unit is a straight carcass with a flush panel across the corner end
+    # and one door at the far end. width / height / depth above are its carcass,
+    # exactly as on any other cabinet; this is the only extra measurement.
+    blind_width: Optional[int] = None    # the blind panel's width, as cut
+
+    # ---- mitre shelves -----------------------------------------------------
+    # A mitre takes two kinds of shelf and can carry both (ruled 22 September
+    # 2026). They replace `shelves` / `fixed_shelves` on a mitre, which are not
+    # read there — a mitre's interior is not a rectangle, so a straight shelf
+    # size would be wrong in the unsafe direction.
+    #
+    #   arm shelf     a rectangle running along one arm, behind the mitre. Its
+    #                 length is that arm's internal span; its depth is typed, and
+    #                 room.arm_shelf_max_depth is the most it may be.
+    #   mitred shelf  the same square blank as the top and bottom, mitred on site
+    #                 Standard.mitre_shelf_clear behind the closed door.
+    arm_shelves: int = 0
+    arm_shelf_arm: str = "a"             # 'a' | 'b' — which arm it runs along
+    arm_shelf_depth: Optional[int] = None    # None = the derived maximum
+    mitred_shelves: int = 0
+    # The corner door's width, overriding the derived one. Blank means derived,
+    # which is what it normally is.
+    corner_door_width: Optional[int] = None
     # The "Corner unit" tickbox. None derives it from the style, which is how
     # every job predating the tickbox reads. False keeps all four measurements
     # and the style in the job file but stops anything reading them.
@@ -565,6 +609,31 @@ class Cabinet:
         if self.corner_unit is None:
             return bool(self.corner_style)
         return bool(self.corner_unit) and bool(self.corner_style)
+
+    @property
+    def corner_ticked(self) -> bool:
+        """Whether the Corner unit box is ticked, whether or not a type is chosen.
+
+        `corner_on` needs a type as well, because everything downstream reads the
+        four measurements through it. This is the other half of that question:
+        ticked but with no type chosen is a cabinet that looks like a corner on
+        screen and cuts a straight box, which is what the UI's "Choose a corner
+        type" line and the validator's warning are both about.
+        """
+        if self.corner_unit is None:
+            return bool(self.corner_style)
+        return bool(self.corner_unit)
+
+    @property
+    def corner_kind(self) -> str:
+        """'mitre' | 'ell' | 'blind', or '' when this is not a live corner unit."""
+        return self.corner_style if self.corner_on else ""
+
+    @property
+    def hand(self) -> str:
+        """'L' or 'R'. Blank reads as 'R' — the corner at the wall's end, which is
+        what this app did before the field existed."""
+        return "L" if self.corner_hand == "L" else "R"
 
     @property
     def door_count(self) -> int:

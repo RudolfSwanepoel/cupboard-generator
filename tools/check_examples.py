@@ -20,7 +20,9 @@ import cabinetgen.room as room              # noqa: E402
 import cabinetgen.standard as standard      # noqa: E402
 
 MODULES = {"drawers": drawers, "room": room, "standard": standard}
-PATTERN = re.compile(r"^\s{4,}([A-Za-z_]\w*\([^)]*\))\s+->\s+(\[[^\]]*\]|\(.*?\)|-?\d+)\s*$", re.M)
+PATTERN = re.compile(
+    r"^\s{4,}([A-Za-z_]\w*\([^)]*\))\s+->\s+"
+    r"(\[[^\]]*\]|\(.*?\)|-?\d+\.\d+|-?\d+)\s*$", re.M)
 
 
 def main() -> int:

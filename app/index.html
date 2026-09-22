@@ -104,6 +104,11 @@
        margin-bottom:9px}
   .sec>h3{margin:0;font-size:12.5px;font-weight:700;letter-spacing:.01em;
           display:flex;align-items:center;gap:8px}
+  .f .prob{display:block;color:var(--crit);font-size:11px;line-height:1.35;margin-top:2px}
+  .f input.bad{border-color:var(--crit);background:#fbeef0}
+  .cdiag{margin:6px 0 4px;border:1px solid var(--line);border-radius:5px;background:var(--panel);padding:4px}
+  .cdiag svg{display:block;width:100%;height:auto;max-height:260px}
+  .cfix{color:var(--crit);font-weight:600}
   .sec>.hint{font-size:11px;color:var(--muted);margin:3px 0 0;line-height:1.35}
   .sec>.off{font-size:11.5px;color:var(--muted);margin:5px 0 0}
   .sec .tick{margin-left:auto;font-weight:400;font-size:11px;color:var(--muted);
@@ -227,6 +232,26 @@
   .sheetsvg svg{display:block}
   .matline{display:flex;gap:18px;align-items:baseline;padding:8px 12px;flex-wrap:wrap}
   .matline b{font-size:14px}
+  /* The hand, as two small plan pictures. A corner unit is the one thing in
+     this editor where a word ("left") is genuinely ambiguous until you see it,
+     so the picture is the control and the word is the label. */
+  .hands{display:flex;gap:6px;margin-top:4px}
+  .handopt{flex:1;display:block;border:1px solid var(--rule);border-radius:6px;
+           padding:6px 7px;cursor:pointer;font-size:11px;line-height:1.15}
+  .handopt.on{border-color:var(--ink);background:rgba(0,0,0,.04)}
+  .handopt input{display:none}
+  .handopt svg{display:block;width:100%;height:44px;color:var(--ink)}
+  .handopt b{display:block;font-size:11.5px;margin-top:3px}
+  .handopt span{display:block;font-size:10.5px;color:var(--muted);line-height:1.3}
+  .handopt .wall{stroke:currentColor;stroke-width:2.5;opacity:.4;fill:none}
+  .handopt .box{fill:var(--door);stroke:currentColor;stroke-width:1.2}
+  .handopt .front{stroke:currentColor;stroke-width:2;fill:none}
+  .handopt .blindp{fill:currentColor;opacity:.4}
+  /* A field whose answer is typed somewhere else: greyed like an unavailable
+     one, but showing the engine's real figure rather than nothing. */
+  .derived input{opacity:.55;background:var(--carc)}
+  .derived label{opacity:.7}
+  .derived .why{font-size:10.5px;color:var(--muted);font-style:italic}
 </style>
 </head>
 <body>
@@ -391,7 +416,9 @@ function blankCabinet(number) {
     carcass_edge: null, door_edge: null, drawer_box_edge: null,
     bespoke: [], note: "", footprint: [],
     corner_style: "", arm_a: null, arm_b: null, face_a: null, face_b: null,
-    corner_unit: null,
+    corner_unit: null, corner_hand: "", blind_width: null,
+    arm_shelves: 0, arm_shelf_arm: "a", arm_shelf_depth: null,
+    mitred_shelves: 0, corner_door_width: null,
   };
 }
 
@@ -564,12 +591,14 @@ function renderList() {
     // its board and its two typed extents, so the table shows the engine's
     // figures for one. A cupboard still shows what it is being built to.
     const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
-    const isP = !!(g && g.is_panel);
+    const isP = !!(g && ((g.is_panel) || (g.corner && g.corner.kind)));
+    const dash = g && g.corner && cornerBroken(c);
+    const dim = (k) => dash ? "\u2014" : (isP ? g[k] : c[k]);
     return `<tr data-i="${i}" class="${i === S.sel ? "sel" : ""}">
       <td class="n">${c.number}</td>
-      <td class="n">${isP ? g.width : c.width}</td><td class="n">${
-        isP ? g.height : c.height}</td><td class="n">${isP ? g.depth : c.depth}</td>
-      <td>${esc(c.kind)}</td>
+      <td class="n">${dim("width")}</td><td class="n">${dim("height")}</td><td class="n">${dim("depth")}</td>
+      <td>${esc(c.kind)}${g && g.corner && g.corner.kind ? " \u00b7 " + esc(g.corner.kind)
+        + " " + (g.corner.hand === "L" ? "L" : "R") : ""}</td>
       <td>${esc(frontsText(c))}</td>
       <td class="n">${shelves || ""}</td>
       <td>${c.template === "none" ? "bespoke" : ""}</td>
@@ -694,11 +723,98 @@ function isPanelCab(c) {
 
 const notPanel = (c) => !isPanelCab(c);
 
+/* ---------- corner units ----------------------------------------------------
+   The engine's reading of this cabinet's corner, read back. Every dimension in
+   it was worked out in cabinetgen; the browser works out none of them, which is
+   exactly what lets the Size fields be greyed and still show something true.
+   Until the next compute lands, only the two things the operator has just
+   clicked are known - the tick and the type - and that is all this falls back
+   to. */
+function cornerInfo(c) {
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  if (g && g.corner !== undefined) return g.corner;
+  if (!tickOn(c, "corner_unit")) return null;
+  return {ticked: true, kind: c.corner_style || "",
+          hand: c.corner_hand === "L" ? "L" : "R", style: c.corner_style || ""};
+}
+function cornerTicked(c) { return !!cornerInfo(c); }
+function cornerKind(c) { const k = cornerInfo(c); return (k && k.kind) || ""; }
+
+// Mitre and ell derive their whole plan shape from the four measurements, so an
+// entered outline is never read. A BLIND corner is a plain rectangle like any
+// other cabinet and its outline IS read, so that one stays live.
+function cornerShaped(c) {
+  const k = cornerKind(c);
+  return k === "mitre" || k === "ell";
+}
+
+// Where a dimension is really entered. It has to be obvious to somebody who has
+// not read the code: a panel's sizes are in Panel design, a corner unit's are in
+// Corner Unit, and Kind stays live either way because a corner can be top-hung,
+// base or tall.
+function sizeGrey(c, key) {
+  if (!(key === "width" || key === "height" || key === "depth")) return "";
+  if (isPanelCab(c)) return "Set in Panel design below";
+  if (cornerTicked(c)) return "Set in Corner Unit below";
+  return "";
+}
+function outlineGrey(c) {
+  return cornerShaped(c)
+    ? "Derived from the corner measurements \u2014 an entered outline is not read"
+    : "";
+}
+
+// The engine's figure for a greyed dimension. A declared width on a corner unit
+// or a panel is a label and no check reads it, so showing the declared one back
+// would be showing the wrong number in a field that looks authoritative.
+function derivedSize(c, key) {
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  if (!g) return null;
+  if (cornerBroken(c)) return null;       // no shape yet, so no size to show
+  return {width: g.width, height: g.height, depth: g.depth}[key];
+}
+
+// A corner unit whose measurements do not make a shape yet. Its sizes are shown
+// as a dash rather than the declared figures, which were never its sizes.
+function cornerBroken(c) {
+  const info = cornerInfo(c);
+  if (!info || !info.kind) return !!info;          // ticked, no type chosen
+  return !!(info.problems && Object.keys(info.problems).length);
+}
+
+// A section this corner type does not have. Said rather than hidden - an option
+// that silently does nothing is worse than one that explains itself, which is
+// the rule the greyed divider controls already follow.
+function cornerOff(c, key) {
+  const k = cornerKind(c);
+  if (!k) return "";
+  if (key === "drawers") {
+    return k === "blind"
+      ? "No drawers in a blind corner \u2014 it is one door and a flush panel."
+      : "No drawers in a mitre or an ell corner.";
+  }
+  if (key === "supports" && k !== "blind") {
+    return "No supports on a corner unit (RULES W13). A mitre is braced by its " +
+           "own top and bottom, which are cut whatever kind it is.";
+  }
+  return "";
+}
+
 const SECTIONS = [
-  {key: "size", name: "Size", fields: [
+  // Width, height and depth are greyed wherever they are entered somewhere
+  // else, and each says where. Kind, Number and Note stay live throughout -
+  // Kind because a corner unit can be top-hung, base or tall.
+  {key: "size", name: "Size", grey: sizeGrey, fields: [
     ["width", "Width", "int"], ["height", "Height", "int"],
     ["depth", "Depth", "int"], ["kind", "Kind", "sel:kinds"],
     ["number", "Number", "int"], ["note", "Note", "text"]]},
+
+  // Three types, each with its own measurements, and every dimension a corner
+  // unit has is entered here - which is why Size is greyed above. It sits
+  // directly under Size (moved 22 Sept 2026): "Set in Corner Unit below" has to
+  // point at the very next thing on screen, not at a section four scrolls down.
+  {key: "corner", name: "Corner Unit", toggle: "corner_unit", tick: "Corner unit",
+   when: notPanel, slot: "cornerbox", fields: []},
 
   // A panel is one part, so it has one section: what it is cut from, which way
   // up it stands, its two finished sizes and its edging. The cupboard sections
@@ -711,7 +827,7 @@ const SECTIONS = [
          "and an end cap each side \u2014 each its own numbered item.",
    fields: []},
 
-  {key: "outline", name: "Outline", when: notPanel,
+  {key: "outline", name: "Outline", when: notPanel, grey: outlineGrey,
    hint: "Actual plan shape, x along the wall, y out from the wall. " +
          "All geometry checks read this, not the declared width/depth.",
    fields: [["footprint", "Footprint outline", "poly"]]},
@@ -724,15 +840,6 @@ const SECTIONS = [
 
   {key: "drawers", name: "Drawers", slot: "drawerbox", when: notPanel,
    toggle: "has_drawers", tick: "Has drawers", fields: []},
-
-  {key: "corner", name: "Corner Unit", toggle: "corner_unit", tick: "Corner unit",
-   when: notPanel,
-   fields: [
-    ["corner_style", "Style", "sel:corner_styles"],
-    ["arm_a", "Arm A (along wall A)", "opt"],
-    ["arm_b", "Arm B (along wall B)", "opt"],
-    ["face_a", "Face A (open face, wall-A side)", "opt"],
-    ["face_b", "Face B (open face, wall-B side)", "opt"]]},
 
   {key: "supports", name: "Supports", slot: "supportbox", when: notPanel,
    hint: "A support is a cross rail spanning the internal width, tying the two " +
@@ -776,7 +883,28 @@ function unavailableField(label, value, why) {
     <span class="why">${esc(why)}</span></div>`;
 }
 
-function fieldHTML(c, [key, label, type]) {
+// A field whose answer is entered somewhere else. Greyed, and showing the
+// ENGINE'S figure rather than the declared one: a declared width on a corner
+// unit or a panel is a label and no check reads it, so echoing it back into a
+// field that looks authoritative would be showing the wrong number.
+function derivedField(label, value, why, wide) {
+  const shown = value === null || value === undefined ? "" : value;
+  return `<div class="f derived${wide ? " wide" : ""}"><label>${esc(label)}</label>
+    <input value="${esc(shown)}" placeholder="\u2014" disabled>
+    <span class="why">${esc(why)}</span>${
+      wide ? `<span class="note" id="geomreadout"></span>` : ""}</div>`;
+}
+
+function fieldHTML(c, [key, label, type], sec) {
+  const why = sec && sec.grey ? sec.grey(c, key) : "";
+  if (why) {
+    // The outline field carries the geometry readout, so a greyed one has to
+    // keep it: a corner unit is precisely where that line is worth reading.
+    return type === "poly"
+      ? derivedField(label, (c[key] || []).map((pt) => pt[0] + "," + pt[1]).join("  "),
+                     why, true)
+      : derivedField(label, derivedSize(c, key), why);
+  }
   const v = c[key];
   let input;
   if (type.startsWith("sel:")) {
@@ -799,18 +927,25 @@ function fieldHTML(c, [key, label, type]) {
 }
 
 function sectionHTML(c, sec) {
+  // A section this corner type does not have at all. Its tickbox goes with it:
+  // offering "Has drawers" on a mitre would be offering a choice that is not
+  // one. Nothing is emptied, exactly as an unticked section is not emptied.
+  const gone = cornerOff(c, sec.key);
   const on = sec.toggle ? tickOn(c, sec.toggle) : true;
-  const tick = sec.toggle
+  const tick = sec.toggle && !gone
     ? `<label class="tick"><input type="checkbox" data-tick="${sec.toggle}"
          ${on ? "checked" : ""}>${esc(sec.tick)}</label>` : "";
-  const hint = sec.hint ? `<p class="hint">${esc(sec.hint)}</p>` : "";
+  const hint = sec.hint && !gone ? `<p class="hint">${esc(sec.hint)}</p>` : "";
   let body;
-  if (sec.toggle && !on) {
+  if (gone) {
+    body = `<p class="off">${esc(gone)} Whatever is in the job file stays there,
+            so changing the corner type back brings it all with it.</p>`;
+  } else if (sec.toggle && !on) {
     body = `<p class="off">Off — nothing is built from it. What you typed stays in
             the job file, so ticking it back brings it all with it.</p>`;
   } else {
     body = (sec.fields.length
-            ? `<div class="grid">${sec.fields.map((f) => fieldHTML(c, f)).join("")}</div>`
+            ? `<div class="grid">${sec.fields.map((f) => fieldHTML(c, f, sec)).join("")}</div>`
             : "") + (sec.slot ? `<div id="${sec.slot}" data-slot="1"></div>` : "");
   }
   return `<div class="sec s-${sec.key}"><h3>${esc(sec.name)}${tick}</h3>${hint}${body}</div>`;
@@ -820,9 +955,15 @@ function sectionHTML(c, sec) {
 function refreshGeometryReadout() {
   const el = $("geomreadout");
   const c = S.sel !== null && S.job.cabinets[S.sel];
-  if (!el || !c || !S.res || !S.res.geometry) return;
+  if (!c || !S.res || !S.res.geometry) return;
   const g = S.res.geometry[String(c.number)];
+  refreshCornerReadout(c, g);
+  if (!el) return;
   if (!g) { el.textContent = ""; return; }
+  if (cornerBroken(c)) {
+    el.textContent = "No shape yet \u2014 finish the Corner Unit measurements above.";
+    return;
+  }
   const how = g.source === "corner"
       ? "corner unit, derived from its arm/face measurements" +
         (g.mitre_deg !== null ? `; mitre ${g.mitre_deg}°` : "") +
@@ -832,6 +973,49 @@ function refreshGeometryReadout() {
     : g.source === "panels" ? "rectangle its panels make"
     : "declared width — its panels give none";
   el.textContent = `Checks use ${g.width} × ${g.depth}, ${g.height} high (${how}).`;
+}
+
+// What this corner unit actually comes out as. Every figure is the engine's,
+// read back off /api/compute - the browser adds nothing to it but the words.
+function refreshCornerReadout(c, g) {
+  const el = $("cornerreadout");
+  if (!el) return;
+  const k = g && g.corner;
+  if (!k || !k.kind) { el.textContent = ""; return; }
+  if (k.problems && Object.keys(k.problems).length) {
+    el.innerHTML = `<span class="cfix">Fix the field${
+      Object.keys(k.problems).length > 1 ? "s" : ""} marked in red above.</span>
+      Until the measurements make a shape, this unit is not drawn and nothing is cut for it.`;
+    return;
+  }
+  if (k.kind === "mitre") {
+    const parts = [`Cuts ${g.width} \u00d7 ${g.depth}, ${g.height} high`];
+    if (k.mitred_shelves || k.arm_shelves) {
+      parts[0] += `, blank ${k.blank ? k.blank.join(" \u00d7 ") : "\u2014"}`;
+    }
+    if (g.mitre_deg !== null && g.mitre_deg !== undefined) {
+      parts.push(`mitre ${g.mitre_deg}\u00b0`);
+    }
+    if (g.face_lengths && g.face_lengths.length) {
+      parts.push(`front face ${g.face_lengths.join(" + ")} mm`);
+    }
+    if (k.inner_span) {
+      parts.push(`door cut to the ${k.inner_span} mm inner span \u2192 ${k.door_width} mm`);
+    }
+    el.textContent = parts.join("; ") + ".";
+  } else if (k.kind === "ell") {
+    el.textContent = g.face_lengths && g.face_lengths.length
+      ? `Cuts ${g.width} \u00d7 ${g.depth}, ${g.height} high; front faces ` +
+        `${g.face_lengths.join(" + ")} mm. Shape only \u2014 an ell cuts no panels yet.`
+      : "Shape only \u2014 an ell cuts no panels yet.";
+  } else if (k.kind === "blind") {
+    el.textContent = k.opening === null || k.opening === undefined
+      ? `W ${c.width}, and no blind panel width yet.`
+      : `W ${c.width}, blind ${k.blind_width} \u2192 opening ${k.opening}, ` +
+        `door ${k.door_width}.`;
+  } else {
+    el.textContent = "";
+  }
 }
 
 /* ---------- painting, instead of rebuilding ---------------------------------
@@ -997,6 +1181,7 @@ function renderEditor() {
   }
 
   renderStructure();
+  renderCorner();
   renderDoors();
   renderDrawers();
   renderSupports();
@@ -1116,6 +1301,7 @@ $("editor").addEventListener("input", (e) => {
           .filter((pt) => pt.length === 2 && pt.every((n) => !isNaN(n)));
     else if (t === "opt") c[k] = raw === "" ? null : parseInt(raw, 10);
     else c[k] = raw === "" ? 0 : parseInt(raw, 10);
+    cornerFollowUp(c, k);
     // A board decides materials and edging, and the door count decides how many
     // leaf rows there are. Both used to force the whole editor to be rebuilt;
     // the compute that follows repaints every section off the reply, which is
@@ -1251,6 +1437,7 @@ $("editor").addEventListener("change", async (e) => {
   }
 
   c[key] = on;
+  if (key === "corner_unit" && on) cornerFollowUp(c, "corner_unit");
   // A cabinet saved with no doors has a count of 0, and ticking the box must
   // not show "1" while building nothing: it gets the one door it is showing.
   if (key === "has_doors" && on && !((c.doors || 0) > 0)) c.doors = 1;
@@ -1320,6 +1507,331 @@ $("editor").addEventListener("click", (e) => {
    The side beside each row is the engine's own answer, the one the plan swings
    from and the elevation draws, so the two can never drift apart.           */
 
+/* ---------- the Corner Unit section -----------------------------------------
+   Three types, and each asks for its own measurements. EVERY dimension a corner
+   unit has is entered here, which is the whole reason Size is greyed above: a
+   new user should never have to hunt for where a number goes.
+
+   Nothing here works out a dimension. The derived figures - the blank, the
+   mitre legs, the inner span, the door width, an arm shelf's maximum depth -
+   all arrive on `geometry.corner` from /api/compute. */
+
+// Six small plan pictures of what each type looks like with its corner at the
+// right-hand end and at the left. Fixed drawings of the idea, not a scaled view
+// of these measurements: nothing is computed here and nothing reads a dimension
+// back off them. Wall A runs across the top; the return wall is the short one.
+const CORNER_ICONS = {
+  "mitre-R": `<path class="wall" d="M4,7 H60 M59,7 V40"/>
+              <polygon class="box" points="30,8 58,8 58,36 42,36 30,24"/>
+              <line class="front" x1="30" y1="24" x2="42" y2="36"/>`,
+  "mitre-L": `<path class="wall" d="M4,7 H60 M5,7 V40"/>
+              <polygon class="box" points="34,8 6,8 6,36 22,36 34,24"/>
+              <line class="front" x1="34" y1="24" x2="22" y2="36"/>`,
+  "ell-R":   `<path class="wall" d="M4,7 H60 M59,7 V40"/>
+              <polygon class="box" points="30,8 58,8 58,36 42,36 42,24 30,24"/>
+              <polyline class="front" points="30,24 42,24 42,36"/>`,
+  "ell-L":   `<path class="wall" d="M4,7 H60 M5,7 V40"/>
+              <polygon class="box" points="34,8 6,8 6,36 22,36 22,24 34,24"/>
+              <polyline class="front" points="34,24 22,24 22,36"/>`,
+  "blind-R": `<path class="wall" d="M4,7 H60 M59,7 V40"/>
+              <rect class="box" x="24" y="8" width="34" height="20"/>
+              <rect class="blindp" x="46" y="26" width="12" height="4"/>
+              <line class="front" x1="24" y1="28" x2="46" y2="28"/>`,
+  "blind-L": `<path class="wall" d="M4,7 H60 M5,7 V40"/>
+              <rect class="box" x="6" y="8" width="34" height="20"/>
+              <rect class="blindp" x="6" y="26" width="12" height="4"/>
+              <line class="front" x1="18" y1="28" x2="40" y2="28"/>`,
+};
+
+function cornerIcon(kind, hand) {
+  const art = CORNER_ICONS[kind + "-" + hand] || "";
+  return `<svg viewBox="0 0 64 44" aria-hidden="true">${art}</svg>`;
+}
+
+// One number field in the Corner Unit grid. The same data-k / data-t contract
+// every other field uses, so the editor's one input handler stores it.
+function cornerNum(key, label, value, note, wide, problem) {
+  return `<div class="f${wide ? " wide" : ""}"><label>${esc(label)}</label>
+    <input type="number" step="1" min="0" data-k="${key}" data-t="opt"
+           class="${problem ? "bad" : ""}"
+           value="${value === null || value === undefined ? "" : value}"
+           placeholder="enter mm">
+    ${problem ? `<span class="prob">${esc(problem)}</span>` : ""}
+    ${note ? `<span class="note">${note}</span>` : ""}</div>`;
+}
+
+/* The unit drawn to scale in plan, off the outline the ENGINE derived, with
+   each measurement lettered the same as the field it comes from. Nothing is
+   computed here but where to put a label: every corner point is the engine's.
+   Wall A runs across the top, the room is below it, and the runs the unit
+   meets are drawn dashed so "open end = depth of the run it meets" is visible
+   rather than a sentence to decode.                                        */
+const CORNER_EDGES = {
+  "mitre-R": {a: [0, 1], b: [1, 2], fb: [2, 3], fa: [4, 0], front: [[3, 4]]},
+  "mitre-L": {b: [0, 1], a: [1, 2], fa: [2, 3], front: [[3, 4]], fb: [4, 0]},
+  "ell-R":   {a: [0, 1], b: [1, 2], fb: [2, 3], front: [[3, 4], [4, 5]], fa: [5, 0]},
+  "ell-L":   {b: [0, 1], a: [1, 2], fa: [2, 3], front: [[3, 4], [4, 5]], fb: [5, 0]},
+};
+const CORNER_LETTER = {a: "A", b: "B", fa: "C", fb: "D"};
+
+function cornerDiagram(c, g, info) {
+  const kind = info.kind, hand = info.hand === "L" ? "L" : "R";
+  let pts, edges, doorTxt = [];
+  const blind = kind === "blind";
+  if (blind) {
+    if (!g || !g.footprint || !(c.width > 0) || !(c.depth > 0)) return "";
+    const W = g.width, D = g.depth, B = c.blind_width || 0;
+    pts = [[0, 0], [W, 0], [W, D], [0, D]];
+    edges = null;
+    const bx0 = hand === "R" ? W - B : 0, bx1 = hand === "R" ? W : B;
+    const dx0 = hand === "R" ? 0 : B, dx1 = hand === "R" ? W - B : W;
+    return drawDiagram(pts, W, D, hand, {blind: [bx0, bx1], door: [dx0, dx1],
+      D, W, B, doorW: info.door_width, opening: info.opening});
+  }
+  if (!g || g.source !== "corner" || !g.footprint) return "";
+  pts = g.footprint;
+  edges = CORNER_EDGES[kind + "-" + hand];
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  return drawDiagram(pts, Math.max(...xs), Math.max(...ys), hand,
+    {edges, fa: c.face_a, fb: c.face_b, a: c.arm_a, b: c.arm_b, kind,
+     doors: g.doors || [], mitre: g.mitre_deg});
+}
+
+function drawDiagram(pts, W, D, hand, o) {
+  const pad = Math.max(W, D) * 0.34;
+  const ghost = Math.max(W, D) * 0.45;            // how much of each run to show
+  const vx0 = -pad, vy0 = -pad * 0.55, vw = W + 2 * pad, vh = D + pad * 1.9;
+  const k = Math.max(W, D) / 260;                 // one screen pixel, in mm
+  const fs = 15 * k, sw = 1.4 * k;
+  const P = (p) => `${p[0]},${p[1]}`;
+  const cornerX = hand === "R" ? W : 0;
+  const out = [];
+  // the walls: A across the top, the return wall down the corner end
+  out.push(`<line x1="${hand === "R" ? -ghost - pad * 0.2 : 0}" y1="0"
+    x2="${hand === "R" ? W : W + ghost + pad * 0.2}" y2="0" stroke="var(--ink)" stroke-width="${3 * k}"/>`);
+  out.push(`<line x1="${cornerX}" y1="0" x2="${cornerX}" y2="${D + ghost + pad * 0.3}"
+    stroke="var(--ink)" stroke-width="${3 * k}"/>`);
+  out.push(`<text x="${hand === "R" ? -ghost : W + ghost}" y="${-6 * k}" font-size="${fs}"
+    text-anchor="${hand === "R" ? "start" : "end"}" fill="var(--muted)">this wall</text>`);
+  out.push(`<text x="${cornerX + (hand === "R" ? 6 : -6) * k}" y="${D + ghost}" font-size="${fs}"
+    text-anchor="${hand === "R" ? "start" : "end"}" fill="var(--muted)">return wall</text>`);
+  const dash = `stroke="var(--rule)" stroke-dasharray="${5 * k} ${4 * k}" fill="none" stroke-width="${sw}"`;
+  if (o.blind) {
+    // the run on the return wall stands in front of the blind panel
+    const rx = hand === "R" ? o.W - o.D : 0;
+    out.push(`<rect x="${rx}" y="${o.D}" width="${o.D}" height="${ghost}" ${dash}/>`);
+    out.push(`<text x="${rx + o.D / 2}" y="${o.D + ghost / 2}" font-size="${fs * 0.85}"
+      text-anchor="middle" fill="var(--muted)">return run</text>`);
+    out.push(`<polygon points="${pts.map(P).join(" ")}" fill="var(--carc)" stroke="var(--ink)" stroke-width="${sw}"/>`);
+    const [b0, b1] = o.blind, [d0, d1] = o.door;
+    if (o.B) out.push(`<rect x="${b0}" y="${o.D}" width="${b1 - b0}" height="${18 * k}"
+      fill="var(--rule)" stroke="var(--ink)" stroke-width="${sw * 0.7}"/>`);
+    out.push(`<rect x="${d0}" y="${o.D}" width="${Math.max(d1 - d0, 0)}" height="${18 * k}"
+      fill="var(--door)" stroke="var(--ink)" stroke-width="${sw * 0.7}"/>`);
+    out.push(label(o.W / 2, -14 * k, `W ${o.W}`, fs));
+    out.push(label(hand === "R" ? -30 * k : o.W + 30 * k, o.D / 2, `depth ${o.D}`, fs));
+    if (o.B) out.push(label((b0 + b1) / 2, o.D + 36 * k, `blind panel ${o.B}`, fs));
+    if (o.doorW) out.push(label((d0 + d1) / 2, o.D + 36 * k, `door ${o.doorW}`, fs));
+  } else {
+    // the two runs this unit meets, dashed, at the open ends' depths
+    if (o.fa) {
+      const x = hand === "R" ? -ghost : W;
+      out.push(`<rect x="${x}" y="0" width="${ghost}" height="${o.fa}" ${dash}/>`);
+      out.push(`<text x="${x + ghost / 2}" y="${o.fa / 2}" font-size="${fs * 0.85}"
+        text-anchor="middle" fill="var(--muted)">next run</text>`);
+    }
+    if (o.fb) {
+      const x = hand === "R" ? W - o.fb : 0;
+      out.push(`<rect x="${x}" y="${D}" width="${o.fb}" height="${ghost}" ${dash}/>`);
+      out.push(`<text x="${x + o.fb / 2}" y="${D + ghost / 2}" font-size="${fs * 0.85}"
+        text-anchor="middle" fill="var(--muted)">next run</text>`);
+    }
+    out.push(`<polygon points="${pts.map(P).join(" ")}" fill="var(--carc)" stroke="var(--ink)" stroke-width="${sw}"/>`);
+    // the door face(s) in the door colour, thick
+    (o.edges.front || []).forEach(([i, j], n) => {
+      const p = pts[i], q = pts[j];
+      out.push(`<line x1="${p[0]}" y1="${p[1]}" x2="${q[0]}" y2="${q[1]}"
+        stroke="#3d8a8a" stroke-width="${5 * k}"/>`);
+      const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+      const txt = o.kind === "mitre"
+        ? `door ${o.doors[0] || ""}${o.mitre !== null && o.mitre !== undefined ? " \u00b7 " + Math.abs(o.mitre) + "\u00b0" : ""}`
+        : "face " + (n + 1);
+      out.push(label(mx + (hand === "R" ? -34 : 34) * k, my + 20 * k, txt, fs));
+    });
+    // each measurement, lettered like its field
+    ["a", "b", "fa", "fb"].forEach((key) => {
+      const e = o.edges[key];
+      if (!e) return;
+      const p = pts[e[0]], q = pts[e[1]];
+      let mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+      // pushed off the edge, away from the box
+      if (key === "a") my -= 14 * k;
+      if (key === "b") mx += (hand === "R" ? 34 : -34) * k;
+      if (key === "fa") mx += (hand === "R" ? 38 : -38) * k;
+      if (key === "fb") my += 16 * k;
+      out.push(label(mx, my, `${CORNER_LETTER[key]} ${o[key]}`, fs, true));
+    });
+  }
+  return `<div class="cdiag"><svg viewBox="${vx0} ${vy0} ${vw} ${vh}"
+    xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">${out.join("")}</svg></div>`;
+}
+
+function label(x, y, text, fs, bold) {
+  return `<text x="${x}" y="${y}" font-size="${fs}" text-anchor="middle"
+    dominant-baseline="middle" fill="var(--ink)"${bold ? ' font-weight="700"' : ""}
+    paint-order="stroke" stroke="var(--panel)" stroke-width="${fs * 0.35}">${esc(text)}</text>`;
+}
+
+/* What follows a change to a corner unit, so the operator is not left to do
+   arithmetic the app can do.
+
+   1. Choosing Mitre or Ell with nothing measured yet fills in a starting shape:
+      both open ends at the depth the cabinet already had (the depth of the runs
+      it meets, which is what they are), and both lengths 350 longer - the
+      proportions of cabinet 7, the one corner unit actually built. Every figure
+      is shown in its field and in the drawing, and is overtyped as measured.
+   2. A corner unit stands IN a corner. Whenever its type, hand or length along
+      the wall changes, a placed unit is moved into the corner its hand names:
+      right-hand end at the wall's end, or left-hand end at the wall's start. It
+      used to be left wherever it was, and the operator had to work out
+      "wall length minus arm" to put it there by hand.                        */
+const CORNER_REACH_KEYS = {corner_style: 1, corner_hand: 1, arm_a: 1, width: 1,
+                           corner_unit: 1};
+function cornerFollowUp(c, k) {
+  if (!(k in CORNER_REACH_KEYS)) return;
+  const on = c.corner_unit !== false && !!c.corner_style;
+  if (!on) return;
+  if (k === "corner_style" && (c.corner_style === "mitre" || c.corner_style === "ell")
+      && [c.arm_a, c.arm_b, c.face_a, c.face_b].every((v) => !(v > 0))) {
+    const d = c.depth > 0 ? c.depth : 500;
+    c.face_a = d; c.face_b = d; c.arm_a = d + 350; c.arm_b = d + 350;
+  }
+  // A mitre or a blind corner is a unit with a door - the blind one by
+  // definition. Choosing the type turns doors on; the operator can still turn
+  // them off on a mitre.
+  if (k === "corner_style" && (c.corner_style === "mitre" || c.corner_style === "blind")
+      && c.has_doors !== true) {
+    c.has_doors = true;
+    if (!((c.doors || 0) > 0)) c.doors = 1;
+  }
+  const reach = c.corner_style === "blind" ? c.width : c.arm_a;
+  if (!(reach > 0)) return;
+  const p = (S.job.placements || []).find((q) => q.cabinet === c.number);
+  const rm = S.job.room;
+  if (!p || !rm) return;
+  const w = (rm.walls || []).find((x) => x.id === p.wall);
+  if (!w) return;
+  const x = c.corner_hand === "L" ? 0 : Math.max(0, w.length - reach);
+  if (p.x !== x) {
+    p.x = x;
+    placesSig = null;
+    toast(`Cabinet ${c.number} moved into the ${c.corner_hand === "L" ? "start" : "end"} ` +
+          `corner of wall ${p.wall} (x = ${x}).`);
+  }
+}
+
+function renderCorner() {
+  const box = slot($("cornerbox"));
+  if (!box) return;
+  const c = S.job.cabinets[S.sel];
+  const info = cornerInfo(c) || {};
+  const kind = info.kind || "";
+  const types = S.def.corner_types || [];
+  const hands = S.def.corner_hands || [];
+
+  const typeRow = `<div class="f wide"><label>Type</label>
+    <select data-k="corner_style" data-t="sel:corner_styles">
+      <option value=""${c.corner_style ? "" : " selected"}>\u2014 choose \u2014</option>
+      ${types.map((t) => `<option value="${esc(t.key)}"${
+        t.key === c.corner_style ? " selected" : ""}>${esc(t.name)}</option>`).join("")}
+    </select>
+    ${kind ? `<span class="note">${esc(
+      (types.find((t) => t.key === kind) || {}).hint || "")}</span>` : ""}</div>`;
+
+  if (!kind) {
+    // Ticking the box and leaving the type blank used to do nothing at all, and
+    // say nothing about it. This is that silence, ended.
+    box.innerHTML = `<div class="grid">${typeRow}</div>
+      <p class="off">Choose a corner type.</p>`;
+    return;
+  }
+
+  const handRow = `<div class="f wide"><label>Hand</label>
+    <div class="hands">${hands.map((h) => `
+      <label class="handopt${info.hand === h.key ? " on" : ""}">
+        <input type="radio" name="cornerhand" data-k="corner_hand" data-t="text"
+               value="${esc(h.key)}"${info.hand === h.key ? " checked" : ""}>
+        ${cornerIcon(kind, h.key)}<b>${esc(h.name)}</b>
+        <span>${esc(h.hint)}</span></label>`).join("")}</div>
+    <span class="note">Which end of the unit stands in the corner, as you face
+    it standing in the room.</span></div>`;
+
+  const prob = info.problems || {};
+  let fields;
+  if (kind === "blind") {
+    fields = cornerNum("width", "Carcass width", c.width,
+                       "the box itself, blind panel and door together", false, prob.width) +
+             cornerNum("height", "Height", c.height, "", false, prob.height) +
+             cornerNum("depth", "Depth", c.depth, "", false, prob.depth) +
+             cornerNum("blind_width", "Blind panel width", c.blind_width,
+                       "cut at exactly this \u2014 it has to cover the run on the return wall",
+                       false, prob.blind_width);
+  } else {
+    fields = cornerNum("arm_a", "A \u2014 length along this wall", c.arm_a,
+                       "wall to the unit's open end", false, prob.arm_a) +
+             cornerNum("arm_b", "B \u2014 length along the return wall", c.arm_b,
+                       "", false, prob.arm_b) +
+             cornerNum("face_a", "C \u2014 open end on this wall", c.face_a,
+                       "= depth of the cupboards beside it on this wall", false, prob.face_a) +
+             cornerNum("face_b", "D \u2014 open end on the return wall", c.face_b,
+                       "= depth of the cupboards on the return wall", false, prob.face_b) +
+             cornerNum("height", "Height", c.height, "", false, prob.height);
+  }
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const diagram = cornerDiagram(c, g, info);
+
+  let extra = "";
+  if (kind === "mitre") {
+    const max = info.arm_shelf_max;
+    const armOpts = [["a", "Arm A \u2014 along this wall"],
+                     ["b", "Arm B \u2014 along the return wall"]];
+    extra = `<div class="grid">
+      <div class="f"><label>Arm shelves</label>
+        <input type="number" step="1" min="0" data-k="arm_shelves" data-t="int"
+               value="${c.arm_shelves || 0}">
+        <span class="note">A rectangle running along one arm, behind the
+        mitre${info.arm_shelf_length ? `. ${info.arm_shelf_length} mm long` : ""}.</span></div>
+      <div class="f"><label>Arm</label>
+        <select data-k="arm_shelf_arm" data-t="sel:corner_arms">${armOpts.map(([k, n]) =>
+          `<option value="${k}"${(c.arm_shelf_arm || "a") === k ? " selected" : ""}>${
+            esc(n)}</option>`).join("")}</select></div>
+      <div class="f"><label>Arm shelf depth</label>
+        <input type="number" step="1" min="0" data-k="arm_shelf_depth" data-t="opt"
+               value="${c.arm_shelf_depth === null || c.arm_shelf_depth === undefined
+                        ? "" : c.arm_shelf_depth}"
+               placeholder="${max === null || max === undefined ? "auto" : max}">
+        <span class="note">${max === null || max === undefined ? "" :
+          `Maximum <b>${max} mm</b> \u2014 the deepest that clears both the closed door
+           (${info.shelf_clear} mm) and the hinge plate (${info.hinge_clearance} mm),
+           rounded down to 5. Blank takes the maximum; more than it is a critical.`}</span></div>
+      <div class="f"><label>Mitred shelves</label>
+        <input type="number" step="1" min="0" data-k="mitred_shelves" data-t="int"
+               value="${c.mitred_shelves || 0}">
+        <span class="note">The same square blank as the top and bottom, mitred on
+        site${info.shelf_legs ? `: legs ${info.shelf_legs[0]} and ${info.shelf_legs[1]}`
+             : ""}.</span></div>
+      ${cornerNum("corner_door_width", "Door width override", c.corner_door_width,
+        info.door_width ? `blank derives ${info.door_width} mm from the arms` : "",
+        true)}
+    </div>`;
+  }
+
+  box.innerHTML = `<div class="grid">${typeRow}${handRow}</div>${diagram}
+    <div class="grid">${fields}</div>${extra}
+    <p class="note" id="cornerreadout"></p>`;
+}
+
+
 function renderDoors() {
   const box = slot($("doorbox"));
   if (!box) return;
@@ -1327,7 +1839,11 @@ function renderDoors() {
   const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
   const mats = (S.res && S.res.materials) || {};
   const keys = (S.res && S.res.boards) || [];
-  const have = c.doors || 1;
+  // A blind corner has exactly one door, at the far end from the blind panel.
+  // That is a ruling, not a default: the unit exists to hold one door clear of
+  // the return run. Its own `doors` count stays in the job file and is not read.
+  const blind = cornerKind(c) === "blind";
+  const have = blind ? 1 : (c.doors || 1);
   const n = Math.max(1, have);
   const counts = [1, 2];
   if (have > 2) counts.push(have);      // a job file written before the limit
@@ -1373,9 +1889,13 @@ function renderDoors() {
        one cabinet. A cabinet takes 1 or 2 now — pick one. Until you do, it is cut as
        ${have}, exactly as it was saved.</p>` : "";
   box.innerHTML = `<div class="grid">
-      <div class="f"><label>How many</label>
+      ${blind
+        ? `<div class="f"><label>How many</label>
+             <input value="1" disabled>
+             <span class="note">A blind corner has one door, always.</span></div>`
+        : `<div class="f"><label>How many</label>
         <select data-k="doors" data-t="int">${counts.map((k) =>
-          `<option value="${k}"${k === have ? " selected" : ""}>${k}</option>`).join("")}</select></div>
+          `<option value="${k}"${k === have ? " selected" : ""}>${k}</option>`).join("")}</select></div>`}
       <div class="f"><label>Door height</label>
         <input type="number" step="1" data-k="door_height" data-t="opt" placeholder="auto"
                value="${c.door_height === null || c.door_height === undefined
@@ -2045,10 +2565,17 @@ function renderStructure() {
       it on the <b>Boards</b> tab before choosing what this cabinet is cut from.</p>`;
     return;
   }
+  // A mitre or an ell is a different construction, not a box with a different
+  // outline. Its back IS its two melamine wall panels, so there is no 3 mm
+  // backing board and nothing to groove it into; and its shelves are the two
+  // kinds in the Corner Unit section, because its interior is not a rectangle
+  // and a straight shelf size would be wrong in the unsafe direction. A BLIND
+  // corner is a straight box and none of this applies to it.
+  const shaped = cornerShaped(c);
   // The back board is only cut when there is a back, or a drawer on a grooved
   // 3 mm base. Nothing on this cabinet uses it otherwise, so it is not asked for.
-  const usesBack = c.back !== "none" ||
-    (tickOn(c, "has_drawers") && (c.drawers || []).some((d) => d.base === "board"));
+  const usesBack = !shaped && (c.back !== "none" ||
+    (tickOn(c, "has_drawers") && (c.drawers || []).some((d) => d.base === "board")));
   const backs = S.def.backs || ["four", "three", "none"];
   const std = S.def.standard || {};
 
@@ -2064,13 +2591,24 @@ function renderStructure() {
              drawer on a grooved base.</p></div>`}
       ${boardSel(c, "carcass_board", "Carcass board",
                  "sides, top, bottom, supports and shelves", "thick")}
-      <div class="f wide"><label>Back fixing</label>
+      ${shaped
+        ? `<div class="f wide"><label>Back fixing</label>
+             <p class="off">A corner unit's back is its two melamine wall panels,
+             one wrapping the other. There is no 3 mm backing board and nothing to
+             groove it into, so this is not asked. What is in the job file stays
+             there.</p></div>`
+        : `<div class="f wide"><label>Back fixing</label>
         <select data-k="back" data-t="sel:backs">${backs.map((b) =>
           `<option value="${esc(b)}"${b === c.back ? " selected" : ""}>${
             esc(BACK_LABEL[b] || b)}</option>`).join("")}</select>
         <span class="note">what the backing board is grooved into, and whether one
-        is cut at all</span></div>
-      <div class="f"><label>Shelves</label>
+        is cut at all</span></div>`}
+      ${shaped
+        ? `<div class="f wide"><label>Shelves</label>
+             <p class="off">A corner unit's shelves are the arm shelf and the mitred
+             shelf, both in <b>Corner Unit</b> below — its inside is not a rectangle,
+             so a straight shelf size would not fit it.</p></div>`
+        : `<div class="f"><label>Shelves</label>
         <input type="number" step="1" min="0" data-k="shelves" data-t="int"
                value="${c.shelves || 0}">
         <span class="note">Adjustable — they sit on shelf pegs and can be moved up
@@ -2080,7 +2618,7 @@ function renderStructure() {
         <input type="number" step="1" min="0" data-k="fixed_shelves" data-t="int"
                value="${c.fixed_shelves || 0}">
         <span class="note">Permanently fixed in place — they do not move. Cut
-        ${std.shelf_gap_fixed} mm clear of the back, so a little deeper.</span></div>
+        ${std.shelf_gap_fixed} mm clear of the back, so a little deeper.</span></div>`}
       ${unavailableField("Shelf width", c.shelf_width,
         "Greyed out: a shelf width only means something once a divider splits " +
         "the inside into bays, and dividers are not available yet.")}
@@ -3646,6 +4184,8 @@ $("places").addEventListener("input", async (e) => {
       renderPlaces(true);
     } else if (i >= 0) {
       S.job.placements[i].wall = e.target.value;
+      const cc = S.job.cabinets.find((c) => c.number === n);
+      if (cc) cornerFollowUp(cc, "corner_unit");   // a corner unit goes into a corner
       renderPlaces(true);
     } else {
       // A NEW placement. Where it goes is the engine's answer, not 0 mm: at 0 it
@@ -3660,6 +4200,8 @@ $("places").addEventListener("input", async (e) => {
       const w = model.ok && model.walls[place.wall];
       if (w && S.job.placements.indexOf(place) >= 0) {
         place.x = w.free_x;
+        const cc = S.job.cabinets.find((c) => c.number === n);
+        if (cc) cornerFollowUp(cc, "corner_unit");   // ...unless it is a corner unit
         renderPlaces(true);
       }
     }
