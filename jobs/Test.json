@@ -30,14 +30,14 @@
       "thickness": 16,
       "grain": "grain",
       "price": 999,
-      "picture": "",
+      "picture": "C:\\Dev\\CupboardApp\\Pictures\\Brookhill.png",
       "has_edging": true,
       "edging_kinds": [
         "pvc",
         "1mm",
         "2mm"
       ],
-      "colour": "#d2b36a"
+      "colour": "#c6a65d"
     },
     "BACK": {
       "board": "WHITE MASONITE BACKING 3MM",
@@ -62,7 +62,7 @@
       "thickness": 16,
       "grain": "plain",
       "price": 1100,
-      "picture": "\"C:\\Dev\\CupboardApp\\Pictures\\Storm Grey.jpg\"",
+      "picture": "C:\\Dev\\CupboardApp\\Pictures\\Storm Grey.jpg",
       "has_edging": true,
       "edging_kinds": [
         "pvc",
@@ -486,19 +486,19 @@
           "face_board": null
         },
         {
-          "face_height": 192,
+          "face_height": 187,
           "box_height": 150,
           "base": "board",
-          "mode": "share",
+          "mode": "fixed",
           "share": 1,
           "box_board": "WHITEMEL",
           "face_board": null
         },
         {
-          "face_height": 195,
+          "face_height": 200,
           "box_height": 150,
           "base": "board",
-          "mode": "share",
+          "mode": "fixed",
           "share": 1,
           "box_board": "WHITEMEL",
           "face_board": null
@@ -592,6 +592,134 @@
       "face_a": null,
       "face_b": null,
       "corner_unit": null
+    },
+    {
+      "number": 9,
+      "width": 600,
+      "height": 2400,
+      "depth": 500,
+      "kind": "panel",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": false,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "BROOKHILL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "panel": {
+        "board": "BROOKHILL",
+        "orientation": "end",
+        "a": 616,
+        "b": 2400,
+        "grain_along": "b",
+        "edge_kind": "1mm",
+        "edge_board": "",
+        "edge_long": 2,
+        "edge_short": 2
+      },
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 10,
+      "width": 600,
+      "height": 2400,
+      "depth": 500,
+      "kind": "panel",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": false,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "BROOKHILL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "panel": {
+        "board": "BROOKHILL",
+        "orientation": "end",
+        "a": 616,
+        "b": 2400,
+        "grain_along": "b",
+        "edge_kind": "1mm",
+        "edge_board": "",
+        "edge_long": 2,
+        "edge_short": 2
+      },
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
     }
   ],
   "loose": [],
@@ -623,7 +751,7 @@
     {
       "cabinet": 1,
       "wall": "A",
-      "x": 0,
+      "x": 16,
       "z": 0,
       "flip": false,
       "layer": null
@@ -631,7 +759,7 @@
     {
       "cabinet": 2,
       "wall": "A",
-      "x": 600,
+      "x": 632,
       "z": 0,
       "flip": false,
       "layer": null
@@ -639,7 +767,7 @@
     {
       "cabinet": 3,
       "wall": "A",
-      "x": 1050,
+      "x": 1082,
       "z": 0,
       "flip": false,
       "layer": null
@@ -647,7 +775,7 @@
     {
       "cabinet": 4,
       "wall": "A",
-      "x": 1500,
+      "x": 1532,
       "z": 0,
       "flip": false,
       "layer": null
@@ -655,7 +783,7 @@
     {
       "cabinet": 5,
       "wall": "A",
-      "x": 600,
+      "x": 632,
       "z": 1400,
       "flip": false,
       "layer": null
@@ -663,7 +791,7 @@
     {
       "cabinet": 6,
       "wall": "A",
-      "x": 1900,
+      "x": 1932,
       "z": 0,
       "flip": false,
       "layer": null
@@ -671,7 +799,7 @@
     {
       "cabinet": 7,
       "wall": "A",
-      "x": 2450,
+      "x": 2482,
       "z": 0,
       "flip": false,
       "layer": null
@@ -679,7 +807,23 @@
     {
       "cabinet": 8,
       "wall": "A",
-      "x": 2800,
+      "x": 2832,
+      "z": 100,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 9,
+      "wall": "A",
+      "x": 0,
+      "z": 100,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 10,
+      "wall": "A",
+      "x": 616,
       "z": 100,
       "flip": false,
       "layer": null
