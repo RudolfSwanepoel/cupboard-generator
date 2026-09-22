@@ -17,7 +17,7 @@ Four tabs — cabinets, cut list, nesting, validation — over one `POST
 /api/compute` that returns panels, issues, board counts, cost, the elevation and
 the sheet layouts in a single payload. **Oct 2025** loads the regression
 fixture. Export writes the Plazaboard CSVs and the layout SVGs to
-`out/<job name>/`, and refuses while any critical is outstanding.
+`output/<job name>/`, and refuses while any critical is outstanding.
 
 ## Run the regression check
 
@@ -37,6 +37,7 @@ python tools/check_single_source.py
 python tools/check_swap.py
 python tools/check_colour.py
 python tools/check_panels.py
+python tools/check_pictures.py
 ```
 
 The first rebuilds the October 2025 wardrobe from cabinet definitions and

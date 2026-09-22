@@ -96,11 +96,13 @@ def main():
     print(f"  estimated total incl VAT  R {est['total_incl_vat']:,.2f}")
     print("  (quotation VRG_SOQ497999 was R 28,322.75 for 9 DECOR / 18 MEL / 6 BACK)")
 
-    os.makedirs(os.path.join(os.path.dirname(__file__), "..", "out"), exist_ok=True)
+    # One job, one folder — the same rule /api/export follows, so a second job's
+    # sheets can never land on this one's.
+    outdir = os.path.join(os.path.dirname(__file__), "..", "output", JOB.name)
+    os.makedirs(outdir, exist_ok=True)
     for mat, sheets in nested.items():
-        N.write_svg(sheets, os.path.join(os.path.dirname(__file__), "..", "out",
-                                         f"nest_{mat}.svg"), title=mat)
-    print("  sheet layouts written to out/nest_*.svg")
+        N.write_svg(sheets, os.path.join(outdir, f"nest_{mat}.svg"), title=mat)
+    print(f"  sheet layouts written to output/{JOB.name}/nest_*.svg")
 
     if not os.path.exists(path):
         print(f"\n! cut list not found at {path} — skipping the diff")
