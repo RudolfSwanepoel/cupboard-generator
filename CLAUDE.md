@@ -65,8 +65,11 @@ Against the brief in `Claude outputs/claude-code-brief-boards-colour-panels-3d-2
 - **B** — `Cabinet._board_slots` is the one list of which fields hold a board, and
   the swap, the un-select, the library scan and the validator all read it.
 - **C** — every fill in the run, the wall elevations and the plan is the colour of
-  the board that part is cut from, through `render.board_look`. See
-  **Drawings** below.
+  the board that part is cut from, through `render.board_look`. Since 22
+  September a grained board with a picture is drawn in the PICTURE instead,
+  through `render.Fills`, and the colour is the fallback. See **Drawings**
+  below. (A later session read a screenshot as "Part C was never built". It was
+  built; the screenshot was an isolated cabinet.)
 
 Since then, and not in the brief: support rows carry a per-row **Cut from**
 board; a swap moves every panel; the editors refresh themselves; deleting a
@@ -107,6 +110,30 @@ floor rather than the plinth top, which is a leg height out and is why
 a cabinet given a wall can land underneath one already there, with nothing to
 click on, so it is now reached from the LIST instead. See **Vertical snap** and
 **Isolate** below.
+
+**A third standalone fix, not a lettered Part (22 September 2026): a board's
+PICTURE is what its parts are drawn in, and the top dimension line reads per
+cupboard.** A session before this one concluded from a screenshot that doors and
+drawer faces "were never built" in the wall elevation. **That was wrong, and the
+screenshot was not what it looked like.** Part C was built, and is: doors, drawer
+faces and the carcass body have been filled with the real board colour through
+`render.board_look` since 20 September, with hinge counts, drawer-face heights
+and the door-swing triangle on top. The plainer screenshot was an ISOLATED
+cabinet — everything else ghosted at `opacity="0.30"`, which is isolate working,
+not a missing feature. **The diagonals in each door are the swing triangle**
+(`render._hinge_marks`, its point on the hinge side), the standard elevation
+convention, not grain. Grain was drawn, as `_grain_lines` — fine vertical
+hairlines at 22 % opacity.
+
+What was genuinely missing is what this stop added. **A board's picture was
+carried and never drawn** — `board_look` said so in as many words. Now:
+`render.Fills` tiles it as an SVG `<pattern>`, and **a picture wins over the
+colour field, on a GRAINED board only** (ruled 22 September 2026). A plain board
+keeps its colour even when it carries a picture: a photograph of a flat white
+sheet says nothing the colour does not and tiles into noise. **Board pictures are
+supplied grain-vertical**, and an upload warns when one is not. **The top
+dimension line breaks at every cupboard**, as the bottom one always did. See
+**Board pictures in the drawings** and **The two dimension lines** below.
 
 **A second standalone fix, not a lettered Part (22 September 2026): board
 pictures, and `out/` renamed `output/`.** A board picture had never once
@@ -195,6 +222,58 @@ resolvers the engine cuts from, so the paper and the cut list cannot disagree.
 A board nobody has coloured draws neutral (`model.NO_COLOUR`) and the legend
 says "no colour set". That is never a warning: a colour changes no cut.
 
+### Board pictures in the drawings
+
+**A picture wins over the colour field, and only on a GRAINED board** (ruled 22
+September 2026). `render.Fills` is the one place that rule lives, and every fill
+in both elevations and in the legend goes through it — `Fills.of(look, vertical)`
+gives back a hex colour or a `url(#...)`, and no drawing decides for itself. A
+plain board keeps its colour even when it carries a picture: a photograph of a
+flat white sheet says nothing the colour does not, and tiles into noise. No
+picture, or nothing readable: the colour, exactly as before.
+
+**The picture is TILED as an SVG `<pattern>`, and the tile is turned onto the
+panel's own grain direction.** Board pictures are supplied with the grain running
+vertically, so the turn is 0 or 90 degrees and never an angle worked out of a
+photograph — that convention is the whole reason this is possible. A door and a
+drawer face are cut with `Length` up the front, so neither turns; a panel asks
+`_panel_grain_vertical`, and a grain running into the page is left as supplied
+rather than turned on a guess. One pattern per board per direction, no more.
+
+**The board's colour sits under the image inside the pattern**, so a picture that
+does not load leaves the part its colour rather than a hole. That is not
+theoretical — it is what you see when the SVG is opened somewhere its pictures
+cannot be reached.
+
+**A picture replaces the grain hairlines, it does not sit under them.**
+`_grain_lines` is skipped wherever `Fills.textured` is true: real grain in a
+photograph does not want fake grain drawn over it.
+
+**The legend swatch takes the same fill as the parts.** A key to a drawing it
+does not describe is worse than no key.
+
+**On screen a picture is asked for over `/pictures/<name>`; an exported drawing
+asks for the bare file name and the file is copied in beside it.** An export
+folder gets opened, zipped and emailed, and the route would 404 the moment it
+left the machine. `render.pictures_drawn(job)` is what says which files to copy —
+`api._export_pictures` must not answer that itself, or the export and the drawing
+become the two lists that disagree.
+
+**The plan is deliberately left on flat colour.** A plan is a top view: you are
+looking at a board's edge, not its face, so a face texture there would be saying
+something untrue — and at footprint scale it reads as mud.
+
+### The two dimension lines
+
+**The top chain breaks wherever either run does** (22 September 2026). It used to
+break only at the overheads, so a wall with one wall unit over a row of base
+units dimensioned that unit and then handed over a single figure spanning every
+cupboard past it — on `Test.json` wall A, `632 | 300 | 3068`. It is
+`chain(hung + floor, wall.length)` now, so the top reads at the bottom's
+resolution and still closes on the wall. A wall with no overheads still gets no
+top chain at all: there is nothing up there to dimension and the bottom already
+says it.
+
 **Base, wall and tall are in the outline, not the fill** (20 September 2026).
 The fill was carrying the layer and now carries the board, so: base a normal
 stroke, wall dashed, tall heavier. The dash is `7 4`, deliberately not the
@@ -212,7 +291,14 @@ grey on a mid grey board was 1.04:1. Both clear 3:1 on every fill.
 direction, and doors and drawer faces are both cut with `Length` up the front,
 so both draw vertical lines. **Vertical on a drawer face is correct** (ruled 20
 September 2026) — no note on the drawing, no change to the cut list, and never
-raise it again. A plain board draws none.
+raise it again. A plain board draws none, and neither does a board drawn in its
+picture — see **Board pictures in the drawings**.
+
+**The diagonals across a door leaf are the SWING, not the grain.**
+`render._hinge_marks` draws the opening triangle with its point on the hinge
+side, the standard elevation convention, paired with the hinge count underneath.
+It has been read as grain at least once; the grain is the fine vertical
+hairlines at 22 % opacity, or the picture.
 
 **Only a hex value reaches an SVG fill.** A job file is a text file somebody
 can edit, and a fill is written into the drawing as it stands, so `board_look`
@@ -258,7 +344,7 @@ tools/check_single_source.py  the one list of which cabinet fields hold a board
 tools/check_swap.py        a swap moves every use of a board, and says what it does
 tools/check_colour.py      board colour in the drawings, and the ink that reads on it
 tools/check_panels.py      independent panels: the line they cut, and what they stay out of
-tools/check_pictures.py    board pictures: what is stored, what is served
+tools/check_pictures.py    board pictures: stored, served, drawn, grain-checked
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
@@ -526,6 +612,28 @@ saved.
 
 **A `data:` URI passes through all of it untouched.** It is already the picture
 rather than a pointer at one.
+
+**The grain must run VERTICALLY in the source image, and an upload says so when
+it does not** (ruled 22 September 2026). That convention is what lets a drawing
+turn the tile onto each panel's length direction through 0 or 90 degrees instead
+of trying to detect an arbitrary angle. `pictures.grain_verdict` is the one
+answer: gradient energy along x against along y, so it measures the direction the
+texture is COHERENT in and knows nothing about wood. It **warns and never
+blocks** — the picture is already in `Pictures/` by then and stays there, the
+same bargain everything but a critical strikes. A picture with no texture to have
+a direction, or none decisive enough to name, is **not asked the question and
+nothing is said**: a warning nobody can act on is worse than silence.
+
+**The browser samples and the app judges.** Decoding a JPEG is the one thing the
+browser can do that this app cannot — it has a decoder and the app has no
+third-party dependency, and taking one on for an advisory would be a large price.
+So the browser draws the picture into a 64-square canvas, which area-averages it,
+and posts the luminance to `/api/picture-grain`; the verdict is reached in
+`cabinetgen.pictures`, so there is one answer and it is testable without a
+picture at all. **Area averaging is not an incidental detail**: point-sampling
+the real 1135-wide `Brookhill.png` aliases the grain away and the direction stops
+being readable (+0.08, indistinguishable from noise), while area-averaging gives
++0.29 and holds from a 32-square grid to a 128-square one.
 
 `tools/check_pictures.py` holds the lot: the cleaning, the URL, the traversal,
 the refusals, and that `boards.json` names nothing absolute. A saved job is

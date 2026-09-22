@@ -7,6 +7,7 @@ wrong here it is wrong in the cut list too.
 from html import escape
 from typing import List
 
+from . import pictures as PIC
 from .engine import panel_of
 from .model import (NO_COLOUR, Cabinet, Job, grain_of, hinge_side,
                     material_board, material_colour, material_record)
@@ -46,7 +47,9 @@ def board_look(job, board_id: str) -> dict:
     A board nobody has coloured comes back NO_COLOUR with `set` False. That is
     what the legend says "no colour set" from; it is never a warning.
 
-    `picture` is carried because the record has one. Nothing draws it yet.
+    `picture` is what the record stores. `Fills` is what turns it into a
+    fill; a picture only ever wins over the colour on a GRAINED board, and
+    the rule lives there so every drawing gets the same answer.
     """
     materials = job.materials if isinstance(job, Job) else (job or {})
     if not board_id:
@@ -171,6 +174,114 @@ def _grain_lines(x, y, w, h, vertical, ink, pitch=7.0):
 PANEL_GRAB = 16
 
 
+# How big a board picture is tiled on a drawing, in pixels. Nothing reads it and
+# it is not a dimension: it is how big the swatch is drawn. Small enough that a
+# door shows the grain running rather than one smeared close-up of it.
+PICTURE_TILE = 40
+
+
+class Fills:
+    r"""The board fills one drawing uses, and the ``<defs>`` they need.
+
+    **A picture wins over the colour field, and only on a GRAINED board** (ruled
+    22 September 2026). A board whose record carries a picture is drawn in that
+    picture; everything else is drawn in its colour exactly as before -- no
+    picture, or a plain board, because a photograph of a flat white sheet says
+    nothing the colour does not and tiles into noise. That rule is stated here
+    and nowhere else, so every fill in every drawing gets the same answer, the
+    same way `board_look` is the one place a colour is resolved.
+
+    The picture is tiled through an SVG ``<pattern>``, and the tile is TURNED
+    onto the panel's own grain direction. Board pictures are supplied with the
+    grain vertical (`pictures.grain_verdict` is what says so at upload time), so
+    the turn is 0 or 90 degrees and never an angle worked out of a photograph --
+    which is the whole reason for the convention.
+
+    The board's colour sits under the image inside the pattern, so a picture
+    that does not load leaves the part its colour rather than a hole.
+
+    Patterns are collected while the drawing is built and spliced into the
+    ``<defs>`` afterwards: which ones a drawing needs is only known once the
+    parts that want them have been drawn.
+
+    ``base`` is where an ``<image>`` points. On screen that is the server route;
+    an exported drawing is a file on disk beside its pictures, so `api.export`
+    hands over ``""`` and copies the files in alongside.
+    """
+
+    def __init__(self, base: str = PIC.ROUTE, tile: int = PICTURE_TILE):
+        self.base = base
+        self.tile = tile
+        self._ids = {}
+        self._defs = []
+
+    def textured(self, look) -> bool:
+        """Is this board drawn in a picture rather than a flat colour?
+
+        Callers ask because a photograph of real grain does not want `_grain_lines`
+        drawn over the top of it.
+        """
+        if self.base is None:                      # colours only: see `_FLAT`
+            return False
+        return bool(look.get("grain") and look.get("picture")
+                    and PIC.url_for(look["picture"], base=self.base))
+
+    def of(self, look, vertical: bool = True) -> str:
+        """What to write into a ``fill=``: a hex colour, or ``url(#...)``.
+
+        `vertical` is which way the grain runs on this part as drawn -- the cut
+        list's direction, the same question `_grain_lines` is asked. `None` means
+        the grain runs into the page and has no direction face on; the tile is
+        left as supplied rather than turned on a guess.
+        """
+        if not self.textured(look):
+            return look["colour"]
+        href = PIC.url_for(look["picture"], base=self.base)
+        turn = vertical is False
+        key = (href, turn)
+        name = self._ids.get(key)
+        if name is None:
+            name = "bpic%d" % (len(self._ids) + 1)
+            self._ids[key] = name
+            t = self.tile
+            spin = f' patternTransform="rotate(90 {t / 2:.1f} {t / 2:.1f})"' if turn else ""
+            self._defs.append(
+                f'<pattern id="{name}" width="{t}" height="{t}" '
+                f'patternUnits="userSpaceOnUse"{spin}>'
+                f'<rect width="{t}" height="{t}" fill="{look["colour"]}"/>'
+                f'<image href="{escape(href, {chr(34): "&quot;"})}" x="0" y="0" '
+                f'width="{t}" height="{t}" preserveAspectRatio="xMidYMid slice"/>'
+                f'</pattern>')
+        return f"url(#{name})"
+
+    def defs(self) -> str:
+        """The patterns, as markup. '' when the drawing needs none."""
+        return "".join(self._defs)
+
+
+# For a caller with nowhere to put a `<defs>`: every fill comes back as its
+# board's colour, which is exactly what every drawing did before pictures.
+_FLAT = Fills(base=None)
+
+
+def pictures_drawn(job: Job) -> list:
+    """Which of this job's board pictures a drawing will actually ask for.
+
+    `export` needs this to copy the files in beside the SVGs it writes, and it
+    must not answer the question itself: whether a picture is drawn at all is
+    `Fills.textured`'s rule and only its, or the export and the drawing would be
+    the two lists that disagree. Stored values, not URLs — the caller is after
+    the files.
+    """
+    fills = Fills()
+    out = set()
+    for board_id in job.board_ids:
+        look = board_look(job, board_id)
+        if fills.textured(look):
+            out.add(look["picture"])
+    return sorted(out)
+
+
 def _panel_grain_vertical(spec):
     """Which way the grain lines run on a panel drawn face on: True for up the
     drawing, False for along it, None when the grain runs into the page.
@@ -257,18 +368,23 @@ def _legend_height(rows) -> int:
     return LEGEND_ROW * len(rows) + 4 if rows else 0
 
 
-def _legend_svg(rows, x, y) -> list:
-    """One swatch per board: its colour, a grain mark when the board is grained,
-    and `id - name`."""
+def _legend_svg(rows, x, y, fills=None) -> list:
+    """One swatch per board: what it is drawn in, a grain mark when the board is
+    grained, and `id - name`.
+
+    The swatch takes the same fill as the parts, through the same `Fills` — a
+    legend that did not would be a key to a drawing it does not describe.
+    """
     out = []
+    fills = fills or _FLAT
     for r, entries in enumerate(rows):
         at_y = y + r * LEGEND_ROW
         at_x = x
         for look, text, width in entries:
             out.append(f'<rect class="swatch" x="{at_x:.1f}" y="{at_y:.1f}" '
-                       f'width="13" height="10" fill="{look["colour"]}" '
+                       f'width="13" height="10" fill="{fills.of(look, True)}" '
                        f'stroke="{RULE}" stroke-width="0.8"/>')
-            if look["grain"]:
+            if look["grain"] and not fills.textured(look):
                 out += _grain_lines(at_x, at_y, 13, 10, True, look["ink"], pitch=3.0)
             out.append(f'<text x="{at_x + 17:.1f}" y="{at_y + 8.5:.1f}" '
                        f'font-size="8.5" fill="{MUTED}">{escape(text)}</text>')
@@ -312,13 +428,16 @@ def _tape_note(job: Job, x, y, width) -> list:
             f'fill="{MUTED}">{escape(text)}</text>']
 
 
-def elevation_svg(job: Job, max_width: int = 1100) -> str:
+def elevation_svg(job: Job, max_width: int = 1100,
+                  pictures: str = PIC.ROUTE) -> str:
     """The Run: the cabinet list drawn side by side.
 
     Panels are not in it, deliberately. A panel is not part of a cupboard run —
     it has no place in a line of carcasses — and keeping it out is also what
     keeps `wall_elevation_svg` with no room equal to this drawing, which
     tools/check_elevation.py asserts.
+
+    `pictures` is where a board picture is fetched from — see `Fills`.
     """
     cabs = [c for c in job.cabinets if not c.is_panel]
     if not cabs:
@@ -337,9 +456,12 @@ def elevation_svg(job: Job, max_width: int = 1100) -> str:
     leg = _legend_height(rows)
     H = int(max_h * scale) + pad * 2 + 14 + leg   # under the floor: tapes, then boards
 
+    fills = Fills(base=pictures)
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
            f'viewBox="0 0 {W} {H}" font-family="system-ui,sans-serif">',
+           "",                          # the board patterns, spliced in below
            f'<rect width="{W}" height="{H}" fill="none"/>']
+    defs_at = 1
     x = pad
     floor = int(max_h * scale) + pad
     for c in cabs:
@@ -352,9 +474,10 @@ def elevation_svg(job: Job, max_width: int = 1100) -> str:
         # drag along, so the press selects rather than moves (C9).
         out.append(f'<g class="ecabg erun" data-cab="{c.number}">')
         out.append(f'<rect class="ecab" data-cab="{c.number}" x="{x:.1f}" y="{y:.1f}" '
-                   f'width="{w:.1f}" height="{h:.1f}" fill="{look["colour"]}" '
+                   f'width="{w:.1f}" height="{h:.1f}" fill="{fills.of(look, True)}" '
                    f'stroke="{stroke}" stroke-width="{sw}"{dash}/>')
-        out += _interior(c, x, y, w, h, scale, std, materials=job.materials)
+        out += _interior(c, x, y, w, h, scale, std, materials=job.materials,
+                         fills=fills)
         out.append(f'<text x="{x + w / 2:.1f}" y="{floor + 16:.1f}" font-size="11" '
                    f'text-anchor="middle" fill="{INK}">{c.number}</text>')
         out.append(f'<text x="{x + w / 2:.1f}" y="{floor + 29:.1f}" font-size="9.5" '
@@ -365,7 +488,8 @@ def elevation_svg(job: Job, max_width: int = 1100) -> str:
     out.append(f'<line x1="{pad - 8}" y1="{floor:.1f}" x2="{W - pad + 8}" y2="{floor:.1f}" '
                f'stroke="{INK}" stroke-width="1.6"/>')
     out += _tape_note(job, pad, H - 8 - leg, W - pad * 2)
-    out += _legend_svg(rows, pad, H - leg + 2)
+    out += _legend_svg(rows, pad, H - leg + 2, fills)
+    out[defs_at] = f"<defs>{fills.defs()}</defs>"
     out.append("</svg>")
     return "\n".join(out)
 
@@ -410,7 +534,14 @@ def wall_elevation_dims(job: Job, wall_id: str) -> dict:
         "ceiling": rm.ceiling,
         "top": top,
         "floor_chain": chain(floor, wall.length),
-        "wall_chain": chain(hung, wall.length) if hung else [],
+        # The top chain breaks wherever EITHER run does (22 September 2026).
+        # It used to break only at the overheads, so a wall with one wall unit
+        # over a row of base units dimensioned that unit and then handed you one
+        # figure spanning every cupboard past it — a number you cannot set
+        # anything out from. Same data as the bottom chain, read at the same
+        # resolution. A wall with no overheads still gets no top chain: there is
+        # nothing up there to dimension, and the bottom already says it.
+        "wall_chain": chain(hung + floor, wall.length) if hung else [],
         "height_chain": chain(heights, top),
     }
 
@@ -440,18 +571,20 @@ def _dim_v(y_top, y_bot, x, value):
     return out
 
 
-def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
+def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100,
+                       pictures: str = PIC.ROUTE) -> str:
     """One wall, face on, as a dimensioned working drawing.
 
     Cabinets at their true positions and heights, with the wall, its openings and
     obstructions behind them, and the fillers and plinth boards that were chosen.
     Widths are chained from the wall's start corner and heights from the floor.
     With no room there is no datum, so it falls back to the side-by-side sanity
-    check, unchanged.
+    check, unchanged. `pictures` is where a board picture is fetched from —
+    see `Fills`.
     """
     rm = job.room
     if rm is None:
-        return elevation_svg(job, max_width)
+        return elevation_svg(job, max_width, pictures)
     wall = next((w for w in rm.walls if w.id == wall_id), None)
     if wall is None:
         return _note_svg(f"No wall {escape(str(wall_id))}")
@@ -496,12 +629,14 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
     else:
         heading, heading_ink = (f"{length} long, ceiling NOT MEASURED — "
                                 f"required before export", CRIT)
+    fills = Fills(base=pictures)
+    hatch = ('<pattern id="ehatch" width="6" height="6" '
+             'patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
+             f'<line x1="0" y1="0" x2="0" y2="6" stroke="{MUTED}" stroke-width="1.4"/>'
+             '</pattern>')
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
            f'viewBox="0 0 {W} {H}" font-family="system-ui,sans-serif">',
-           '<defs><pattern id="ehatch" width="6" height="6" '
-           'patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
-           f'<line x1="0" y1="0" x2="0" y2="6" stroke="{MUTED}" stroke-width="1.4"/>'
-           '</pattern></defs>',
+           "",                  # the hatch and the board patterns, spliced below
            f'<rect width="{W}" height="{H}" fill="none"/>',
            f'<text x="{pad_l}" y="20" font-size="12" fill="{heading_ink}">Wall {wid} — '
            f'{heading}</text>']
@@ -603,10 +738,10 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
         # so a drag moves the whole thing rather than an empty outline.
         out.append(f'<g class="ecabg" data-cab="{c.number}">')
         out.append(f'<rect class="ecab" data-cab="{c.number}" x="{cx:.1f}" y="{cy:.1f}" '
-                   f'width="{cw:.1f}" height="{ch:.1f}" fill="{look["colour"]}" '
+                   f'width="{cw:.1f}" height="{ch:.1f}" fill="{fills.of(look, True)}" '
                    f'stroke="{stroke}" stroke-width="{sw}"{dash}/>')
         out += _interior(c, cx, cy, cw, ch, scale, std, flip=p.flip,
-                         materials=job.materials)
+                         materials=job.materials, fills=fills)
         out.append(f'<text x="{cx + 4:.1f}" y="{cy + 11:.1f}" font-size="9.5" '
                    f'fill="{look["ink"]}">{c.number}</text>')
         if p.z == 0 and lay != "wall" and c.number not in boarded and cw >= 30:
@@ -628,13 +763,12 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
         crash = c.number in bad_panels
         stroke = CRIT if crash else INK
         out.append(f'<g class="ecabg epanel" data-cab="{c.number}">')
+        vert = _panel_grain_vertical(spec)
         out.append(f'<rect class="epan" data-cab="{c.number}" x="{px:.1f}" y="{py:.1f}" '
-                   f'width="{pw:.1f}" height="{ph:.1f}" fill="{look["colour"]}" '
+                   f'width="{pw:.1f}" height="{ph:.1f}" fill="{fills.of(look, vert)}" '
                    f'stroke="{stroke}" stroke-width="{"2" if crash else "1.3"}"/>')
-        if look["grain"]:
-            vert = _panel_grain_vertical(spec)
-            if vert is not None:
-                out += _grain_lines(px, py, pw, ph, vert, look["ink"])
+        if look["grain"] and not fills.textured(look) and vert is not None:
+            out += _grain_lines(px, py, pw, ph, vert, look["ink"])
         # E4: a 16 mm panel is a few pixels of target. This is invisible, catches
         # the pointer for the whole group, and is what makes one grabbable at all.
         hw, hh = max(pw, PANEL_GRAB), max(ph, PANEL_GRAB)
@@ -661,7 +795,7 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
                    f'between spread evenly — indicative only, not a drilling reference.'
                    f'</text>')
     out += _tape_note(job, pad_l, H - 8 - leg, W - pad_l - pad_r)
-    out += _legend_svg(rows, pad_l, H - leg + 2)
+    out += _legend_svg(rows, pad_l, H - leg + 2, fills)
 
     for ob in wall.obstructions:
         kind = escape(ob.kind)
@@ -687,6 +821,7 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100) -> str:
     for a, b in zip(hc, hc[1:]):
         out += _dim_v(Y(b), Y(a), X(0) - 30, b - a)
 
+    out[1] = f"<defs>{hatch}{fills.defs()}</defs>"
     out.append("</svg>")
     return "\n".join(out)
 
@@ -1119,7 +1254,7 @@ def _hinge_marks(c: Cabinet, x0, top, dw, dh, door_h, flip, std: Standard,
 
 
 def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
-              materials=None):
+              materials=None, fills=None):
     """Doors, drawer faces and shelf lines, drawn from the bottom up.
 
     `flip` turns on the hinge marks and says which way a single door hangs. Left
@@ -1132,6 +1267,10 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
     none passed the whole thing falls back to the neutral colour, so a caller
     that has no job still draws.
 
+    `fills` is the drawing's `Fills`, which turns a grained board's picture into
+    a tiled fill and collects the `<defs>` that needs. A caller with nowhere to
+    put a `<defs>` passes none and gets flat colours, exactly as before.
+
     Two things here are handles rather than drawing: each door leaf carries its
     cabinet, its index and the edge it hangs from, so clicking it can turn it
     round; and each join between two drawer faces carries the pair's span in both
@@ -1142,6 +1281,7 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
     """
     out = []
     mats = materials or {}
+    fills = fills or _FLAT
     body = board_look(mats, c.carcass_board)
     stack = c.drawer_list
     leaves = c.door_count
@@ -1167,9 +1307,9 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
         tops[i] = cursor
         fx, fy, fw, fhh = x + 2, cursor + 1, w - 4, max(fh - 2, 1)
         out.append(f'<rect x="{fx:.1f}" y="{fy:.1f}" width="{fw:.1f}" '
-                   f'height="{fhh:.1f}" fill="{look["colour"]}" stroke="{RULE}" '
+                   f'height="{fhh:.1f}" fill="{fills.of(look, True)}" stroke="{RULE}" '
                    f'stroke-width="0.8"/>')
-        if look["grain"]:
+        if look["grain"] and not fills.textured(look):
             out += _grain_lines(fx, fy, fw, fhh, True, look["ink"])
         if face_edge:
             out += _edge_band(fx, fy, fw, fhh, face_edge)
@@ -1202,8 +1342,8 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
             out.append(f'<rect class="edoor" data-cab="{c.number}" data-door="{i}" '
                        f'data-hinge="{side}" x="{dx:.1f}" y="{top:.1f}" '
                        f'width="{dw - 1:.1f}" height="{dh:.1f}" '
-                       f'fill="{look["colour"]}" stroke="{RULE}" stroke-width="0.8"/>')
-            if look["grain"]:
+                       f'fill="{fills.of(look, True)}" stroke="{RULE}" stroke-width="0.8"/>')
+            if look["grain"] and not fills.textured(look):
                 out += _grain_lines(dx, top, dw - 1, dh, True, look["ink"])
             if door_edge:
                 out += _edge_band(dx, top, dw - 1, dh, door_edge)

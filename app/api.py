@@ -29,7 +29,8 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
                               material_colour, material_has_edging,
                               material_offers, material_price,
                               material_record, material_thickness, tape_for)
-from cabinetgen.render import elevation_svg, plan_svg, wall_elevation_svg
+from cabinetgen.render import (elevation_svg, pictures_drawn, plan_svg,
+                               wall_elevation_svg)
 from cabinetgen.room import (LAYERS, add_wall, carcass_z, clashes as room_clashes,
                              closure_error, free_x, gaps as room_gaps, geometry,
                              layer_of, overlaps as room_overlaps,
@@ -590,6 +591,28 @@ def drop_picture(payload):
         return {"ok": False, "error": str(exc)}
 
 
+def picture_grain(payload):
+    """Does this picture's grain run vertically? A grid of luminance in, a
+    verdict out.
+
+    Board pictures are supplied grain-vertical (ruled 22 September 2026) so a
+    drawing can turn the tile onto each panel's length direction through 0 or 90
+    degrees instead of working an angle out of a photograph. This is what says so
+    at upload time, and it only ever WARNS: the picture is taken in either way,
+    the same bargain everything but a critical strikes.
+
+    The browser samples, because it has a JPEG decoder and this app has no
+    third-party dependency that does. It hands over pixels and no judgment —
+    `pictures.grain_verdict` reaches the verdict, so there is one answer to the
+    question and it can be checked without a picture at all.
+
+    `ok` is whether the question was answered, `grain` is the answer — the two
+    are not the same thing, and a picture whose grain is sideways is a perfectly
+    successful request.
+    """
+    return {"ok": True, "grain": PIC.grain_verdict(payload.get("grid") or [])}
+
+
 def board_select(payload):
     """Select a library board into this project, or take one out.
 
@@ -1088,16 +1111,21 @@ def export(payload):
             N.write_svg(sheets, path, title=mat)
             written.append(path)
 
-    drawings = [(f"{job.name}_elevation.svg", elevation_svg(job))]
+    # An exported drawing is a file on disk, not a page on the server, so a
+    # board picture in it is asked for by bare name and copied in beside it —
+    # `/pictures/x.png` would 404 the moment the folder is opened or emailed.
+    drawings = [(f"{job.name}_elevation.svg", elevation_svg(job, pictures=""))]
     if job.room is not None:
         # one face-on drawing per wall: the sheet that goes to site with the order
         drawings += [(f"{job.name}_elevation_{_safe_name(w.id)}.svg",
-                      wall_elevation_svg(job, w.id)) for w in job.room.walls]
+                      wall_elevation_svg(job, w.id, pictures=""))
+                     for w in job.room.walls]
     for name, svg in drawings:
         path = os.path.join(outdir, name)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(svg)
         written.append(path)
+    written += _export_pictures(job, outdir)
     return {"ok": True, "dir": outdir, "files": [os.path.basename(p) for p in written]}
 
 
@@ -1252,6 +1280,39 @@ def elevation(payload):
     return {"ok": True, "svg": svg}
 
 
+def _export_pictures(job, outdir: str) -> list:
+    """Copy the board pictures this job's drawings name into the export folder.
+
+    The drawings are written asking for a bare `Brookhill.png`, so the file has
+    to sit beside them — a folder that is opened, zipped or emailed takes its
+    pictures with it. Only the boards the drawings actually draw in a picture
+    are copied: a plain board is drawn in its colour and needs none.
+
+    Which pictures those are is `render.pictures_drawn`'s answer and not this
+    function's: a plain board is drawn in its colour and needs no file, and that
+    rule belongs where the drawing reads it.
+
+    A picture that is not there is not an error. It is not on the cut list, it
+    changes no figure, and the pattern falls back to the board's colour — the
+    export has already refused if anything is actually wrong.
+    """
+    import shutil
+    out = []
+    for stored in pictures_drawn(job):
+        if PIC.is_data_uri(stored):
+            continue                          # it IS the picture; nothing to copy
+        src = PIC.resolve(stored, ROOT)
+        if not src or not os.path.isfile(src):
+            continue
+        dest = os.path.join(outdir, os.path.basename(src))
+        try:
+            shutil.copyfile(src, dest)
+        except OSError:
+            continue
+        out.append(dest)
+    return out
+
+
 def _safe_name(name) -> str:
     """A job or wall name fit to go into a file name inside output/.
 
@@ -1349,6 +1410,7 @@ ROUTES = {
     "/api/board-swap": board_swap,
     "/api/pick-picture": pick_picture,
     "/api/drop-picture": drop_picture,
+    "/api/picture-grain": picture_grain,
     "/api/export": export,
     "/api/jobs": job_list,
     "/api/save": job_save,

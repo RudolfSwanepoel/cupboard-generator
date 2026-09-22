@@ -94,7 +94,12 @@ def main() -> int:
     check("widths along the floor, from the wall's start corner",
           d["floor_chain"], [0, 900, 1500, 2100, 4000])
     check("and they add up to the wall", sum(diffs(d["floor_chain"])), 4000)
-    check("the overheads get their own chain", d["wall_chain"], [0, 900, 4000])
+    # 22 September 2026: the top chain used to break only where the overheads
+    # do, so past the last one it handed over a single figure spanning every
+    # cupboard below it. It reads at the bottom chain's resolution now.
+    check("the top chain breaks wherever either run does",
+          d["wall_chain"], [0, 900, 1500, 2100, 4000])
+    check("and it still closes on the wall", sum(diffs(d["wall_chain"])), 4000)
     check("heights: legs, carcass, up to the overhead, the overhead, to the ceiling",
           d["height_chain"], [0, legs, legs + 720, 1500, 2200, 2700])
     check("which add up to the ceiling", sum(diffs(d["height_chain"])), 2700)
@@ -124,8 +129,13 @@ def main() -> int:
     check("draws the cabinets on this wall",
           all(f'class="ecab" data-cab="{n}"' in svg for n in (1, 2, 3)), True)
     check("and not the one round the corner", 'class="ecab" data-cab="4"' in svg, False)
-    want = {"900", "600", "1900", "4000", "3100", str(legs), "720", "680", "700", "500"}
+    # "3100" was the old top chain's one figure past the last overhead. It is
+    # broken at every cupboard now, so the top reads 900 / 600 / 600 / 1900 —
+    # the bottom's own segments, which is the point.
+    want = {"900", "600", "1900", "4000", str(legs), "720", "680", "700", "500"}
     check("every chain segment is labelled", sorted(want - dim_labels(svg)), [])
+    check("and nothing spans several cupboards at the top any more",
+          "3100" in dim_labels(svg), False)
     check("the window, with its sill and head", "sill 900 · head 2100" in svg, True)
     check("the waste, with where to find it", "waste @ 1800, 300 up" in svg, True)
     check("the space under an unboarded run says it is legs", ">legs</text>" in svg, True)

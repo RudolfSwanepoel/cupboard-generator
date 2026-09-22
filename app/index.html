@@ -2400,6 +2400,62 @@ function drawBoardEditor() {
    at /api/drop-picture, which is also where a drop lands. A drop gives us the
    file's CONTENTS and no path — WebView2 does not expose File.path and
    pywebview 6.2.1 has no file-drop event — so the bytes are what is sent.     */
+/* Board pictures are supplied with the grain running VERTICALLY (ruled 22 Sept
+   2026): that is what lets a drawing turn the tile onto each panel's length
+   direction through 0 or 90 degrees rather than working an angle out of a
+   photograph. checkGrain is what says so as a picture arrives.
+
+   The SAMPLING is here and the VERDICT is not. Decoding a JPEG is the one thing
+   the browser can do that the app cannot — it has a decoder and the app has no
+   third-party dependency — so it draws the picture into a small canvas, which
+   area-averages it, and sends the luminance up. /api/picture-grain reaches the
+   answer, through cabinetgen.pictures, so there is one answer to the question.
+   Nothing here decides anything.
+
+   It WARNS and never blocks: the picture is already in Pictures/ by this point
+   and stays there, which is the app's bargain everywhere but a critical.       */
+const GRAIN_GRID = 64;
+
+async function checkGrain(url, note) {
+  let grid;
+  try {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    await new Promise((ok, bad) => {
+      img.onload = ok;
+      img.onerror = () => bad(new Error("the picture would not load"));
+      img.src = url;
+    });
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = GRAIN_GRID;
+    const cx = cv.getContext("2d", {willReadFrequently: true});
+    // drawImage onto a small canvas area-averages, which is what makes the
+    // measurement steady: point-sampling a 1135-wide photo aliases the grain
+    // away and the direction stops being readable at all.
+    cx.drawImage(img, 0, 0, GRAIN_GRID, GRAIN_GRID);
+    const px = cx.getImageData(0, 0, GRAIN_GRID, GRAIN_GRID).data;
+    grid = [];
+    for (let y = 0; y < GRAIN_GRID; y++) {
+      const row = [];
+      for (let x = 0; x < GRAIN_GRID; x++) {
+        const o = (y * GRAIN_GRID + x) * 4;
+        row.push(0.2126 * px[o] + 0.7152 * px[o + 1] + 0.0722 * px[o + 2]);
+      }
+      grid.push(row);
+    }
+  } catch (e) {
+    return;                       // nothing to say: it is an advisory, not a gate
+  }
+  const r = await post("/api/picture-grain", {grid: grid});
+  const v = r && r.grain;
+  if (!v || !v.checked || v.ok) return;   // vertical, or no texture to have a way
+  toast(v.message, true);
+  if (note) {
+    note.insertAdjacentHTML("beforeend",
+      ' <b class="bad">' + esc(v.message) + "</b>");
+  }
+}
+
 function wirePicture() {
   const drop = $("bf-drop"), field = $("bf-picture"), note = $("bf-picnote");
   if (!drop || !field) return;
@@ -2425,6 +2481,8 @@ function wirePicture() {
     note.textContent = "copied into " + ((S.def && S.def.pictures_dir) || "Pictures") +
       "/ as " + r.name + " — stored relative to the project, so it works on " +
       "both machines. Save the board to keep it.";
+    // Both ways in end here, so the grain is asked about once, whichever it was.
+    checkGrain(img.src, note);
   };
 
   const sendBytes = (file) => {

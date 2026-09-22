@@ -34,6 +34,11 @@ from urllib.parse import quote
 # a basename lookup rather than a path-traversal question.
 DIRNAME = "Pictures"
 
+# The one URL the server answers for a picture. Stated here rather than in
+# `app/api.py` so the route and the `<img src>` that asks for it cannot drift
+# apart -- the same bargain `TYPES` strikes for the content type.
+ROUTE = "/pictures/"
+
 # What the browser will actually draw, and therefore what may be stored or
 # served. Extension -> content type; the server needs the type and the picker
 # needs the extensions, so they are one table and cannot disagree.
@@ -128,20 +133,26 @@ def readable(stored, root: str) -> bool:
     return os.path.isfile(path) and os.access(path, os.R_OK)
 
 
-def url_for(stored, root: str = "") -> str:
-    """What an ``<img src>`` asks for. '' when there is nothing to draw.
+def url_for(stored, root: str = "", base: str = ROUTE) -> str:
+    """What an ``<img src>`` or an SVG ``<image>`` asks for. '' when there is
+    nothing to draw.
 
     A ``data:`` URI is itself. Everything else is ``/pictures/<name>``, which is
     the one route the server answers -- including a stored ABSOLUTE path inside
     ``Pictures/``, so a job file written before this module still draws without
     being rewritten. Files on disk change only when saved.
+
+    ``base`` is the one thing a caller may vary, and there is exactly one reason
+    to: an exported drawing is a file on disk beside its pictures, not a page on
+    the server, so ``export`` asks for ``""`` and gets the bare name. Everything
+    on screen takes the route.
     """
     s = clean(stored, root)
     if not s:
         return ""
     if is_data_uri(s):
         return s
-    return "/pictures/" + quote(os.path.basename(s))
+    return base + quote(os.path.basename(s))
 
 
 def _free_name(folder: str, name: str) -> str:
@@ -226,3 +237,94 @@ def content_type(path: str) -> str:
     """What to serve it as. An unknown extension never reaches here -- the route
     checks against ``TYPES`` first -- so the fallback is belt and braces."""
     return TYPES.get(os.path.splitext(path)[1].lower(), "application/octet-stream")
+
+
+# --- which way the grain runs -----------------------------------------------
+#
+# A board picture is supplied with the grain running VERTICALLY (ruled 22 Sept
+# 2026). That convention is the whole reason a drawing can put a board's real
+# texture on a panel: it turns the tile through 0 or 90 degrees onto the panel's
+# length direction, instead of trying to work an arbitrary angle out of a
+# photograph. So the one thing worth asking of a picture as it arrives is
+# whether it honours the convention.
+#
+# It is asked of a GRID, not of a file. Decoding a JPEG is the browser's job --
+# it has a decoder and this module does not, and adding one to take a dependency
+# on would be a large price for an advisory. The browser draws the picture into
+# a small canvas, which area-averages it, and hands the luminance over; the
+# verdict is reached here, so it is one answer, testable without a picture at
+# all. Measured on the real `Pictures/Brookhill.png`: +0.29 as supplied, -0.29
+# turned on its side, and stable from a 32-square grid to a 128-square one.
+
+# Below this there is no texture to have a direction -- a flat colour, a plain
+# white melamine. Mean absolute difference between neighbouring samples, out of
+# 255; a flat fill is 0 and Brookhill is 3.4.
+GRAIN_TEXTURE_MIN = 1.0
+
+# And below this the texture has no direction worth calling one. Nothing is said
+# either way: a warning nobody can act on is worse than silence.
+GRAIN_DECISIVE = 0.15
+
+
+def _gradient_energy(rows):
+    """Mean absolute difference between neighbours, along x and along y.
+
+    Grain running up the picture varies fast ACROSS it and slowly ALONG it, so
+    vertical grain is `x` large and `y` small. Nothing here knows about wood --
+    it is the direction the texture is coherent in, which is what the convention
+    is actually about.
+    """
+    h = len(rows)
+    w = len(rows[0]) if h else 0
+    if h < 2 or w < 2:
+        return 0.0, 0.0
+    gx = sum(abs(rows[y][x + 1] - rows[y][x])
+             for y in range(h) for x in range(w - 1)) / float(h * (w - 1))
+    gy = sum(abs(rows[y + 1][x] - rows[y][x])
+             for y in range(h - 1) for x in range(w)) / float((h - 1) * w)
+    return gx, gy
+
+
+def grain_verdict(rows) -> dict:
+    """Does this picture's texture run vertically? A grid of luminance in, a
+    sentence out.
+
+    `checked` False means nothing was decided and nothing should be said -- the
+    grid was unusable, there is no texture, or the texture has no clear
+    direction. `ok` False is the one case that warns, and it never blocks: the
+    picture is taken in either way, the same bargain the validator strikes
+    everywhere but a critical.
+
+    >>> grain_verdict([[0, 90, 0, 90]] * 4)["ok"]
+    True
+    >>> grain_verdict([[0, 0, 0, 0], [90, 90, 90, 90]] * 2)["ok"]
+    False
+    >>> grain_verdict([[60] * 4] * 4)["checked"]
+    False
+    """
+    blank = {"checked": False, "ok": True, "vertical": None,
+             "strength": 0.0, "message": ""}
+    try:
+        grid = [[float(v) for v in row] for row in rows]
+    except (TypeError, ValueError):
+        return blank
+    if len(grid) < 2 or len(grid[0]) < 2:
+        return blank
+    if any(len(row) != len(grid[0]) for row in grid):
+        return blank
+
+    gx, gy = _gradient_energy(grid)
+    if max(gx, gy) < GRAIN_TEXTURE_MIN:
+        return blank                       # a flat colour has no grain to place
+    strength = (gx - gy) / (gx + gy)
+    if abs(strength) < GRAIN_DECISIVE:
+        return blank                       # no direction worth calling one
+
+    vertical = strength > 0
+    return {"checked": True, "ok": vertical, "vertical": vertical,
+            "strength": round(strength, 3),
+            "message": "" if vertical else
+                       "the grain does not look vertical — rotate the picture "
+                       "and upload it again. Drawings turn a board's grain onto "
+                       "each panel from vertical, so a picture on its side puts "
+                       "it the wrong way round on every panel."}
