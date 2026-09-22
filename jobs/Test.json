@@ -30,7 +30,7 @@
       "thickness": 16,
       "grain": "grain",
       "price": 999,
-      "picture": "C:\\Dev\\CupboardApp\\Pictures\\Brookhill.png",
+      "picture": "Pictures/Brookhill.png",
       "has_edging": true,
       "edging_kinds": [
         "pvc",
@@ -53,7 +53,7 @@
         "1mm",
         "2mm"
       ],
-      "colour": ""
+      "colour": "#ffffff"
     },
     "GREY": {
       "board": "STORMGREY",
@@ -62,7 +62,7 @@
       "thickness": 16,
       "grain": "plain",
       "price": 1100,
-      "picture": "C:\\Dev\\CupboardApp\\Pictures\\Storm Grey.jpg",
+      "picture": "Pictures/Storm Grey.jpg",
       "has_edging": true,
       "edging_kinds": [
         "pvc",
@@ -178,7 +178,7 @@
     },
     {
       "number": 3,
-      "width": 450,
+      "width": 400,
       "height": 780,
       "depth": 570,
       "kind": "base",
@@ -720,6 +720,123 @@
       "face_a": null,
       "face_b": null,
       "corner_unit": null
+    },
+    {
+      "number": 12,
+      "width": 600,
+      "height": 2400,
+      "depth": 500,
+      "kind": "panel",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": false,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "BROOKHILL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "panel": {
+        "board": "GREY",
+        "orientation": "end",
+        "a": 616,
+        "b": 2400,
+        "grain_along": "b",
+        "edge_kind": "1mm",
+        "edge_board": "GREY",
+        "edge_long": 2,
+        "edge_short": 2
+      },
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 11,
+      "width": 600,
+      "height": 2400,
+      "depth": 600,
+      "kind": "tall",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 5,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 2,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": true,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
     }
   ],
   "loose": [],
@@ -775,7 +892,7 @@
     {
       "cabinet": 4,
       "wall": "A",
-      "x": 1532,
+      "x": 1482,
       "z": 0,
       "flip": false,
       "layer": null
@@ -791,7 +908,7 @@
     {
       "cabinet": 6,
       "wall": "A",
-      "x": 1932,
+      "x": 1882,
       "z": 0,
       "flip": false,
       "layer": null
@@ -799,7 +916,7 @@
     {
       "cabinet": 7,
       "wall": "A",
-      "x": 2482,
+      "x": 2432,
       "z": 0,
       "flip": false,
       "layer": null
@@ -807,7 +924,7 @@
     {
       "cabinet": 8,
       "wall": "A",
-      "x": 2832,
+      "x": 2782,
       "z": 100,
       "flip": false,
       "layer": null
@@ -824,6 +941,22 @@
       "cabinet": 10,
       "wall": "A",
       "x": 616,
+      "z": 100,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 11,
+      "wall": "A",
+      "x": 2798,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 12,
+      "wall": "A",
+      "x": 3398,
       "z": 100,
       "flip": false,
       "layer": null

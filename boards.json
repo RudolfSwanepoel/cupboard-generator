@@ -48,7 +48,7 @@
         "1mm",
         "2mm"
       ],
-      "colour": ""
+      "colour": "#ffffff"
     },
     {
       "id": "GREY",
@@ -73,7 +73,7 @@
       "thickness": 16,
       "grain": "grain",
       "price": 1054.79,
-      "picture": "",
+      "picture": "Pictures/Cascade Grey.jpg",
       "has_edging": true,
       "edging_kinds": [
         "pvc",
