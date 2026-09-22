@@ -178,22 +178,38 @@ machine does not turn up as untracked.
   relative form in through `refresh_from_library`. The file on disk is untouched.
 - No console errors at any point.
 
-### Verification
+### Verification — the full protocol, run fresh at the stop
 
-- `regen_check`: 272 MEL / 59 BROOKHILL / 30 BACK, 92 pot holes, 18 / 9 / 6
-  boards, **R28,363.50**.
-- Every `tools/check_*.py`: 15 of 15 pass, including the new
-  `tools/check_pictures.py`.
-- `Check It Still Works.bat`: clean (now runs `check_pictures` too).
-- `snapshot.py --compare`: **identical**. See the note below about the baseline.
+| # | Item | Result |
+|---|---|---|
+| 1 | `python tools/regen_check.py` | **PASS** — 272 MEL / 59 BROOKHILL / 30 BACK panels, 92 pot holes, **18 / 9 / 6 boards from the nester**, **R28,363.50** incl VAT, 0 nest rejects |
+| 2 | Every `tools/check_*.py` | **PASS — 15 of 15**, every one exit 0 |
+| 3 | `python tools/snapshot.py --compare baseline.json` | **DIFFERENT — and not from this work.** See below. Against the tree as it stood *before* this work, with the same `Test.json`: **identical** |
+| 4 | `Check It Still Works.bat` | **PASS** — 865 lines, no traceback, no FAIL, all nine checks green |
+
+The fifteen checks, each exit 0: `check_boards`, `check_colour`, `check_drag`,
+`check_edging`, `check_elevation`, `check_examples` (24 worked examples, 0
+wrong), `check_fillers`, `check_fronts`, `check_library`, `check_panels`,
+`check_pictures`, `check_plinth`, `check_room`, `check_single_source`,
+`check_swap`.
+
+Two things `regen_check` prints that are expected and pre-existing:
+
+- **`1808` is a CRITICAL — `2882x50 does not fit a 2750x1830 board`**, so the
+  October fixture's export "would be BLOCKED". That is logged finding **W2** and
+  is named in CLAUDE.md by number. Nothing to do with this work.
+- **The 22-of-30 cabinet line does not print on this machine.** It needs
+  `..\..\Wardrobes\R Swanepoel Cutlist.xlsx`, two levels above the repo, which
+  is not on this machine — `regen_check` says so and skips the diff rather than
+  failing. Every other figure above comes out of the engine and is checked here.
 
 ---
 
 ## Two things to know
 
-**`baseline.json` was already out of date before this work started.**
-`snapshot.py --compare baseline.json` differs on a clean checkout because of
-uncommitted edits in `jobs/Test.json` — a new cabinet 9, and drawer faces
+**`baseline.json` was already out of date before this work started, and this
+was proved rather than assumed.** `snapshot.py --compare baseline.json` differs
+on `Test` because of edits in `jobs/Test.json` — a new cabinet 9, and drawer faces
 192/195 changed to 187/200 fixed. That is Rudolf's work in progress, not a
 regression, and it was not touched. A snapshot of the tree as it stood before
 any of this work was taken instead, and the comparison against that is
@@ -201,10 +217,20 @@ identical, so nothing here moved a panel, an issue, a cost or a drawing.
 `baseline.json` was **not** regenerated — that is Rudolf's call once he has
 finished with Test.json.
 
-**`jobs/Test.json` was deliberately left uncommitted.** It carries only his
-in-progress edits. `boards.json` had to be committed because the picture paths
-in it are part of this fix; his colour tweak to BROOKHILL (`#d2b36a` →
-`#c6a65d`) came along with it.
+**The proof, so this is not a judgement call.** A throwaway git worktree was
+made at `f57f80b` — the commit *before* any of this work — Rudolf's current
+`jobs/Test.json` and `baseline.json` were copied into it, and
+`snapshot.py --compare` run there. **The old code produces exactly the same
+difference against the same baseline from the same job file.** So the diff is
+`Test.json`'s, not the code's. The worktree was removed afterwards.
+
+**`jobs/Test.json` was committed on Rudolf's instruction**, after being held
+back at first. It carries only his own in-progress design edits — a ninth
+cabinet on wall A, and drawer faces 2 and 3 moved from 192/195 share to 187/200
+fixed — and nothing from this work. It went in as its own commit so it can be
+reverted on its own if that is not what he meant. `boards.json` had to be
+committed either way, because the picture paths in it are part of this fix; his
+colour tweak to BROOKHILL (`#d2b36a` → `#c6a65d`) came along with it.
 
 ---
 

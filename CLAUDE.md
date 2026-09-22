@@ -47,6 +47,12 @@ If a change drops the clean-cabinet count or moves the cost estimate, it broke
 something. The eight cabinets that do not reproduce are listed in `KNOWN` in
 that script, each tied to a logged finding — those differences are correct.
 
+**The cabinet-by-cabinet diff needs the real cut list, which is not in the repo.**
+It is expected at `..\..\Wardrobes\R Swanepoel Cutlist.xlsx`, two levels above
+`CupboardApp` — a machine without it gets everything above except the 22-of-30
+line, and `regen_check` says so rather than failing. Every other figure in this
+list comes out of the engine and is checked on any machine.
+
 ## Status
 
 **Part A (boards record and edging), Part B (one source for which fields hold
@@ -109,7 +115,10 @@ all, so an `<img src>` naming a Windows path resolved against
 `http://127.0.0.1:<port>/` and 404'd. There is a `/pictures/<name>` route now,
 a picture is chosen with Browse… or dropped on the swatch rather than typed,
 and whichever way it arrives the server copies it into `Pictures/` and stores a
-path relative to the repo. `Pictures/` is in git. See **Board pictures** below.
+path relative to the repo. `Pictures/` is in git. Exercised in the running app,
+not only in Python: both swatches decode, a real drop lands, Browse… opens the
+native dialog, and an export writes `output/<job>/`. See **Board pictures** and
+**Where the exports land** below.
 
 Also done since Part C, and not in the brief:
 
@@ -129,9 +138,9 @@ Also done since Part C, and not in the brief:
   readable. See **One source for "which fields hold a board"**.
 
 **The benchmark held through all of it**, and is what says so: 272 MEL /
-59 BROOKHILL / 30 BACK panels, 92 pot holes, 18 / 9 / 6 boards, R28,363.50,
-`snapshot.py --compare` identical on all three fixed jobs, and every
-`tools/check_*.py` green.
+59 BROOKHILL / 30 BACK panels, 92 pot holes, 18 / 9 / 6 boards from the nester,
+R28,363.50, and every `tools/check_*.py` green — fifteen of them, `regen_check`
+and `Check It Still Works.bat` included.
 
 Open questions from the brief that Rudolf has not ruled: **Q1** line endings
 and git hygiene (the working tree is CRLF, HEAD is LF; edit without changing a
@@ -158,6 +167,17 @@ drag can let go before anything is listening and the cabinet sticks to the
 pointer. Reproduces at 100 % zoom, so it is nothing to do with Part E's zoom;
 the elevation drag was given the fix on 18 September 2026 and the plan's never
 was (found 21 September 2026).
+
+Open and not a fault — **`baseline.json` is stale, and deliberately not
+regenerated** (22 September 2026). It is per-machine and gitignored, and
+`snapshot.py --compare baseline.json` reports Test differing: `jobs/Test.json`
+has genuinely changed since the baseline was taken — a ninth cabinet, and two
+drawer faces moved from 192/195 share to 187/200 fixed — so the new gaps, total
+and drawings are correct, not a regression. Proved rather than assumed: the code
+AS IT WAS, before the picture work, produces the same diff against the same
+baseline from the same `Test.json`. Regenerate it when Test.json settles; a
+stale baseline that is known to be stale is safer than one refreshed over a
+difference nobody looked at.
 
 ## Drawings
 
