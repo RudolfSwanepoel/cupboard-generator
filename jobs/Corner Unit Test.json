@@ -78,10 +78,10 @@
       "shelf_width": null,
       "divider_height": null,
       "divider_count": 0,
-      "doors": 1,
+      "doors": 2,
       "door_height": null,
       "door_hinges": [],
-      "has_doors": false,
+      "has_doors": true,
       "door_boards": [],
       "drawers": [],
       "has_drawers": null,
@@ -112,7 +112,7 @@
     {
       "number": 2,
       "width": 1200,
-      "height": 790,
+      "height": 1100,
       "depth": 570,
       "kind": "base",
       "back": "four",
@@ -155,7 +155,7 @@
       "bespoke": [],
       "note": "",
       "footprint": [],
-      "corner_style": "blind",
+      "corner_style": "mitre",
       "arm_a": 1000,
       "arm_b": 1000,
       "face_a": 570,
@@ -203,8 +203,8 @@
     {
       "cabinet": 2,
       "wall": "A",
-      "x": 2800,
-      "z": 0,
+      "x": 3000,
+      "z": 1400,
       "flip": false,
       "layer": null
     }
