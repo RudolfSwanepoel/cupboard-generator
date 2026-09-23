@@ -3,6 +3,8 @@
 Nothing here decides a dimension. Every number in a response came out of the
 engine; this module only moves it from a dataclass into a dict.
 """
+import base64
+import binascii
 import glob
 import json
 import os
@@ -1575,6 +1577,32 @@ def drag(payload):
     }
 
 
+def snapshot(payload):
+    """Save the 3D view the browser drew, as a PNG, into output/<job>/ under a
+    name that never overwrites: <job>_3d_<n>.png. The bytes are the browser's;
+    this only writes what it is sent, under `_safe_name`."""
+    name = _safe_name(payload.get("name"))
+    data = str(payload.get("png") or "")
+    head, _sep, b64 = data.partition(",")
+    if not head.startswith("data:image/png") or not b64:
+        return {"ok": False, "error": "no PNG to save"}
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        return {"ok": False, "error": f"bad PNG data: {exc}"}
+    if not raw.startswith(b"\x89PNG"):
+        return {"ok": False, "error": "not a PNG"}
+    outdir = os.path.join(OUT_DIR, name)
+    os.makedirs(outdir, exist_ok=True)
+    n = 1
+    while os.path.exists(os.path.join(outdir, f"{name}_3d_{n}.png")):
+        n += 1
+    path = os.path.join(outdir, f"{name}_3d_{n}.png")
+    with open(path, "wb") as fh:
+        fh.write(raw)
+    return {"ok": True, "file": os.path.relpath(path, ROOT).replace("\\", "/")}
+
+
 def scene(payload):
     """The 3D scene: every placed cabinet and panel as world-space solids, the
     room shell, the boards' looks, and the overlays. Separate from /api/compute
@@ -1641,6 +1669,7 @@ ROUTES = {
     "/api/drag": drag,
     "/api/elevation": elevation,
     "/api/scene": scene,
+    "/api/snapshot": snapshot,
     "/api/room-extend": room_extend,
 }
 

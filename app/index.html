@@ -117,6 +117,12 @@
                      font-size:11px;font-weight:600;cursor:pointer;user-select:none;
                      line-height:14px}
   #v3dview .v3dlabel.sel{background:#1f6fd0;color:#fff;border-color:#1f6fd0}
+  #v3dview .v3dbadge{position:absolute;width:16px;height:16px;line-height:14px;text-align:center;
+                     border-radius:8px;font-size:10px;font-weight:700;cursor:pointer;
+                     border:1px solid transparent;color:#fff}
+  #v3dview .v3dbadge.critical{background:var(--crit)}
+  #v3dview .v3dbadge.warning{background:var(--warn)}
+  #v3dview .v3dbadge.accepted{background:var(--rule)}
   #v3dview .v3ddim{position:absolute;transform:translate(-50%,-50%);font-size:11px;
                    color:#1f6fd0;background:rgba(255,255,255,.88);padding:0 4px;
                    border-radius:3px;pointer-events:none;white-space:nowrap}
@@ -4547,6 +4553,7 @@ $("layers").addEventListener("click", (e) => {
   const i = on.indexOf(b.dataset.layer);
   if (i >= 0) on.splice(i, 1); else on.push(b.dataset.layer);
   renderPlan();
+  if (V3D) V3D.setLayers(planLayers());    // one toggle: the 3D view follows it
 });
 
 /* ---------- placements ---------------------------------------------------- */
@@ -5233,7 +5240,7 @@ async function render3D() {
           isolate: (number) => { S.isolate = number; sync3D(); if (S.tab === "room") renderPlan(); },
           card: (number, part) => showPartCard(number, part),
           showLine: (label) => showInCutList(label),
-          snapshot: () => snapshot3D(),
+          snapshot: (dataUrl) => snapshot3D(dataUrl),
         });
         $("v3dview").appendChild(cardEl());
       }).catch((err) => {
@@ -5341,7 +5348,14 @@ function showPartCard(number, part) {
   box.hidden = false;
 }
 
-function snapshot3D() {}                           // F5
+// Snapshot (F5): the view as a PNG, written by the server into output/<job>/
+// under a name that never overwrites. The toast names the file.
+async function snapshot3D(dataUrl) {
+  if (!dataUrl) return;
+  const r = await post("/api/snapshot", {name: S.job.name, png: dataUrl});
+  if (!r.ok) { toast(r.error, true); return; }
+  toast(`Saved ${r.file}`);
+}
 
 /* ---------- job files ----------------------------------------------------- */
 

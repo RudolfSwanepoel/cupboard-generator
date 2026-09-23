@@ -614,7 +614,125 @@ def stage_f4(pw):
     ctx.close()
     browser.close()
 
-STAGES = {"f1": stage_f1, "f3": stage_f3, "f4": stage_f4}
+
+# ---------------------------------------------------------------------------
+
+def stage_f5(pw):
+    print("\nF5 — fronts, clearances, layers, badges, snapshot")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    page.goto(URL)
+    page.wait_for_function("() => S.def !== null", timeout=15000)
+    load_job(page, "Test")
+    open_3d(page)
+    wait_scene(page)
+    scene = page.request.post(URL.rstrip("/") + "/api/scene",
+                              data=json.dumps({"job": page.evaluate("() => S.job")}),
+                              headers={"Content-Type": "application/json"}).json()
+    items = {it["number"]: it for it in scene["items"]}
+    left, top, w, hgt = viewport_origin(page)
+    page.mouse.move(left + w / 2, top + hgt / 2)
+
+    # 11. fronts open: every door swings to the side its hinge marks show
+    page.click("#v3dbar button:has-text('Fronts')")
+    time.sleep(0.6)
+    page.wait_for_function("() => V3D.idle()", timeout=10000)
+    doors = [q for it in scene["items"] for q in it["parts"] if q["role"] == "door" and q["hinge"]]
+    drawers = [q for it in scene["items"] for q in it["parts"] if q["role"] == "drawer" and q["pull"]]
+    bad = []
+    for q in doors:
+        info = page.evaluate("() => V3D.partInfo(%s)" % json.dumps(q["id"]))
+        want = math.radians(q["hinge"]["angle"])
+        if abs(info["rotation"] - want) > 0.01:
+            bad.append((q["id"], round(info["rotation"], 3), round(want, 3)))
+    check(f"{len(doors)} doors swung by the angle and sign the server sent (hinge_side)", bad, [])
+    bad = []
+    for q in drawers:
+        info = page.evaluate("() => V3D.partInfo(%s)" % json.dumps(q["id"]))
+        rest, now = info["rest"]
+        moved = math.hypot(now[0] - rest[0], now[1] - rest[1])
+        if abs(moved - q["pull"]["distance"]) > 0.5:
+            bad.append((q["id"], round(moved), q["pull"]["distance"]))
+    check(f"{len(drawers)} drawer faces slid out by the runner's length", bad, [])
+    # the sign: a left-hinged single door turns anticlockwise seen from above
+    hinges = {q["id"]: q["hinge"]["angle"] for q in doors}
+    check("the angles carry both signs across the job (leaves hinged left and right)",
+          sorted(set(a > 0 for a in hinges.values())), [False, True])
+    page.click("#v3dbar button:has-text('Fronts')")
+    time.sleep(0.6)
+    page.wait_for_function("() => V3D.idle()", timeout=10000)
+    info = page.evaluate("() => V3D.partInfo(%s)" % json.dumps(doors[0]["id"]))
+    check("and close again", round(info["rotation"], 4), 0)
+    # one cabinet from the context menu
+    n = doors[0]["cab"]
+    pr = project(page, doors[0]["outline"][0][0], doors[0]["outline"][0][1], doors[0]["z1"] - 50)
+    page.mouse.move(left + pr["x"], top + pr["y"])
+    page.mouse.click(left + pr["x"], top + pr["y"], button="right")
+    time.sleep(0.2)
+    btn = page.locator("#v3dview .v3dctx button:has-text('fronts')")
+    check_true("the context menu offers to open that cabinet's fronts", btn.count() == 1, btn.all_inner_texts())
+    btn.click()
+    time.sleep(0.6)
+    page.wait_for_function("() => V3D.idle()", timeout=10000)
+    opened = {q["cab"] for q in doors if abs(page.evaluate("() => V3D.partInfo(%s)" % json.dumps(q["id"]))["rotation"]) > 0.01}
+    check_true("and only that cabinet opened", len(opened) == 1, f"{opened}")
+
+    # clearances: red where Validation lists a clash
+    page.click("#v3dbar button:has-text('Clearances')")
+    time.sleep(0.2)
+    ov = page.evaluate("() => V3D.overlayInfo()")
+    sw = scene["overlays"]["swings"]
+    check("one envelope per swing and pull-out the plan hovers", ov["swings"], len(sw))
+    check("red exactly where room.clashes reports a clash", ov["clashes"], sum(1 for q in sw if q["clash"]))
+    check("overlaps outlined in red", ov["overlaps"], 2 * len(scene["overlays"]["overlaps"]))
+    page.click("#v3dbar button:has-text('Clearances')")
+    check("off again", page.evaluate("() => V3D.overlayInfo().swings"), 0)
+
+    # 12. layers in 3D and in the plan are the same toggle
+    page.click("#v3dbar button:has-text('Wall')")
+    check("3D: Wall off -> S.layers without wall", "wall" in page.evaluate("() => S.layers"), False)
+    info5 = page.evaluate("() => V3D.partInfo(%s)" % json.dumps(items[5]["parts"][0]["id"]))
+    check("the wall unit is ghosted, not hidden", (info5["ghost"], info5["visible"]), (True, True))
+    page.click('nav [data-tab="room"]')
+    page.wait_for_function("() => document.querySelector('#layers [data-layer=\"wall\"]') !== null", timeout=10000)
+    check("the plan's Wall button shows it off", page.locator('#layers [data-layer="wall"]').get_attribute("class"), "")
+    page.click('#layers [data-layer="wall"]')
+    page.wait_for_function("() => S.layers.indexOf('wall') >= 0", timeout=10000)
+    page.click('nav [data-tab="view3d"]')
+    time.sleep(0.2)
+    check("plan: Wall on -> 3D shows it solid again",
+          page.evaluate("() => V3D.partInfo(%s).ghost" % json.dumps(items[5]["parts"][0]["id"])), False)
+
+    # validation markers
+    n_badges = page.evaluate("() => [...document.querySelectorAll('#v3dview .v3dbadge')].filter((e) => !e.hidden).length")
+    with_issue = {i["cabinet"] for i in scene["overlays"]["issues"]}
+    check_true("a badge over each cabinet carrying an issue that is labelled", 0 < n_badges <= len(with_issue), f"{n_badges} of {len(with_issue)}")
+    page.locator("#v3dview .v3dbadge:not([hidden])").first.click()
+    time.sleep(0.2)
+    check_true("clicking a badge selects the cabinet and the dock shows its issue",
+               page.evaluate("() => S.sel !== null") and page.locator("#v3ddock #editor .dockissues div").count() > 0)
+
+    # 13. snapshot writes a PNG into output/Test/
+    outdir = os.path.join(ROOT, "output", "Test")
+    before = set(os.listdir(outdir)) if os.path.isdir(outdir) else set()
+    page.click("#v3dbar button:has-text('Snapshot')")
+    page.wait_for_function("() => document.getElementById('toast').textContent.indexOf('Saved') === 0", timeout=15000)
+    after = set(os.listdir(outdir))
+    new = sorted(after - before)
+    check_true("a new PNG landed in output/Test/", len(new) == 1 and new[0].startswith("Test_3d_") and new[0].endswith(".png"), f"{new}")
+    if new:
+        with open(os.path.join(outdir, new[0]), "rb") as fh:
+            check("and it is a PNG", fh.read(4), b"\x89PNG")
+        check("the toast names it", "Saved output/Test/" + new[0] in page.locator("#toast").text_content(), True)
+    page.click("#v3dbar button:has-text('Snapshot')")
+    page.wait_for_function("() => document.getElementById('toast').textContent.indexOf('_3d_') > 0", timeout=15000)
+    check("a second one does not overwrite the first", len(set(os.listdir(outdir)) - before), 2)
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+STAGES = {"f1": stage_f1, "f3": stage_f3, "f4": stage_f4, "f5": stage_f5}
 
 with sync_playwright() as pw:
     for name, fn in STAGES.items():

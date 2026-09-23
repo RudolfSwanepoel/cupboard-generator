@@ -764,9 +764,21 @@ function placeLabels() {
       el.classList.toggle("sel", c.number === V.sel);
       el.hidden = false;
       shown.add(c.number);
+      // a badge beside the label for a cabinet carrying a critical (red) or a
+      // warning (amber); an accepted critical greyed, as in the Validation list
+      const iss = V.issueOf && V.issueOf.get(c.number);
+      if (iss) {
+        const b = badgeFor(c.number);
+        b.className = "v3dbadge " + (iss.accepted ? "accepted" : iss.level);
+        b.title = iss.message;
+        b.style.left = (box.x1 + 2) + "px";
+        b.style.top = box.y0 + "px";
+        b.hidden = false;
+      }
     }
   }
   for (const [n, el] of V.labelEls) if (!shown.has(n)) el.hidden = true;
+  if (V.badgeEls) for (const [n, el] of V.badgeEls) if (!shown.has(n) || !(V.issueOf && V.issueOf.get(n))) el.hidden = true;
   placeDimLabels();
 }
 
@@ -1535,19 +1547,150 @@ function openContextMenu(e) {
   V.ctxEl.hidden = false;
 }
 
-/* ---------- stubs filled in by later stages ------------------------------------ */
+/* ---------- fronts open / closed (F5) --------------------------------------------
+   A door turns about the hinge axis the server sent, by the angle it sent —
+   its sign is which way the leaf swings (model.hinge_side, the same rule the
+   plan's arcs and the elevation's marks read). A drawer face slides out along
+   its pull-out direction by the runner's length. Because drawer boxes are not
+   drawn, a pulled-out face moves on its own. The toolbar opens everything; the
+   context menu flips one cabinet the other way. Animated ~400 ms.             */
 
-function toggleFronts() { V.frontsOpen = !V.frontsOpen; updateBar(); }
+const FRONT_MS = 400;
+
+function frontOpen(mesh) {
+  const n = mesh.userData.number;
+  const flipped = V.openFor && V.openFor.has(n);
+  return V.frontsOpen ? !flipped : !!flipped;
+}
+
+// Pose one front at fraction t of its travel. The mesh's geometry is in world
+// coordinates, so turning it about a world axis through A is a rotation about
+// Z plus the translation A - R(theta) A.
+function poseFront(m) {
+  const part = m.userData.part;
+  const t = m.userData.t || 0;
+  if (part.hinge) {
+    const [ax, ay] = part.hinge.axis[0];
+    const th = THREE.MathUtils.degToRad(part.hinge.angle) * t;
+    const c = Math.cos(th), s = Math.sin(th);
+    m.rotation.set(0, 0, th);
+    m.position.set(ax - (c * ax - s * ay), ay - (s * ax + c * ay), 0);
+  } else if (part.pull) {
+    m.position.set(part.pull.dir[0] * part.pull.distance * t,
+                   part.pull.dir[1] * part.pull.distance * t, 0);
+  }
+}
+
+function applyFronts(instant) {
+  const moving = [];
+  for (const grp of V.groups.values()) {
+    for (const m of grp.children) {
+      const part = m.userData.part;
+      if (!part || !(part.hinge || part.pull)) continue;
+      m.userData.tTarget = frontOpen(m) ? 1 : 0;
+      if (m.userData.t === undefined) m.userData.t = 0;
+      if (instant) { m.userData.t = m.userData.tTarget; poseFront(m); }
+      else if (m.userData.t !== m.userData.tTarget) moving.push(m);
+    }
+  }
+  if (!moving.length) { requestRender(); return; }
+  const start = performance.now();
+  const from = new Map(moving.map((m) => [m, m.userData.t]));
+  V.animating = () => {
+    const k = Math.min((performance.now() - start) / FRONT_MS, 1);
+    const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;   // ease in and out
+    for (const m of moving) {
+      m.userData.t = from.get(m) + (m.userData.tTarget - from.get(m)) * e;
+      poseFront(m);
+    }
+    if (k >= 1) V.animating = null;
+  };
+  startLoop();
+}
+
+function toggleFronts() {
+  V.frontsOpen = !V.frontsOpen;
+  if (V.openFor) V.openFor.clear();          // the toolbar speaks for every cabinet
+  applyFronts(false);
+  updateBar();
+}
+
 function toggleFrontsFor(number) {
   if (!V.openFor) V.openFor = new Set();
   if (V.openFor.has(number)) V.openFor.delete(number); else V.openFor.add(number);
+  applyFronts(false);
 }
+
+/* ---------- clearances, overlaps, validation badges (F5) -------------------------
+   The swing and pull-out envelopes room.py already emits for the plan's hover,
+   extruded over their height range, translucent; red where room.clashes says
+   so. An overlap (a critical) outlines both cabinets in red whatever the
+   toggle says. All of it comes from the server; nothing is computed here.  */
+
 function toggleClearances() { V.clearances = !V.clearances; buildOverlays(); updateBar(); }
+
 function buildOverlays() {
   if (V.overlays) { V.scene.remove(V.overlays); disposeObject(V.overlays); V.overlays = null; }
+  if (!V.payload) { requestRender(); return; }
+  const g = new THREE.Group();
+  const ov = V.payload.overlays || {swings: [], overlaps: [], issues: []};
+  if (V.clearances) {
+    for (const sw of ov.swings) {
+      if (!sw.outline || sw.outline.length < 3) continue;
+      const geom = extrude(sw.outline, sw.z0, sw.z1);
+      const colour = sw.clash ? PAPER.clash : PAPER.clear;
+      const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({
+        color: colour, transparent: true, opacity: sw.clash ? 0.32 : 0.16, depthWrite: false}));
+      mesh.renderOrder = 3;
+      mesh.userData = {overlay: true, cabinet: sw.cabinet, kind: sw.kind, clash: sw.clash};
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 30),
+        new THREE.LineBasicMaterial({color: colour, transparent: true, opacity: 0.7}));
+      g.add(mesh, edges);
+    }
+  }
+  for (const o of ov.overlaps) {
+    for (const n of [o.a, o.b]) {
+      const grp = V.groups.get(n);
+      if (!grp) continue;
+      const box = new THREE.Box3().setFromObject(grp).expandByScalar(6);
+      const helper = new THREE.Box3Helper(box, PAPER.overlap);
+      helper.userData = {overlay: true, overlap: true, cabinet: n};
+      g.add(helper);
+    }
+  }
+  V.scene.add(g);
+  V.overlays = g;
+  // the worst issue per cabinet, for the badges over the labels
+  V.issueOf = new Map();
+  for (const i of ov.issues) {
+    const rank = i.level === "critical" ? (i.accepted ? 1 : 3) : 2;
+    const cur = V.issueOf.get(i.cabinet);
+    if (!cur || rank > cur.rank) V.issueOf.set(i.cabinet, {rank: rank, level: i.level, accepted: i.accepted, message: i.message});
+  }
   requestRender();
 }
-function snapshot() { if (V.hooks.snapshot) V.hooks.snapshot(); }
+
+function badgeFor(number) {
+  if (!V.badgeEls) V.badgeEls = new Map();
+  let el = V.badgeEls.get(number);
+  if (!el) {
+    el = h("div", {class: "v3dbadge", text: "!"});
+    el.addEventListener("pointerdown", (e) => e.stopPropagation());
+    el.addEventListener("click", (e) => { e.stopPropagation(); doSelect(number, null); });
+    V.els.view.appendChild(el);
+    V.badgeEls.set(number, el);
+  }
+  return el;
+}
+
+/* ---------- snapshot (F5): the view as a PNG, saved by the server ---------------- */
+
+function snapshot() {
+  if (!V.renderer || !V.hooks.snapshot) return;
+  V.renderer.render(V.scene, V.camera);          // the buffer is not preserved: draw, then read
+  V.hooks.snapshot(V.renderer.domElement.toDataURL("image/png"));
+}
+
 function cancelDrag() {}
 
 /* ---------- the interface index.html uses ---------------------------------------- */
@@ -1646,7 +1789,8 @@ export function update(payload, opts) {
   updateLegend();
   say(payload.banner || (payload.room && !payload.ceiling_measured
     ? "The ceiling is not measured: the walls stop a drawing margin above the tallest item." : ""));
-  if (fresh) { V.hidden.clear(); setProjection(false, false); viewHome(false); }
+  if (fresh) { V.hidden.clear(); if (V.openFor) V.openFor.clear(); setProjection(false, false); viewHome(false); }
+  applyFronts(true);                       // rebuilt parts take the open/closed state as it stands
   buildList();
   if (V.hooks.updated) V.hooks.updated(payload);
   requestRender();
@@ -1712,6 +1856,16 @@ export function debugCam() {
           focal: fo.toArray(), cam: V.camera.position.toArray(), fov: V.persp.fov,
           polar: c.polarAngle, azimuth: c.azimuthAngle, zoom: V.camera.zoom, running: V.running,
           active: c.active};
+}
+
+export function overlayInfo() {
+  if (!V.overlays) return {swings: 0, clashes: 0, overlaps: 0};
+  let swings = 0, clashes = 0, overlaps = 0;
+  V.overlays.children.forEach((o) => {
+    if (o.userData.overlap) overlaps += 1;
+    else if (o.isMesh) { swings += 1; if (o.userData.clash) clashes += 1; }
+  });
+  return {swings, clashes, overlaps};
 }
 
 export function groupIds() {
