@@ -67,7 +67,7 @@ const FLY_MS = 300;
 const V = {
   els: {},             // view, bar, list, dock, status, from index.html
   hooks: {},           // what index.html asked to be told about
-  renderer: null, scene: null, camera: null, persp: null, ortho: null,
+  renderer: null, scene: null, root: null, camera: null, persp: null, ortho: null,
   controls: null,      // the LIVE controls (perspective or orthographic)
   cP: null, cO: null,  // one CameraControls per camera; only one is enabled
   clock: null,
@@ -149,6 +149,19 @@ function webglAvailable() {
     return false;
   }
 }
+
+/* ---------- room frame and render frame -----------------------------------------
+   room.py's world is X right, Y INTO the room from wall A, Z up, and its plan
+   maps onto SVG with no flip — which, with Z up, is a LEFT-handed frame: facing
+   wall A from inside the room, the wall's own x runs to your right on the
+   elevation, and that is the real room. Drawn as it stands in a right-handed
+   renderer the room would come out as its mirror image, hinge sides included.
+   So every solid lives under `V.root`, which negates Y, and this is the ONE
+   place the two frames meet: `toRender` / `toRoom` for a point or a vector.
+   Geometry is never touched; the server's numbers go in as they are.       */
+
+function toRender(x, y, z) { return new THREE.Vector3(x, -y, z); }
+function toRoom(v) { return [v.x, -v.y, v.z]; }
 
 /* ---------- renderer, cameras, controls -------------------------------------- */
 
@@ -444,23 +457,23 @@ function syncItems(payload) {
     seen.add(item.number);
     const old = V.groups.get(item.number);
     if (old && old.userData.hash === item.hash) { old.userData.item = item; continue; }
-    if (old) { V.scene.remove(old); disposeObject(old); V.groups.delete(item.number); }
+    if (old) { V.root.remove(old); disposeObject(old); V.groups.delete(item.number); }
     if (!item.parts.length) continue;
     const grp = buildItem(item);
-    V.scene.add(grp);
+    V.root.add(grp);
     V.groups.set(item.number, grp);
   }
   for (const [n, grp] of [...V.groups]) {
-    if (!seen.has(n)) { V.scene.remove(grp); disposeObject(grp); V.groups.delete(n); }
+    if (!seen.has(n)) { V.root.remove(grp); disposeObject(grp); V.groups.delete(n); }
   }
   // plinths and fillers: few, cheap — rebuilt whenever their list changes
   const key = JSON.stringify(payload.room_parts.map((q) => q.id + q.z1 + q.outline.join(",")));
   if (!V.roomParts || V.roomParts.userData.key !== key) {
-    if (V.roomParts) { V.scene.remove(V.roomParts); disposeObject(V.roomParts); }
+    if (V.roomParts) { V.root.remove(V.roomParts); disposeObject(V.roomParts); }
     V.roomParts = new THREE.Group();
     V.roomParts.userData = {key: key, number: 0};
     for (const q of payload.room_parts) V.roomParts.add(buildPart(q));
-    V.scene.add(V.roomParts);
+    V.root.add(V.roomParts);
   }
   // drop textures for boards no longer in the job
   for (const [k, tex] of [...V.textures]) {
@@ -530,7 +543,7 @@ function obstructionMeshes(w) {
 }
 
 function buildShell(payload) {
-  if (V.shell) { V.scene.remove(V.shell); disposeObject(V.shell); V.shell = null; }
+  if (V.shell) { V.root.remove(V.shell); disposeObject(V.shell); V.shell = null; }
   const shell = new THREE.Group();
   shell.userData.kind = "shell";
   const room = payload.room;
@@ -570,11 +583,11 @@ function buildShell(payload) {
     const d = Math.max(b.max.y - b.min.y, 1000) + 1200;
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
       new THREE.MeshStandardMaterial({color: PAPER.floor, roughness: 1}));
-    floor.position.set((b.max.x + b.min.x) / 2, (b.max.y + b.min.y) / 2, -0.5);
+    floor.position.set((b.max.x + b.min.x) / 2, -(b.max.y + b.min.y) / 2, -0.5);   // room frame, in the root
     floor.userData.kind = "floor";
     shell.add(floor);
   }
-  V.scene.add(shell);
+  V.root.add(shell);
   V.shell = shell;
   applyWalls();
 }
@@ -597,7 +610,7 @@ function computeBBox() {
   for (const grp of V.groups.values()) b.expandByObject(grp);
   if (V.roomParts) b.expandByObject(V.roomParts);
   if (V.payload && V.payload.room) {
-    for (const [x, y] of V.payload.room.floor) b.expandByPoint(new THREE.Vector3(x, y, 0));
+    for (const [x, y] of V.payload.room.floor) b.expandByPoint(toRender(x, y, 0));
     b.expandByPoint(new THREE.Vector3(b.min.x, b.min.y, V.payload.room.top));
   }
   if (b.isEmpty()) b.set(new THREE.Vector3(-1000, -1000, 0), new THREE.Vector3(1000, 1000, 1000));
@@ -620,8 +633,8 @@ function computeBBox() {
 
 function rebuildAll() {
   if (!V.payload) return;
-  for (const [n, grp] of [...V.groups]) { V.scene.remove(grp); disposeObject(grp); V.groups.delete(n); }
-  if (V.roomParts) { V.scene.remove(V.roomParts); disposeObject(V.roomParts); V.roomParts = null; }
+  for (const [n, grp] of [...V.groups]) { V.root.remove(grp); disposeObject(grp); V.groups.delete(n); }
+  if (V.roomParts) { V.root.remove(V.roomParts); disposeObject(V.roomParts); V.roomParts = null; }
   syncItems(V.payload);
   computeBBox();
   buildShell(V.payload);
@@ -661,6 +674,7 @@ function applyGhosting() {
     }
   }
   applySelection();
+  updateHandles();
   requestRender();
 }
 
@@ -762,6 +776,9 @@ function placeLabels() {
       el.style.top = box.y0 + "px";
       el.style.opacity = c.ghost ? GHOST : 1;
       el.classList.toggle("sel", c.number === V.sel);
+      // the selected item's label sits where its move handles start: it must
+      // not take the press meant for them (its number is in the dock anyway)
+      el.style.pointerEvents = V.handles ? "none" : "";
       el.hidden = false;
       shown.add(c.number);
       // a badge beside the label for a cabinet carrying a critical (red) or a
@@ -773,6 +790,7 @@ function placeLabels() {
         b.title = iss.message;
         b.style.left = (box.x1 + 2) + "px";
         b.style.top = box.y0 + "px";
+        b.style.pointerEvents = V.handles ? "none" : "";
         b.hidden = false;
       }
     }
@@ -999,7 +1017,7 @@ function lookFrom(dir, box, transition, keepDistance) {
   fitTo(b, transition !== false, dir);
 }
 
-const ISO_DIR = new THREE.Vector3(-0.62, 0.72, 0.55);
+const ISO_DIR = new THREE.Vector3(-0.62, -0.72, 0.55);   // render frame
 
 // Home looks at the room from the side its cabinets FACE: the direction is the
 // walls' inward normals, each weighted by what stands on it, so a kitchen on
@@ -1019,8 +1037,8 @@ function homeDir() {
   if (d.length() < 0.2) return ISO_DIR.clone();
   d.normalize();
   // turn a little off the exact diagonal so both runs read, and lift it
-  const turned = new THREE.Vector3(d.x * 0.92 - d.y * 0.39, d.x * 0.39 + d.y * 0.92, 0);
-  return turned.setZ(0.7).normalize();
+  const turned = new THREE.Vector3(d.x * 0.92 - d.y * 0.39, d.x * 0.39 + d.y * 0.92, 0);   // room frame
+  return toRender(turned.x, turned.y, 0.7).normalize();
 }
 
 function viewHome(transition) { lookFrom(homeDir(), V.bbox, transition); }
@@ -1034,14 +1052,14 @@ function viewWall(index, transition) {
   // of the wall elevation
   if (!V.ortho_on) setProjection(true, false);
   const box = wallBox(w);
-  lookFrom(new THREE.Vector3(w.normal[0], w.normal[1], 0), box, transition);
+  lookFrom(toRender(w.normal[0], w.normal[1], 0), box, transition);
 }
 
 function wallBox(w) {
   const b = new THREE.Box3();
   const top = V.payload.room.top;
-  b.expandByPoint(new THREE.Vector3(w.start[0], w.start[1], 0));
-  b.expandByPoint(new THREE.Vector3(w.end[0], w.end[1], top));
+  b.expandByPoint(toRender(w.start[0], w.start[1], 0));
+  b.expandByPoint(toRender(w.end[0], w.end[1], top));
   // anything standing on it, out to its depth
   for (const grp of V.groups.values()) {
     if (grp.userData.item.wall === w.id) b.expandByObject(grp);
@@ -1178,7 +1196,7 @@ function cubeLabels() {
     normals.forEach(([fx, fy], i) => {
       let best = null;
       for (const w of room.walls) {
-        const dot = w.normal[0] * fx + w.normal[1] * fy;
+        const dot = w.normal[0] * fx - w.normal[1] * fy;   // render frame
         if (dot > Math.cos(Math.PI / 6) && (!best || dot > best.dot)) best = {dot: dot, id: w.id};
       }
       if (best) out[i] = best.id;
@@ -1216,6 +1234,17 @@ function onPointerDown(e) {
   V.pressed = true;
   startLoop();
   if (V.dragging) return;              // F6: the move handle owns this press
+  if (e.button === 0 && V.handles) {
+    const axis = pickHandle(e);
+    if (axis) {
+      // a press on a move handle: the camera must not see it
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      V.press = null;
+      startMove(e, axis);
+      return;
+    }
+  }
   // Orbit about the point pressed on, pan at its depth; nothing hit keeps the
   // current pivot. Done before camera-controls sees the press.
   setOrbitPointFrom(e);
@@ -1630,7 +1659,7 @@ function toggleFrontsFor(number) {
 function toggleClearances() { V.clearances = !V.clearances; buildOverlays(); updateBar(); }
 
 function buildOverlays() {
-  if (V.overlays) { V.scene.remove(V.overlays); disposeObject(V.overlays); V.overlays = null; }
+  if (V.overlays) { V.root.remove(V.overlays); disposeObject(V.overlays); V.overlays = null; }
   if (!V.payload) { requestRender(); return; }
   const g = new THREE.Group();
   const ov = V.payload.overlays || {swings: [], overlaps: [], issues: []};
@@ -1652,13 +1681,15 @@ function buildOverlays() {
     for (const n of [o.a, o.b]) {
       const grp = V.groups.get(n);
       if (!grp) continue;
-      const box = new THREE.Box3().setFromObject(grp).expandByScalar(6);
+      const rb = new THREE.Box3().setFromObject(grp).expandByScalar(6);   // render frame
+      const box = new THREE.Box3(new THREE.Vector3(rb.min.x, -rb.max.y, rb.min.z),
+                                 new THREE.Vector3(rb.max.x, -rb.min.y, rb.max.z));   // room frame
       const helper = new THREE.Box3Helper(box, PAPER.overlap);
       helper.userData = {overlay: true, overlap: true, cabinet: n};
       g.add(helper);
     }
   }
-  V.scene.add(g);
+  V.root.add(g);
   V.overlays = g;
   // the worst issue per cabinet, for the badges over the labels
   V.issueOf = new Map();
@@ -1691,7 +1722,231 @@ function snapshot() {
   V.hooks.snapshot(V.renderer.domElement.toDataURL("image/png"));
 }
 
-function cancelDrag() {}
+/* ---------- moving a cabinet or a panel in 3D (F6) -------------------------------
+   A SELECTED, placed item shows a move handle per axis it may move on: an
+   arrow along its wall, an arrow up, and for a panel an arrow out from the
+   wall. Dragging an arrow moves the item along that axis only; a left-drag
+   on the part itself still orbits, so moving is always deliberate.
+
+   On the press, ONE /api/drag call (the same the plan and the elevation
+   make) gives the snap targets, leg_lift and the tolerance; the wall's world
+   direction and normal are already in the scene. The browser projects the
+   pointer onto the chosen axis (the point on the axis nearest the cursor's
+   ray), keeps the grab offset by construction, and takes the NEAREST
+   candidate within Standard.snap_tolerance, ties broken by the nearest
+   neighbour along the wall — the plan's rule. It works out no position of
+   its own. The press listens before it awaits, and replays the last move and
+   a release once the model lands, so a quick flick never sticks. The drop
+   writes Placement.x, .z (and .y for a panel) and nothing else; Esc puts the
+   item back. No moving onto another wall, no rotating.                      */
+
+const HANDLE_LEN = 420;
+
+function handleMesh(dir, origin, colour, axis) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({color: colour, depthTest: false, transparent: true, opacity: 0.9});
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(14, 14, HANDLE_LEN - 110, 10), mat);
+  shaft.position.y = (HANDLE_LEN - 110) / 2;
+  const head = new THREE.Mesh(new THREE.ConeGeometry(48, 110, 14), mat);
+  head.position.y = HANDLE_LEN - 55;
+  // a fat invisible sleeve, so a 28 mm shaft is grabbable at all
+  const grab = new THREE.Mesh(new THREE.CylinderGeometry(70, 70, HANDLE_LEN, 8),
+                              new THREE.MeshBasicMaterial({visible: false}));
+  grab.position.y = HANDLE_LEN / 2;
+  g.add(shaft, head, grab);
+  g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  g.position.copy(origin);
+  g.renderOrder = 20;
+  g.userData = {handle: axis, dir: dir.clone().normalize()};
+  [shaft, head, grab].forEach((m) => { m.userData = {handle: axis, group: g}; m.renderOrder = 20; });
+  return g;
+}
+
+function updateHandles() {
+  if (V.handles) { V.scene.remove(V.handles); disposeObject(V.handles); V.handles = null; }
+  const grp = V.sel !== null ? V.groups.get(V.sel) : null;
+  const room = V.payload && V.payload.room;
+  if (!grp || !room || !grp.visible) { requestRender(); return; }
+  const item = grp.userData.item;
+  if (!item.placed || !itemShown(item)) { requestRender(); return; }
+  const wall = room.walls.find((w) => w.id === item.wall);
+  if (!wall) { requestRender(); return; }
+  const b = new THREE.Box3().setFromObject(grp);
+  const c = b.getCenter(new THREE.Vector3());
+  const dir = toRender(wall.dir[0], wall.dir[1], 0);
+  const nrm = toRender(wall.normal[0], wall.normal[1], 0);
+  // from the middle of the item's top face, so they read whichever way it is seen
+  const origin = new THREE.Vector3(c.x, c.y, b.max.z + 40);
+  const hs = new THREE.Group();
+  hs.add(handleMesh(dir, origin, PAPER.accent, "x"));
+  hs.add(handleMesh(new THREE.Vector3(0, 0, 1), origin, PAPER.pivot, "z"));
+  if (item.panel) hs.add(handleMesh(nrm, origin, PAPER.warn, "y"));
+  hs.userData = {number: item.number};
+  V.scene.add(hs);
+  V.handles = hs;
+  requestRender();
+}
+
+function pickHandle(e) {
+  if (!V.handles) return null;
+  V.handles.updateMatrixWorld(true);        // built since the last frame, maybe
+  raycaster.setFromCamera(ndcOf(e), V.camera);
+  const hits = raycaster.intersectObjects(V.handles.children, true);
+  return hits.length ? hits[0].object.userData.handle : null;
+}
+
+// The point on the axis (through P0 along u) nearest the cursor's ray, as a
+// distance from P0 along u — pure camera maths, no dimension of the model.
+function axisParam(e, P0, u) {
+  raycaster.setFromCamera(ndcOf(e), V.camera);
+  const o = raycaster.ray.origin, d = raycaster.ray.direction;
+  const w0 = P0.clone().sub(o);
+  const a = u.dot(u), b = u.dot(d), c = d.dot(d);
+  const dd = w0.dot(u), ee = w0.dot(d);
+  const den = a * c - b * b;
+  if (Math.abs(den) < 1e-9) return null;               // looking straight along the axis
+  return (b * ee - c * dd) / den;
+}
+
+function startMove(e, axis) {
+  const grp = V.groups.get(V.sel);
+  const item = grp.userData.item;
+  const wall = V.payload.room.walls.find((w) => w.id === item.wall);
+  const u = axis === "x" ? toRender(wall.dir[0], wall.dir[1], 0)
+          : axis === "y" ? toRender(wall.normal[0], wall.normal[1], 0)
+          : new THREE.Vector3(0, 0, 1);   // render frame: the cursor's ray is
+  V.handles.updateMatrixWorld(true);
+  raycaster.setFromCamera(ndcOf(e), V.camera);
+  const hit = raycaster.intersectObjects(V.handles.children, true)[0];
+  const P0 = hit ? hit.point.clone() : V.handles.children[0].position.clone();
+  const d = {number: item.number, axis: axis, u: u, P0: P0, grp: grp, item: item, wall: wall,
+             from: {x: item.x, z: item.z, y: item.y || 0}, at: {x: item.x, z: item.z, y: item.y || 0},
+             model: null, last: null, released: false, moved: false, reason: ""};
+  V.dragging = d;
+  V.controls.enabled = false;                    // the camera stays put while a handle moves
+  window.addEventListener("pointermove", onMoveDrag);
+  window.addEventListener("pointerup", endMoveDrag);
+  window.addEventListener("pointercancel", endMoveDrag);
+  status(`moving ${item.number} …`);
+  // listen first, THEN ask: the model may land after the pointer has let go
+  Promise.resolve(V.hooks.dragModel ? V.hooks.dragModel(item.number) : null).then((model) => {
+    if (V.dragging !== d && !d.released) return;          // superseded by a newer press
+    if (!model || !model.ok) { d.moved = false; finishMove(d, true); return; }
+    d.model = model;
+    if (d.last) moveDrag(d, d.last);
+    if (d.released) finishMove(d, false);
+  });
+}
+
+function onMoveDrag(e) {
+  const d = V.dragging;
+  if (!d) return;
+  if (!d.model) { d.last = {clientX: e.clientX, clientY: e.clientY}; return; }
+  moveDrag(d, e);
+}
+
+function nearestSnap(value, cands, get, tol, span) {
+  let best = null;
+  for (const c of cands) {
+    const v = get(c);
+    if (v === null || v === undefined) continue;
+    const dist = Math.abs(v - value);
+    if (dist > tol) continue;
+    // ties: the candidate whose neighbour is nearest along the wall (0 for a
+    // wall-wide datum), the plan's and the elevation's rule
+    const gap = (c.x0 !== undefined && c.x0 !== null && span)
+      ? Math.max(0, c.x0 - span[1], span[0] - c.x1) : 0;
+    if (!best || dist < best.dist - 1e-9 || (Math.abs(dist - best.dist) < 1e-9 && gap < best.gap)) {
+      best = {value: v, why: c.why, dist: dist, gap: gap};
+    }
+  }
+  return best;
+}
+
+function moveDrag(d, e) {
+  const t = axisParam(e, d.P0, d.u);
+  if (t === null) return;
+  const m = d.model;
+  const wallModel = m.walls[d.wall.id];
+  const tol = m.tolerance;
+  const width = m.width;
+  d.moved = true;
+  let reason = "";
+  if (d.axis === "x") {
+    let x = d.from.x + t;
+    x = Math.max(0, Math.min(wallModel.max_x, x));
+    const snap = nearestSnap(x, wallModel.snaps, (c) => c.x, tol, null);
+    if (snap) { x = snap.value; reason = snap.why; }
+    d.at.x = Math.round(x);
+  } else if (d.axis === "y") {
+    let y = Math.max(0, d.from.y + t);
+    const span = [d.at.x, d.at.x + width];
+    const snap = nearestSnap(y, wallModel.y_snaps || [], (c) => c.y, tol, span);
+    if (snap) { y = snap.value; reason = snap.why; }
+    d.at.y = Math.round(y);
+  } else {
+    // the pointer moves the UNDERSIDE; Placement.z is 0 on the floor (the
+    // carcass then stands on its legs, leg_lift up) and the underside above it
+    const lift = m.leg_lift || 0;
+    const under0 = d.from.z > 0 ? d.from.z : lift;
+    let under = under0 + t;
+    const span = [d.at.x, d.at.x + width];
+    const cands = (wallModel.z_snaps || []).filter((c) => {
+      if (c.x0 !== undefined && c.x0 !== null && (c.x1 <= span[0] || c.x0 >= span[1])) return false;
+      if (c.not_x0 !== undefined && c.not_x0 !== null && !(c.not_x1 <= span[0] || c.not_x0 >= span[1])) return false;
+      return true;
+    });
+    const snap = nearestSnap(under, cands, (c) => (c.z > 0 ? c.z : lift), tol, span);
+    let z;
+    if (snap) { under = snap.value; z = snap.value <= lift ? 0 : snap.value; reason = snap.why; }
+    else z = under <= lift ? 0 : Math.round(under);
+    if (m.max_z !== null && m.max_z !== undefined) z = Math.min(z, m.max_z);
+    d.at.z = Math.max(0, z);
+  }
+  d.reason = reason;
+  // move the group by the world difference from where it stands
+  const dx = d.at.x - d.from.x, dy = d.at.y - d.from.y;
+  const lift = m.leg_lift || 0;
+  const zNow = d.at.z > 0 ? d.at.z : lift, zWas = d.from.z > 0 ? d.from.z : lift;
+  const along = new THREE.Vector3(d.wall.dir[0], d.wall.dir[1], 0).multiplyScalar(dx);
+  const out = new THREE.Vector3(d.wall.normal[0], d.wall.normal[1], 0).multiplyScalar(dy);
+  d.grp.position.copy(along.add(out).setZ(zNow - zWas));              // room frame, in the root
+  if (V.handles) V.handles.position.copy(toRender(d.grp.position.x, d.grp.position.y, d.grp.position.z));
+  const fig = d.axis === "x" ? `x ${d.at.x}` : d.axis === "y" ? `y ${d.at.y}` : `z ${d.at.z}`;
+  status(`${d.item.number}: ${fig} mm${reason ? " · " + reason : ""}`);
+  requestRender();
+}
+
+function endMoveDrag() {
+  const d = V.dragging;
+  if (!d) return;
+  d.released = true;
+  if (!d.model) return;                          // the model is still on its way: replayed when it lands
+  finishMove(d, false);
+}
+
+function finishMove(d, cancelled) {
+  if (V.dragging === d) V.dragging = null;
+  window.removeEventListener("pointermove", onMoveDrag);
+  window.removeEventListener("pointerup", endMoveDrag);
+  window.removeEventListener("pointercancel", endMoveDrag);
+  V.controls.enabled = true;
+  d.grp.position.set(0, 0, 0);
+  if (V.handles) V.handles.position.set(0, 0, 0);
+  const changed = d.at.x !== d.from.x || d.at.z !== d.from.z || d.at.y !== d.from.y;
+  if (cancelled || !d.moved || !changed) { status(V.hint); requestRender(); return; }
+  status(`${d.item.number} moved to ${d.axis} ${d.at[d.axis]} mm${d.reason ? " · " + d.reason : ""}`);
+  if (V.hooks.drop) V.hooks.drop(d.item.number, {x: d.at.x, z: d.at.z, y: d.item.panel ? d.at.y : undefined});
+  requestRender();
+}
+
+function cancelDrag() {
+  const d = V.dragging;
+  if (!d) return;
+  d.at = {...d.from};
+  finishMove(d, true);
+  status(`${d.item.number}: move cancelled`);
+}
 
 /* ---------- the interface index.html uses ---------------------------------------- */
 
@@ -1719,6 +1974,9 @@ export function mount(els, hooks) {
   el.appendChild(V.renderer.domElement);
   el.appendChild(V.note);
   V.scene = new THREE.Scene();
+  V.root = new THREE.Group();
+  V.root.scale.set(1, -1, 1);              // the room frame, drawn true (see toRender)
+  V.scene.add(V.root);
   V.scene.add(makeLights());
   V.grid = makeGrid(6000);
   V.scene.add(V.grid);
@@ -1830,8 +2088,8 @@ export function idle() { return !V.running && !V.animating; }
 export function bounds(number) {
   const grp = V.groups.get(number);
   if (!grp) return null;
-  const b = new THREE.Box3().setFromObject(grp);
-  return {min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z]};
+  const b = new THREE.Box3().setFromObject(grp);                // render frame
+  return {min: [b.min.x, -b.max.y, b.min.z], max: [b.max.x, -b.min.y, b.max.z]};   // room frame
 }
 
 export function partInfo(id) {
@@ -1856,6 +2114,28 @@ export function debugCam() {
           focal: fo.toArray(), cam: V.camera.position.toArray(), fov: V.persp.fov,
           polar: c.polarAngle, azimuth: c.azimuthAngle, zoom: V.camera.zoom, running: V.running,
           active: c.active};
+}
+
+export function pickHandleAt(clientX, clientY) {
+  if (!V.handles) return {axis: null, handles: []};
+  V.handles.updateMatrixWorld(true);
+  const axis = pickHandle({clientX, clientY});
+  const boxes = V.handles.children.map((g) => {
+    const b = new THREE.Box3().setFromObject(g);
+    return {axis: g.userData.handle, min: b.min.toArray(), max: b.max.toArray(),
+            meshes: g.children.length, visible: g.visible};
+  });
+  raycaster.setFromCamera(ndcOf({clientX, clientY}), V.camera);
+  const hits = raycaster.intersectObjects(V.handles.children, true).map((hh) => [hh.object.userData.handle, hh.distance]);
+  return {axis, handles: boxes, hits, ray: [raycaster.ray.origin.toArray(), raycaster.ray.direction.toArray()]};
+}
+
+export function dragInfo() {
+  const d = V.dragging;
+  const hs = V.handles ? V.handles.children.map((g) => ({axis: g.userData.handle, origin: toRoom(g.position),
+                                                         dir: toRoom(g.userData.dir)})) : [];
+  return {dragging: !!d, axis: d ? d.axis : null, at: d ? d.at : null, reason: d ? d.reason : "",
+          hasModel: !!(d && d.model), handles: hs};
 }
 
 export function overlayInfo() {
@@ -1897,20 +2177,20 @@ export function state() {
 export function camera() {
   const p = V.controls.getPosition(new THREE.Vector3());
   const t = V.controls.getTarget(new THREE.Vector3());
-  return {position: [p.x, p.y, p.z], target: [t.x, t.y, t.z], zoom: V.camera.zoom, ortho: V.ortho_on};
+  return {position: toRoom(p), target: toRoom(t), zoom: V.camera.zoom, ortho: V.ortho_on};
 }
 
 // Screen position of a world point — for the checks, which want to know that
 // a corner stayed under the cursor.
 export function project(x, y, z) {
   const r = V.renderer.domElement.getBoundingClientRect();
-  const p = new THREE.Vector3(x, y, z).project(V.camera);
+  const p = toRender(x, y, z).project(V.camera);
   return {x: (p.x + 1) / 2 * r.width, y: (1 - p.y) / 2 * r.height, depth: p.z};
 }
 
 export function unproject(clientX, clientY) {
   const hit = pick({clientX, clientY}, true);
-  return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+  return hit ? toRoom(hit.point) : null;
 }
 
 export function dispose() {
@@ -1918,7 +2198,7 @@ export function dispose() {
   if (V.observer) V.observer.disconnect();
   window.removeEventListener("keydown", onKey);
   window.removeEventListener("keyup", onKey);
-  for (const [n, grp] of [...V.groups]) { V.scene.remove(grp); disposeObject(grp); V.groups.delete(n); }
+  for (const [n, grp] of [...V.groups]) { V.root.remove(grp); disposeObject(grp); V.groups.delete(n); }
   if (V.roomParts) disposeObject(V.roomParts);
   if (V.shell) disposeObject(V.shell);
   for (const t of V.textures.values()) t.dispose();

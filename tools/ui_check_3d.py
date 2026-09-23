@@ -416,6 +416,9 @@ def stage_f3(pw):
     for i in range(30):
         w = 450 + (i % 2)
         edit_and_wait(page, f"() => {{ S.job.cabinets[1].width = {w}; schedule(); }}")
+    # back to the width it started at: at 451 cabinet 2 overlaps 3 by a
+    # millimetre and the two red overlap outlines are two live geometries
+    edit_and_wait(page, "() => { S.job.cabinets[1].width = 450; schedule(); }")
     settle(page)
     m1 = page.evaluate("() => V3D.memory()")
     print(f"      renderer.info.memory before {m0} after {m1}")
@@ -424,7 +427,7 @@ def stage_f3(pw):
     check("30 edits: the camera did not move", cam(), cam0)
     check("30 edits: no console errors", errors, [])
     b2b = page.evaluate("() => V3D.bounds(2)")
-    check("the edited cabinet is rebuilt at its new width", round(b2b["max"][0] - b2b["min"][0]), 451 + 0)
+    check("the edited cabinet is rebuilt at its width", round(b2b["max"][0] - b2b["min"][0]), 450)
 
     # the October fixture: no room, ~360 parts, first draw
     seq = page.evaluate("() => sceneSeq")
@@ -732,7 +735,147 @@ def stage_f5(pw):
     ctx.close()
     browser.close()
 
-STAGES = {"f1": stage_f1, "f3": stage_f3, "f4": stage_f4, "f5": stage_f5}
+
+# ---------------------------------------------------------------------------
+
+def stage_f6(pw):
+    print("\nF6 — moving cabinets and panels in 3D")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    page.goto(URL)
+    page.wait_for_function("() => S.def !== null", timeout=15000)
+    load_job(page, "Test")
+    open_3d(page)
+    wait_scene(page)
+    left, top, w, hgt = viewport_origin(page)
+    page.mouse.move(left + w / 2, top + hgt / 2)
+
+    def select(number):
+        page.evaluate("() => { selectCabinet(S.job.cabinets.findIndex((c) => c.number === %d), {isolate: false}); renderList(); }" % number)
+        time.sleep(0.15)
+
+    def placement(number):
+        return page.evaluate("() => S.job.placements.find((p) => p.cabinet === %d)" % number)
+
+    def handle_screen(axis):
+        info = page.evaluate("() => V3D.dragInfo()")
+        hd = next(hh for hh in info["handles"] if hh["axis"] == axis)
+        o, d = hd["origin"], hd["dir"]
+        # grab the shaft a third of the way along, and know which way on screen the axis runs
+        g = [o[i] + d[i] * 140 for i in range(3)]
+        p0 = project(page, *g)
+        p1 = project(page, *[o[i] + d[i] * 340 for i in range(3)])
+        vx, vy = p1["x"] - p0["x"], p1["y"] - p0["y"]
+        n = math.hypot(vx, vy) or 1
+        return (left + p0["x"], top + p0["y"]), (vx / n, vy / n), (n / 200)   # px per mm along the axis
+
+    def drag_handle(axis, mm, steps=12, pause=0.02):
+        (sx, sy), (ux, uy), per_mm = handle_screen(axis)
+        px = mm * per_mm
+        page.mouse.move(sx, sy)
+        page.mouse.down()
+        for i in range(1, steps + 1):
+            page.mouse.move(sx + ux * px * i / steps, sy + uy * px * i / steps)
+            time.sleep(pause)
+        page.mouse.up()
+        page.wait_for_function("() => !V3D.dragInfo().dragging", timeout=10000)
+        page.wait_for_function("() => !S.sceneStale && sceneTimer === null", timeout=15000)
+        settle(page)
+
+    # handles appear only on a selected, placed item
+    check("no handles with nothing selected", page.evaluate("() => V3D.dragInfo().handles.length"), 0)
+    select(5)                                                   # the wall unit on A, x 2680, z 1398
+    check("a selected cabinet shows an along-the-wall and an up handle",
+          sorted(hh["axis"] for hh in page.evaluate("() => V3D.dragInfo().handles")), ["x", "z"])
+    select(8)
+    check("a panel gets the out-from-the-wall handle too",
+          sorted(hh["axis"] for hh in page.evaluate("() => V3D.dragInfo().handles")), ["x", "y", "z"])
+
+    # 14a. a wall unit along the wall, then up onto "on top of N"
+    select(5)
+    page.keyboard.press("1")                                    # face on to wall A: the axes read cleanly
+    settle(page)
+    p5 = placement(5)
+    cam0 = page.evaluate("() => V3D.camera()")
+    drag_handle("x", -150)
+    p5b = placement(5)
+    check_true("dragging the wall arrow moved cabinet 5 along wall A only",
+               p5b["x"] != p5["x"] and p5b["z"] == p5["z"] and p5b["wall"] == "A", f"{p5} -> {p5b}")
+    check("the camera did not move during the drag", page.evaluate("() => V3D.camera()"), cam0)
+    check("the plan and the elevation agree: the engine's geometry moved with it",
+          page.evaluate("() => S.res.room.placements['5'].x"), p5b["x"])
+    # up/down onto a neighbour's top: cabinet 5 stands over 6 (base, top at 100 + 780)
+    model = page.request.post(URL.rstrip("/") + "/api/drag",
+                              data=json.dumps({"job": page.evaluate("() => S.job"), "cabinet": 5}),
+                              headers={"Content-Type": "application/json"}).json()
+    tops = [c for c in model["walls"]["A"]["z_snaps"] if c["why"].startswith("on top of")]
+    check_true("the model offers 'on top of N' targets", len(tops) > 0, f"{[c['why'] for c in tops]}")
+    target = min(tops, key=lambda c: abs(c["z"] - p5b["z"]))
+    drag_handle("z", target["z"] - p5b["z"] + 8)               # 8 mm short: the snap closes it
+    p5c = placement(5)
+    check(f"dragging the up arrow snapped it to '{target['why']}'", p5c["z"], target["z"])
+    check("and the status line said so", target["why"] in page.locator("#v3dstatus").text_content(), True)
+    check("x untouched by a vertical drag", p5c["x"], p5b["x"])
+
+    # 14b. panel 8 out from the wall
+    select(8)
+    page.keyboard.press("t")
+    settle(page)
+    p8 = placement(8)
+    drag_handle("y", 300)
+    p8b = placement(8)
+    check_true("dragging the out arrow moved panel 8 off wall A", (p8b.get("y") or 0) > 0 and p8b["x"] == p8["x"] and p8b["z"] == p8["z"],
+               f"{p8} -> {p8b}")
+    status = page.locator("#v3dstatus").text_content()
+    check_true("it snapped to a depth the engine named", any(k in status for k in ("in front of", "front level with", "against the wall", "back level", "behind")) or (p8b.get("y") or 0) == 300, status)
+    check("a cabinet has no y", placement(5).get("y", 0), 0)
+
+    # 14c. a quick flick does not stick: press, move and release in one go
+    select(5)
+    page.keyboard.press("1")
+    settle(page)
+    before = placement(5)
+    (sx, sy), (ux, uy), per_mm = handle_screen("x")
+    page.mouse.move(sx, sy)
+    page.mouse.down()
+    page.mouse.move(sx + ux * 60 * per_mm, sy + uy * 60 * per_mm)
+    page.mouse.up()                                             # before /api/drag can have replied
+    page.wait_for_function("() => !V3D.dragInfo().dragging", timeout=10000)
+    page.wait_for_function("() => !S.sceneStale && sceneTimer === null", timeout=15000)
+    after = placement(5)
+    check_true("a flick moved it and let go: nothing stuck to the pointer",
+               after["x"] != before["x"] and not page.evaluate("() => V3D.dragInfo().dragging"), f"{before['x']} -> {after['x']}")
+    page.mouse.move(sx + 200, sy + 200)
+    time.sleep(0.2)
+    check("and a later move does not drag it", placement(5)["x"], after["x"])
+
+    # 14d. Esc restores
+    settle(page)
+    before = placement(5)
+    (sx, sy), (ux, uy), per_mm = handle_screen("x")
+    page.mouse.move(sx, sy)
+    page.mouse.down()
+    for i in range(1, 8):
+        page.mouse.move(sx + ux * 120 * per_mm * i / 8, sy + uy * 120 * per_mm * i / 8)
+        time.sleep(0.03)
+    moved_live = page.evaluate("() => V3D.dragInfo().at.x")
+    check_true("mid-drag the live figure has moved", moved_live != before["x"], f"{moved_live} vs {before['x']}")
+    page.keyboard.press("Escape")
+    page.mouse.up()
+    time.sleep(0.3)
+    check("Esc during the drag restores the start position", placement(5)["x"], before["x"])
+    check("and nothing was recomputed for it", page.evaluate("() => S.sceneStale"), False)
+
+    # the drop wrote the placement and nothing else
+    job = page.evaluate("() => S.job")
+    check("cabinet 5 still has every field it had (only its placement moved)",
+          job["cabinets"][[c["number"] for c in job["cabinets"]].index(5)]["width"], 300)
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+STAGES = {"f1": stage_f1, "f3": stage_f3, "f4": stage_f4, "f5": stage_f5, "f6": stage_f6}
 
 with sync_playwright() as pw:
     for name, fn in STAGES.items():

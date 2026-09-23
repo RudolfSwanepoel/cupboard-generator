@@ -5241,6 +5241,19 @@ async function render3D() {
           card: (number, part) => showPartCard(number, part),
           showLine: (label) => showInCutList(label),
           snapshot: (dataUrl) => snapshot3D(dataUrl),
+          // F6: one /api/drag per press, the same the plan and the elevation
+          // make; the drop writes the placement and nothing else, then the
+          // one compute redraws every view
+          dragModel: (number) => post("/api/drag", {job: S.job, cabinet: number}),
+          drop: (number, at) => {
+            const p = (S.job.placements || []).find((x) => x.cabinet === number);
+            if (!p) return;
+            p.x = at.x;
+            p.z = at.z;
+            if (at.y !== undefined) p.y = at.y;
+            placesSig = null;            // the placements table shows the new numbers
+            compute();
+          },
         });
         $("v3dview").appendChild(cardEl());
       }).catch((err) => {
