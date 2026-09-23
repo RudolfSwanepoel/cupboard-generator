@@ -1,7 +1,7 @@
 """Drive the 3D view in the running app with a real (headless) browser.
 
     python run_app.py --no-window --port 8766      # in another window
-    python tools/ui_check_3d.py [--port 8766] [--stage f1]
+    python tools/ui_check_3d.py [--port 8766] [--stage f1|f3|...|all]
 
 Needs Playwright (`pip install playwright && python -m playwright install
 chromium`) — the ONLY third-party dependency anywhere near this app, and only
@@ -19,6 +19,7 @@ with a real mouse" level that the brief asks for on top of them.
 """
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -38,6 +39,7 @@ ap.add_argument("--stage", default="all")
 ap.add_argument("--headed", action="store_true")
 args = ap.parse_args()
 URL = f"http://127.0.0.1:{args.port}/"
+LAUNCH = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
 
 FAILS = []
 
@@ -50,8 +52,8 @@ def check(label, got, want):
     return ok
 
 
-def check_true(label, got):
-    return check(label, bool(got), True)
+def check_true(label, got, detail=""):
+    return check(label + (f" [{detail}]" if detail else ""), bool(got), True)
 
 
 def load_job(page, name):
@@ -70,18 +72,52 @@ def open_3d(page):
     page.wait_for_selector("#v3dview canvas", timeout=15000)
 
 
-def stage_f1(pw):
-    print("\nF1 — vendoring, static routes, lazy loading, offline")
-    browser = pw.chromium.launch(headless=not args.headed, args=[
-        "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+def wait_scene(page):
+    page.wait_for_function("() => !S.sceneStale && V3D.memory().groups > 0", timeout=20000)
+    settle(page)
+
+
+def settle(page):
+    page.wait_for_function("() => V3D.idle()", timeout=10000)
+    time.sleep(0.15)
+
+
+def viewport_origin(page):
+    r = page.evaluate("() => { const r = document.querySelector('#v3dview canvas').getBoundingClientRect();"
+                      " return [r.left, r.top, r.width, r.height]; }")
+    return r
+
+
+def project(page, x, y, z):
+    return page.evaluate(f"() => V3D.project({x}, {y}, {z})")
+
+
+def new_page(browser, errors):
     ctx = browser.new_context(viewport={"width": 1400, "height": 900})
     page = ctx.new_page()
-    hosts, errors, requests = set(), [], []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(str(e)))
+    page.on("dialog", lambda d: d.accept())        # "discard unsaved changes?" — yes
+    return ctx, page
 
-    # Offline acceptance: anything that is not this server is refused, and the
-    # tab has to work anyway.
+
+def edit_and_wait(page, js):
+    """Run an edit in the page and wait until the 3D view has caught up with the
+    compute it caused: the scene fetch after this edit has come back."""
+    seq = page.evaluate("() => sceneSeq")
+    page.evaluate(js)
+    page.wait_for_function(f"() => sceneSeq > {seq} && !S.sceneStale && sceneTimer === null", timeout=15000)
+
+
+# ---------------------------------------------------------------------------
+
+def stage_f1(pw):
+    print("\nF1 — vendoring, static routes, lazy loading, offline")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    hosts, requests = set(), []
+
     def route(r):
         from urllib.parse import urlparse
         host = urlparse(r.request.url).hostname
@@ -100,7 +136,7 @@ def stage_f1(pw):
     check("nor is three.js", any("/vendor/" in u for u in before), False)
     load_job(page, "Test")
     open_3d(page)
-    time.sleep(0.8)
+    wait_scene(page)
     check("every request went to this server only", sorted(hosts), ["127.0.0.1"])
     fetched = [u.split("/", 3)[3] for u in requests if "/vendor/" in u or "view3d" in u]
     check("the module and the two libraries were fetched, and nothing else off /vendor/",
@@ -112,10 +148,8 @@ def stage_f1(pw):
                page.evaluate("() => { const c = document.querySelector('#v3dview canvas');"
                              " return !!(c && (c.getContext('webgl2') || c.getContext('webgl'))); }"))
     h = page.evaluate("() => document.getElementById('v3d').getBoundingClientRect().height")
-    win = page.evaluate("() => window.innerHeight")
     check_true("the viewport fills the window below the tab bar (no page scroll)",
                h > 300 and page.evaluate("() => document.documentElement.scrollHeight <= window.innerHeight + 2"))
-    # Content types and the whitelist.
     for path, ctype in (("/vendor/three/three.module.js", "text/javascript"),
                         ("/vendor/three/LICENSE", "text/plain"),
                         ("/vendor/camera-controls/LICENSE", "text/plain"),
@@ -129,8 +163,6 @@ def stage_f1(pw):
         check(f"{path} is refused", r.status, 404)
     check("the static route sends the house cache header",
           page.request.get(URL.rstrip("/") + "/app/view3d.js").headers.get("cache-control"), "no-store")
-
-    # Switching away stops rendering; coming back renders again.
     page.click('nav [data-tab="cabinets"]')
     check("hidden tab: the view says it is not visible",
           page.evaluate("() => V3D.setVisible && document.getElementById('tab-view3d').hidden"), True)
@@ -139,7 +171,6 @@ def stage_f1(pw):
     check("no console errors after switching tabs", errors, [])
     ctx.close()
 
-    # No WebGL: one line, the rest of the app untouched.
     ctx2 = browser.new_context(viewport={"width": 1400, "height": 900})
     page2 = ctx2.new_page()
     errs2 = []
@@ -165,7 +196,252 @@ def stage_f1(pw):
     browser.close()
 
 
-STAGES = {"f1": stage_f1}
+# ---------------------------------------------------------------------------
+
+def stage_f3(pw):
+    print("\nF3 — drawing and navigation")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    page.goto(URL)
+    page.wait_for_function("() => S.def !== null", timeout=15000)
+    load_job(page, "Test")
+    open_3d(page)
+    wait_scene(page)
+    scene = page.request.post(URL.rstrip("/") + "/api/scene",
+                              data=json.dumps({"job": page.evaluate("() => S.job")}),
+                              headers={"Content-Type": "application/json"}).json()
+    items = {it["number"]: it for it in scene["items"]}
+
+    # 2. every placed cabinet and panel, in the right place, at the right height
+    placed = sorted(n for n, it in items.items() if it["placed"])
+    got = page.evaluate("() => [...Array(40).keys()].filter((n) => V3D.bounds(n) !== null)")
+    check("every placed item has a group in the scene", got, placed)
+    bad = []
+    for n in placed:
+        b = page.evaluate(f"() => V3D.bounds({n})")
+        parts = items[n]["parts"]
+        want_min = [min(x for q in parts for x, _ in q["outline"]), min(y for q in parts for _, y in q["outline"]),
+                    min(q["z0"] for q in parts)]
+        want_max = [max(x for q in parts for x, _ in q["outline"]), max(y for q in parts for _, y in q["outline"]),
+                    max(q["z1"] for q in parts)]
+        if any(abs(a - c) > 0.6 for a, c in zip(b["min"] + b["max"], want_min + want_max)):
+            bad.append((n, b, want_min, want_max))
+    check("and its bounds are the server's outlines and heights", bad, [])
+    b2 = page.evaluate("() => V3D.bounds(2)")
+    check("cabinet 2 stands on its legs: bottom at 100", b2["min"][2], 100)
+    b5 = page.evaluate("() => V3D.bounds(5)")
+    check("wall unit 5 hangs at its own z", b5["min"][2], items[5]["parts"][0]["z0"])
+    b8 = page.evaluate("() => V3D.bounds(8)")
+    check("panel 8 stands at its typed z", b8["min"][2], 100)
+
+    # colours and pictures off the boards
+    looks = scene["looks"]
+    door = next(q for q in items[2]["parts"] if q["role"] == "door")
+    info = page.evaluate(f"() => V3D.partInfo({json.dumps(door['id'])})")
+    check("a door is drawn in its board's colour", info["colour"], looks[door["board"]]["colour"])
+    check("a grained board with a picture is textured", info["map"], bool(looks[door["board"]]["picture"]))
+    side = next(q for q in items[2]["parts"] if q["role"] == "side")
+    info_s = page.evaluate(f"() => V3D.partInfo({json.dumps(side['id'])})")
+    check("a plain board keeps its colour, no texture", (info_s["colour"], info_s["map"]),
+          (looks[side["board"]]["colour"], False))
+    mitre_door = next(q for q in items[13]["parts"] if q["role"] == "door")
+    info_m = page.evaluate(f"() => V3D.partInfo({json.dumps(mitre_door['id'])})")
+    check("the mitre door reads in BROOKHILL, as the Finish elevation has it",
+          (mitre_door["board"], info_m["colour"]), ("BROOKHILL", looks["BROOKHILL"]["colour"]))
+    p12 = items[12]["parts"][0]
+    info_12 = page.evaluate(f"() => V3D.partInfo({json.dumps(p12['id'])})")
+    check("panel 12 reads in its own board", info_12["colour"], looks[p12["board"]]["colour"])
+    legend = page.locator("#v3dview .v3dlegend .rows").inner_text()
+    check_true("the legend names the boards in view", all(b in legend for b in ("BROOKHILL", "WHITEMEL", "BACK")))
+    check_true("and says what is not drawn", "Not drawn" in page.locator("#v3dview .v3dlegend .nd").inner_text())
+
+    # 3. zoom to cursor: a cabinet corner stays under the cursor over ten wheel steps
+    settle(page)
+    corner = [door["outline"][1][0], door["outline"][1][1], door["z1"]]   # door 2's top right front corner
+    left, top, w, hgt = viewport_origin(page)
+    p = project(page, *corner)
+    check_true("the corner is on screen", 0 < p["x"] < w and 0 < p["y"] < hgt, f"{p}")
+    # the point the wheel is over is whatever the pick finds there: hold THAT
+    # still, which is what "zoom towards the point under the cursor" means
+    under = page.evaluate(f"() => V3D.unproject({left + p['x']}, {top + p['y']})")
+    check_true("something is under the cursor there", under is not None, f"{under}")
+    corner = under or corner
+    p = project(page, *corner)
+    page.mouse.move(left + p["x"], top + p["y"])
+    for _ in range(10):
+        page.mouse.wheel(0, -120)
+        time.sleep(0.05)
+    settle(page)
+    q = project(page, *corner)
+    drift = math.hypot(q["x"] - p["x"], q["y"] - p["y"])
+    check_true("zoom to cursor: the corner stayed under the cursor over ten wheel steps",
+               drift < 6, f"drift {drift:.1f} px")
+    cam_d = page.evaluate("() => { const c = V3D.camera(); return Math.hypot(c.position[0]-c.target[0], c.position[1]-c.target[1], c.position[2]-c.target[2]); }")
+    check_true("and it zoomed in", cam_d < 6000, f"distance {cam_d:.0f}")
+    # pinch is a wheel with ctrl held: same path
+    page.keyboard.down("Control")
+    for _ in range(4):
+        page.mouse.wheel(0, 120)
+        time.sleep(0.05)
+    page.keyboard.up("Control")
+    settle(page)
+    q2 = project(page, *corner)
+    drift2 = math.hypot(q2["x"] - p["x"], q2["y"] - p["y"])
+    check_true("pinch (Ctrl+wheel) zooms about the cursor too", drift2 < 6, f"drift {drift2:.1f} px")
+
+    # 4. orbit about the pressed point: press on a door and orbit; it stays put
+    page.keyboard.press("h")
+    settle(page)
+    az0 = page.evaluate("() => { const c = V3D.camera(); return Math.atan2(c.position[1]-c.target[1], c.position[0]-c.target[0]); }")
+    face = [(door["outline"][0][0] + door["outline"][1][0]) / 2,
+            door["outline"][1][1], (door["z0"] + door["z1"]) / 2]     # the middle of door 2's front
+    p = project(page, *face)
+    # what is really under the cursor there is the pressed point (a panel may
+    # stand in front of the door from this angle): that is what must stay put
+    face = page.evaluate(f"() => V3D.unproject({left + p['x']}, {top + p['y']})") or face
+    p = project(page, *face)
+    page.mouse.move(left + p["x"], top + p["y"])
+    page.mouse.down()
+    for i in range(1, 13):
+        page.mouse.move(left + p["x"] + i * 12, top + p["y"] + i * 4)
+        time.sleep(0.02)
+    page.mouse.up()
+    settle(page)
+    q = project(page, *face)
+    drift = math.hypot(q["x"] - p["x"], q["y"] - p["y"])
+    check_true("orbit about the pressed point: the door stayed put while the room turned",
+               drift < 6, f"drift {drift:.1f} px")
+    az = page.evaluate("() => { const c = V3D.camera(); return Math.atan2(c.position[1]-c.target[1], c.position[0]-c.target[0]); }")
+    check_true("and the camera did orbit", abs(az - az0) > 0.05, f"azimuth {az:.2f} from {az0:.2f}")
+
+    # 5. pan: right-drag; the grabbed point stays under the cursor
+    page.keyboard.press("h")
+    settle(page)
+    p = project(page, *face)
+    face = page.evaluate(f"() => V3D.unproject({left + p['x']}, {top + p['y']})") or face
+    p = project(page, *face)
+    page.mouse.move(left + p["x"], top + p["y"])
+    page.mouse.down(button="right")
+    for i in range(1, 11):
+        page.mouse.move(left + p["x"] + i * 10, top + p["y"] + i * 6)
+        time.sleep(0.02)
+    page.mouse.up(button="right")
+    settle(page)
+    q = project(page, *face)
+    check_true("pan: the grabbed point moved with the cursor",
+               abs((q["x"] - p["x"]) - 100) < 6 and abs((q["y"] - p["y"]) - 60) < 6,
+               f"moved ({q['x'] - p['x']:.1f}, {q['y'] - p['y']:.1f}) for (100, 60)")
+
+    # 6. views: H, T, 1-9, P, Fit, the cube
+    def cam():
+        return page.evaluate("() => V3D.camera()")
+
+    def direction():
+        c = cam()
+        d = [c["position"][i] - c["target"][i] for i in range(3)]
+        n = math.sqrt(sum(x * x for x in d)) or 1
+        return [x / n for x in d]
+    page.keyboard.press("t")
+    settle(page)
+    d = direction()
+    check_true("T: looking straight down", d[2] > 0.98, f"{[round(x, 2) for x in d]}")
+    page.keyboard.press("h")
+    settle(page)
+    d = direction()
+    check_true("H: home looks at the runs from the side they face, from above",
+               d[0] < -0.2 and d[1] > 0.2 and d[2] > 0.3, f"{[round(x, 2) for x in d]}")
+    page.keyboard.press("1")
+    settle(page)
+    d = direction()
+    check_true("1: face on to wall A, from the room", abs(d[1] - 1) < 0.05 and abs(d[2]) < 0.05, f"{[round(x, 2) for x in d]}")
+    check("in orthographic", cam()["ortho"], True)
+    page.keyboard.press("2")
+    settle(page)
+    d = direction()
+    check_true("2: face on to wall B", abs(d[0] + 1) < 0.05, f"{[round(x, 2) for x in d]}")
+    page.keyboard.press("p")
+    settle(page)
+    check("P: back to perspective", cam()["ortho"], False)
+    page.keyboard.press("h")
+    settle(page)
+    c0 = cam()
+    page.mouse.move(left + w * 0.5, top + hgt * 0.5)
+    for _ in range(6):
+        page.mouse.wheel(0, -120)
+        time.sleep(0.04)
+    settle(page)
+    page.keyboard.press("f")
+    settle(page)
+    c1 = cam()
+    d0 = math.dist(c0["position"], c0["target"])
+    d1 = math.dist(c1["position"], c1["target"])
+    check_true("F with nothing selected fits everything again (back out to the Home distance)",
+               abs(d1 - d0) < d0 * 0.02, f"{d1:.0f} vs {d0:.0f}")
+    # the cube: at Home its centre is the near corner; click it and the camera
+    # goes to a corner view, animated
+    cube = page.locator("#v3dview .v3dcube").bounding_box()
+    page.mouse.click(cube["x"] + cube["width"] / 2, cube["y"] + cube["height"] * 0.22)
+    moving = not page.evaluate("() => V3D.idle()")
+    settle(page)
+    d = direction()
+    check_true("cube: clicking its top face looks down, animated",
+               d[2] > 0.9 and moving, f"{[round(x, 2) for x in d]}, animating {moving}")
+    page.keyboard.press("h")
+    settle(page)
+    page.mouse.click(cube["x"] + cube["width"] * 0.3, cube["y"] + cube["height"] * 0.66)   # a side face, seen from Home
+    settle(page)
+    d = direction()
+    check_true("cube: a side face turns the view to that side", abs(d[2]) < 0.3, f"{[round(x, 2) for x in d]}")
+    check_true("cube faces carry the wall letters",
+               page.evaluate("() => V3D.state() !== null"))
+    page.keyboard.press("h")
+    settle(page)
+    check("labels are on by default", page.evaluate("() => V3D.state().labels"), True)
+    n_labels = page.evaluate("() => [...document.querySelectorAll('#v3dview .v3dlabel')].filter((e) => !e.hidden).length")
+    check_true("item numbers are drawn as DOM labels, decluttered", 4 <= n_labels <= 13, f"{n_labels} of 13")
+    page.keyboard.press("l")
+    check("L hides them", page.evaluate("() => [...document.querySelectorAll('#v3dview .v3dlabel')].filter((e) => !e.hidden).length"), 0)
+    page.keyboard.press("l")
+    page.keyboard.press("x")
+    info = page.evaluate(f"() => V3D.partInfo({json.dumps(door['id'])})")
+    check("X: x-ray makes the parts translucent", info["opacity"] < 1, True)
+    page.keyboard.press("x")
+    check("no console errors", errors, [])
+
+    # 15 (part): 30 edits in a row; memory counts steady, no console errors
+    page.click('nav [data-tab="view3d"]')
+    m0 = page.evaluate("() => V3D.memory()")
+    cam0 = cam()
+    for i in range(30):
+        w = 450 + (i % 2)
+        edit_and_wait(page, f"() => {{ S.job.cabinets[1].width = {w}; schedule(); }}")
+    settle(page)
+    m1 = page.evaluate("() => V3D.memory()")
+    print(f"      renderer.info.memory before {m0} after {m1}")
+    check("30 edits: geometry count returns to where it was", m1["geometries"], m0["geometries"])
+    check("30 edits: texture count returns to where it was", m1["textures"], m0["textures"])
+    check("30 edits: the camera did not move", cam(), cam0)
+    check("30 edits: no console errors", errors, [])
+    b2b = page.evaluate("() => V3D.bounds(2)")
+    check("the edited cabinet is rebuilt at its new width", round(b2b["max"][0] - b2b["min"][0]), 451 + 0)
+
+    # the October fixture: no room, ~360 parts, first draw
+    seq = page.evaluate("() => sceneSeq")
+    page.click("#fixture")
+    page.wait_for_function(f"() => S.job && S.job.name !== 'Test' && S.res && sceneSeq > {seq} && !S.sceneStale", timeout=30000)
+    settle(page)
+    ms = page.evaluate("() => S.sceneMs")
+    m2 = page.evaluate("() => V3D.memory()")
+    print(f"      October: {m2['pickables']} parts, scene fetched and built in {ms} ms")
+    check_true("October fixture draws with no room, in about a second or less", ms < 2500, f"{ms} ms")
+    check_true("the banner says there is no room", "no room" in page.locator("#v3dview .v3dnote").text_content())
+    check("no console errors on the October job", errors, [])
+    ctx.close()
+    browser.close()
+
+
+STAGES = {"f1": stage_f1, "f3": stage_f3}
 
 with sync_playwright() as pw:
     for name, fn in STAGES.items():

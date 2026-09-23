@@ -110,6 +110,42 @@
                     pointer-events:none}
   #v3dstatus{font-size:11.5px;color:var(--muted);min-height:16px;white-space:nowrap;
              overflow:hidden;text-overflow:ellipsis}
+  /* overlays inside the viewport: labels, dimension figures, the view cube,
+     the legend, the help card; and the toolbar's dropdowns */
+  #v3dview .v3dlabel{position:absolute;padding:1px 6px;border-radius:9px;
+                     background:rgba(255,255,255,.92);border:1px solid var(--rule);
+                     font-size:11px;font-weight:600;cursor:pointer;user-select:none;
+                     line-height:14px}
+  #v3dview .v3dlabel.sel{background:#1f6fd0;color:#fff;border-color:#1f6fd0}
+  #v3dview .v3ddim{position:absolute;transform:translate(-50%,-50%);font-size:11px;
+                   color:#1f6fd0;background:rgba(255,255,255,.88);padding:0 4px;
+                   border-radius:3px;pointer-events:none;white-space:nowrap}
+  #v3dview .v3dcube{position:absolute;right:10px;top:10px;cursor:pointer;touch-action:none}
+  #v3dview .v3dlegend{position:absolute;right:10px;bottom:10px;max-width:280px;
+                      background:rgba(255,255,255,.93);border:1px solid var(--line);
+                      border-radius:5px;padding:6px 9px;font-size:11px}
+  .v3dlegend .hd{font-weight:600;display:flex;justify-content:space-between;gap:8px;
+                 align-items:center}
+  .v3dlegend .hd .tog{padding:0 6px;font-size:11px;line-height:14px}
+  .v3dlegend.closed .rows,.v3dlegend.closed .nd{display:none}
+  .v3dlegend .row{display:flex;gap:6px;align-items:center;margin-top:3px}
+  .v3dlegend .sw{width:22px;height:14px;border:1px solid var(--rule);border-radius:2px;
+                 display:inline-block;flex:none}
+  .v3dlegend .nd{margin-top:5px;color:var(--muted)}
+  #v3dview .v3dhelp{position:absolute;left:10px;top:10px;max-width:540px;
+                    background:rgba(255,255,255,.96);border:1px solid var(--line);
+                    border-radius:5px;padding:8px 10px;font-size:11.5px;line-height:1.5}
+  #v3dbar{position:relative}
+  #v3dbar .v3dmenu{position:absolute;top:26px;z-index:20;background:var(--panel);
+                   border:1px solid var(--line);border-radius:5px;padding:3px;
+                   display:flex;flex-direction:column;min-width:190px;
+                   box-shadow:0 4px 14px rgba(0,0,0,.12)}
+  #v3dbar .v3dmenu[hidden]{display:none}
+  #v3dbar .v3dmenu button{text-align:left;border:none;background:none;padding:4px 8px;
+                          font-size:11.5px}
+  #v3dbar .v3dmenu button:hover{background:var(--carc)}
+  #v3dbar .v3dmenu button.on{font-weight:700}
+  #v3dbar .sep{width:1px;height:18px;background:var(--line);margin:0 3px}
   #editor{width:560px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
           overflow:auto}
   #cablist tr.sel td{background:var(--door)}
@@ -538,6 +574,7 @@ async function compute() {
   if (S.tab === "boards" && S.lib) drawBoards();
   renderElevation();
   renderList();
+  refreshScene();          // the 3D view catches up, now or when next shown
   renderTab();
 }
 
@@ -4958,6 +4995,8 @@ document.querySelector("nav").addEventListener("click", (e) => {
 
 let V3D = null;          // the module, once loaded
 let v3dLoading = null;   // the one in-flight import, so two clicks load it once
+S.sceneStale = true;     // the 3D view has not seen the job as it now stands
+S.sceneJob = null;       // which job object the view last drew: a new one opens at Home
 
 function size3D() {
   const box = $("v3d");
@@ -4970,13 +5009,31 @@ function size3D() {
 }
 window.addEventListener("resize", size3D);
 
+function selNumber() {
+  const c = S.sel !== null && S.job && S.job.cabinets[S.sel];
+  return c ? c.number : null;
+}
+
 async function render3D() {
   if (!V3D) {
     if (!v3dLoading) {
       v3dLoading = import("/app/view3d.js").then((m) => {
         V3D = m;
-        V3D.mount($("v3dview"), {
-          status: (text) => { const s = $("v3dstatus"); if (s) s.textContent = text; },
+        V3D.mount({view: $("v3dview"), bar: $("v3dbar"), list: $("v3dlist"),
+                   dock: $("v3ddock"), status: $("v3dstatus")}, {
+          // a click in 3D selects, without isolating (F4)
+          select: (number, part) => select3D(number, part),
+          // the layer toggle is the plan's: one answer to "what am I looking at"
+          toggleLayer: (k) => {
+            const on = planLayers();
+            const i = on.indexOf(k);
+            if (i >= 0) on.splice(i, 1); else on.push(k);
+            V3D.setLayers(planLayers());
+            if (S.tab === "room") renderPlan();
+          },
+          card: (number, part) => showPartCard(number, part),
+          context: (e, hit) => contextMenu3D(e, hit),
+          snapshot: () => snapshot3D(),
         });
       }).catch((err) => {
         v3dLoading = null;
@@ -4988,7 +5045,48 @@ async function render3D() {
   }
   size3D();
   V3D.setVisible(true);
+  if (S.sceneStale && sceneTimer === null) fetchScene();
+  else V3D.select(selNumber());
 }
+
+// After every compute: the 3D view asks /api/scene, debounced, and only while
+// its tab is showing — a hidden tab refreshes when it is next shown. Nothing
+// is computed for the 3D view that the plan or the validation does not
+// already compute; the scene is one more read-only view of the job.
+let sceneSeq = 0, sceneTimer = null;
+function refreshScene() {
+  S.sceneStale = true;
+  if (S.tab !== "view3d" || !V3D) return;
+  clearTimeout(sceneTimer);
+  sceneTimer = setTimeout(() => { sceneTimer = null; fetchScene(); }, 40);
+}
+
+async function fetchScene() {
+  clearTimeout(sceneTimer);
+  sceneTimer = null;
+  if (!V3D || !S.job) return;
+  const seq = ++sceneSeq;
+  const t0 = performance.now();
+  const r = await post("/api/scene", {job: S.job});
+  if (seq !== sceneSeq) return;                    // a newer job is on its way
+  if (!r.ok) { toast(r.error, true); return; }
+  S.sceneStale = false;
+  const fresh = S.sceneJob !== S.job;              // a newly loaded job opens at Home
+  S.sceneJob = S.job;
+  V3D.setLayers(planLayers());
+  V3D.update(r, {fresh: fresh});
+  V3D.select(selNumber());
+  S.sceneMs = Math.round(performance.now() - t0);
+}
+
+function select3D(number, part) {                  // F4 fills this in
+  const i = number === null ? -1 : S.job.cabinets.findIndex((c) => c.number === number);
+  S.sel = i >= 0 ? i : null;
+  renderList();
+}
+function showPartCard(number, part) {}             // F4
+function contextMenu3D(e, hit) {}                  // F4
+function snapshot3D() {}                           // F5
 
 /* ---------- job files ----------------------------------------------------- */
 
