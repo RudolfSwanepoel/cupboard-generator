@@ -875,7 +875,119 @@ def stage_f6(pw):
     ctx.close()
     browser.close()
 
-STAGES = {"f1": stage_f1, "f3": stage_f3, "f4": stage_f4, "f5": stage_f5, "f6": stage_f6}
+
+# ---------------------------------------------------------------------------
+
+def stage_extras(pw):
+    print("\nExtras — a blind corner, the three panel orientations, the October fixture")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    page.goto(URL)
+    page.wait_for_function("() => S.def !== null", timeout=15000)
+
+    def scene_of(page):
+        return page.request.post(URL.rstrip("/") + "/api/scene",
+                                 data=json.dumps({"job": page.evaluate("() => S.job")}),
+                                 headers={"Content-Type": "application/json"}).json()
+
+    # A blind corner, on an in-memory copy of Corner Unit Test (Q2a): cabinet 2
+    # becomes a blind unit; nothing is saved.
+    load_job(page, "Corner Unit Test")
+    edit_and_wait_or_open = None
+    page.evaluate("""() => { const c = S.job.cabinets.find((x) => x.number === 2);
+      c.corner_style = 'blind'; c.blind_width = 500; c.width = 1000; c.depth = 560; c.doors = 1;
+      c.has_doors = true; c.corner_hand = 'R'; c.kind = 'base'; c.height = 790; c.drawers = [];
+      const p = S.job.placements.find((x) => x.cabinet === 2); p.x = 3000; p.z = 0;
+      schedule(); }""")
+    page.wait_for_function("() => !S.dirty || S.res", timeout=15000)
+    time.sleep(0.4)
+    open_3d(page)
+    wait_scene(page)
+    sc = scene_of(page)
+    it2 = next(it for it in sc["items"] if it["number"] == 2)
+    roles = sorted(q["role"] for q in it2["parts"])
+    check("a blind corner draws its sides, bottom, back, the flush panel and ONE door",
+          roles, ["back", "blind", "bottom", "door", "side", "side"])
+    blind = next(q for q in it2["parts"] if q["role"] == "blind")
+    door = next(q for q in it2["parts"] if q["role"] == "door")
+    # where blind_spans puts them: cabinet 2 stands on wall A at x 3000, right-handed
+    bx = sorted(x for x, _ in blind["outline"])
+    dx = sorted(x for x, _ in door["outline"])
+    check("the blind panel sits inside the carcass between the corner-end side and the opening (B 500)",
+          (round(bx[0] - 3000), round(bx[-1] - 3000)), (1000 - 16 - 500, 1000 - 16))
+    check("the door laps the far side and the panel's face, 497 wide from 1.5",
+          (round((dx[0] - 3000) * 2) / 2, round(dx[-1] - dx[0])), (1.5, 497))
+    check("both tied to their cut-list lines", (blind["line"] is not None, door["line"] is not None), (True, True))
+    info = page.evaluate("() => V3D.partInfo(%s)" % json.dumps(blind["id"]))
+    check_true("and the flush panel is drawn in 3D, in its own board's colour", info and info["visible"] and info["colour"] == sc["looks"][blind["board"]]["colour"])
+    b2 = page.evaluate("() => V3D.bounds(2)")
+    check("the blind unit's height in 3D is H on its legs", (b2["min"][2], b2["max"][2]), (100, 890))
+
+    # Test_Panels: no room — the Run's layout, cabinets only (Q3a)
+    load_job(page, "Test_Panels")
+    page.click('nav [data-tab="view3d"]')
+    page.wait_for_function("() => !S.sceneStale", timeout=20000)
+    settle(page)
+    sc = scene_of(page)
+    check("Test_Panels with no room draws the Run: its one cabinet, no panels",
+          [it["number"] for it in sc["items"] if it["placed"]], [1])
+    check("the banner says there is no room", "no room" in page.locator("#v3dview .v3dnote").text_content(), True)
+    rows = page.locator("#v3dlist .row.off").count()
+    check("the item list greys the unplaced panels as not placed", rows, 6)
+    # give it a room in memory and stand three panels on wall A, one per orientation
+    specs = page.evaluate("() => S.job.cabinets.filter((c) => c.kind === 'panel').map((c) => [c.number, c.panel.orientation])")
+    by_orient = {}
+    for n, o in specs:
+        by_orient.setdefault(o, n)
+    check("the fixture carries all three orientations", sorted(by_orient), ["end", "flat", "upright"])
+    page.evaluate("""(nums) => {
+      S.job.room = {name: 'room', ceiling: 2600, offset_depth: 600, closed: true,
+                    walls: [{id: 'A', length: 4000, offset_start: 0, offset_end: 0, openings: [], obstructions: []},
+                            {id: 'B', length: 3000, offset_start: 0, offset_end: 0, openings: [], obstructions: []},
+                            {id: 'C', length: 4000, offset_start: 0, offset_end: 0, openings: [], obstructions: []},
+                            {id: 'D', length: 3000, offset_start: 0, offset_end: 0, openings: [], obstructions: []}]};
+      S.job.placements = nums.map((n, i) => ({cabinet: n, wall: 'A', x: 200 + i * 1200, z: 100, flip: false, layer: null, y: 0}));
+      roomSig = null; placesSig = null; schedule(); }""", [by_orient["upright"], by_orient["flat"], by_orient["end"]])
+    page.wait_for_function("() => S.res && S.res.room && S.res.room.panels === 3", timeout=15000)
+    page.wait_for_function("() => !S.sceneStale && sceneTimer === null", timeout=15000)
+    settle(page)
+    sc = scene_of(page)
+    bad = []
+    for o, n in by_orient.items():
+        it = next(it for it in sc["items"] if it["number"] == n)
+        b = page.evaluate("() => V3D.bounds(%d)" % n)
+        d = it["dims"]
+        got = (round(b["max"][0] - b["min"][0]), round(b["max"][1] - b["min"][1]), round(b["max"][2] - b["min"][2]))
+        want = (d["width"], d["depth"], d["height"])
+        if got != want:
+            bad.append((o, n, got, want))
+    check("each orientation stands in 3D with room.geometry's extents (along, out, up)", bad, [])
+    check("no console errors", errors, [])
+
+    # the October fixture: no room, the Run layout, first draw
+    seq = page.evaluate("() => sceneSeq")
+    page.click("#fixture")
+    page.wait_for_function(f"() => sceneSeq > {seq} && !S.sceneStale", timeout=30000)
+    settle(page)
+    m = page.evaluate("() => V3D.memory()")
+    ms = page.evaluate("() => S.sceneMs")
+    print(f"      October: {m['groups']} cabinets, {m['pickables']} parts, scene fetched and drawn in {ms} ms")
+    check_true("October: every cabinet stands in the Run", m["groups"] == 19, f"{m['groups']}")
+    # orbit smoothly: a drag renders frames without error
+    left, top, w, hgt = viewport_origin(page)
+    page.mouse.move(left + w / 2, top + hgt / 2)
+    page.mouse.down()
+    for i in range(1, 16):
+        page.mouse.move(left + w / 2 + i * 8, top + hgt / 2 + i * 3)
+        time.sleep(0.02)
+    page.mouse.up()
+    settle(page)
+    check("October: orbiting raised no errors", errors, [])
+    ctx.close()
+    browser.close()
+
+STAGES = {"f1": stage_f1, "f3": stage_f3, "f4": stage_f4, "f5": stage_f5, "f6": stage_f6, "extras": stage_extras}
 
 with sync_playwright() as pw:
     for name, fn in STAGES.items():

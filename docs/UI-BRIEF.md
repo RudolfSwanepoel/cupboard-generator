@@ -89,6 +89,26 @@ actual heights. Exact heights are never silently adjusted — that is deliberate
 - Loading `jobs/wardrobe_oct2025.py`'s job as JSON shows 19 cabinets and the
   elevation looks like the real wardrobe.
 
+## The dock and the 3D tab (23 September 2026)
+
+The cabinet editor is ONE element, `#editor`, docked as a right-hand column on
+the Cabinets, Room and 3D tabs and moved between them — never cloned, so
+there is nothing to disagree with it. Its dock collapses to a thin strip with
+a chevron, resizes by dragging the strip, and remembers both per viewer in
+`localStorage` (wrapped, and the app works without it). With nothing selected
+it says "Select a cabinet in the drawing or the list". The selected cabinet's
+own criticals and warnings sit at its top, one line each, linking to the
+Validation tab.
+
+The **3D view** tab: a toolbar (views, Persp/Ortho, display mode, layer
+toggles shared with the plan, Fronts, Clearances, Walls, Ceiling, Labels,
+Isolate, Snapshot, ?), then a row of the collapsible item list, the viewport
+(view cube top right, part card bottom left, legend bottom right) and the
+dock, then a status line saying what is under the cursor or how the current
+gesture is going. The viewport fills the window below the tab bar and never
+makes the page scroll. Everything in it is `app/view3d.js`, loaded the first
+time the tab opens.
+
 ## Don't
 
 - Don't put dimension logic in the front end. If the UI needs a number the

@@ -32,8 +32,15 @@ python tools/check_colour.py
 python tools/check_panels.py
 python tools/check_pictures.py
 python tools/check_accept.py
+python tools/check_scene.py
 python tools/snapshot.py --compare baseline.json
 ```
+
+And, with the app running (`python run_app.py --no-window --port 8766`) and
+Playwright installed, `python tools/ui_check_3d.py` drives the 3D view with a
+real mouse in headless Chromium. It is optional — Playwright is the only
+third-party package anywhere near this app, and only that script needs it —
+and it says so and exits 0 when it is not installed.
 
 Regenerates the October 2025 wardrobe from cabinet definitions and diffs it
 against the cut list that was really sent to Plazaboard. Current state:
@@ -55,6 +62,48 @@ line, and `regen_check` says so rather than failing. Every other figure in this
 list comes out of the engine and is checked on any machine.
 
 ## Status
+
+**Part F — the 3D view, and one editor across every view (23 September 2026,
+brief `Claude outputs/3d-view-brief-2026-09-23.md`, on branch `3d-view`).**
+Built F1 to F6 in order, each committed with the benchmark unchanged
+(272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50), every `check_*.py`
+green — eighteen now, `check_scene.py` added — and `snapshot.py --compare`
+against the tree at Step 0 showing no panel, issue, summary, total or drawing
+moved. Exercised in the running app with a real mouse in headless Chromium
+(`tools/ui_check_3d.py`, six stages), not only in Python. See **The 3D view**
+below for what was built; the short form:
+
+1. **F1** three.js 0.186.0 and camera-controls 3.1.2 vendored under
+   `app/vendor/` with their licences, served by `Handler._static` off a
+   whitelist; a "3D view" tab whose module `app/view3d.js` is imported the
+   first time it is opened; offline is the acceptance.
+2. **F2** `cabinetgen/scene.py` and `/api/scene`: the scene built on the
+   server from `room.solid_parts`, plus the backing board (`room.back_part`)
+   and the chosen plinths and fillers (`room.plinth_solids`,
+   `room.filler_solids`); every part tied to its cut-list designation; hinge
+   axes off `room.door_hinges`, factored out of `swing_envelopes` unchanged.
+3. **F3** the drawing and CAD-grade navigation: orbit about the pressed
+   point, pan at its depth, zoom about the point under the cursor (this
+   module's own, exact by construction), view cube, named views, perspective
+   and orthographic, render on demand.
+4. **F4** one selection and one docked editor across Cabinets, Room and 3D;
+   the part card with Show in cut list; the item list; the context menu;
+   **a click in the plan now selects without isolating** (a change to the 21
+   September isolate ruling — see **Isolate**).
+5. **F5** fronts open on their hinge axes, clearances red where
+   `room.clashes` says so, validation badges, one layer toggle with the plan,
+   Snapshot to `output/<job>/<job>_3d_<n>.png`.
+6. **F6** moving a cabinet or panel in 3D on move handles, through the same
+   `/api/drag` and the same snaps as the plan and the elevation.
+
+**One thing the brief did not know: `room.py`'s world frame is left-handed.**
+X right, Y into the room, Z up, and a plan that maps onto SVG with no flip —
+that is a left-handed frame, and drawn as it stands in a right-handed renderer
+the room came out as its own mirror image, hinge sides included. The 3D view
+draws every solid under a root that negates Y (`toRender` / `toRoom` in
+`view3d.js` is the one place the two frames meet), so face on to wall A from
+inside the room its x runs left to right exactly as the wall elevation draws
+it. Not one number the server sends is changed. See **The 3D view**.
 
 **Line / Finish redone, faces in the plan, one set of line weights (23
 September 2026, brief of that date).** Benchmark unchanged (272 / 59 / 30, 92
@@ -250,7 +299,7 @@ construction is not decided, and every corner unit has a **hand** saying which
 end of it stands in the corner. Size is greyed on a corner unit exactly as it is
 on a panel. See **Corner units** below, and spec items 21-28.
 
-**Next: Part F (3D). It is not started.**
+**Part F (3D) is built — the Status entry at the top, and **The 3D view**.**
 
 **A standalone fix, not a lettered Part (21 September 2026): vertical snap in
 the wall elevation, and isolate in the plan.** Two things Rudolf hit while
@@ -349,6 +398,134 @@ AS IT WAS, before the picture work, produces the same diff against the same
 baseline from the same `Test.json`. Regenerate it when Test.json settles; a
 stale baseline that is known to be stale is safer than one refreshed over a
 difference nobody looked at.
+
+## The 3D view
+
+**A drawing, and nothing else** (Part F, 23 September 2026). `cabinetgen/scene.py`
+builds the scene on the server and `app/view3d.js` only draws it: it extrudes
+the outlines it is given, turns a door by the angle it is given, and picks the
+nearest snap from a list it is given. None of `engine`, `validate`,
+`export_plaza`, `nest`, `room` or `store` imports `scene`; `check_scene.py`
+fails if one ever does, and `check_colour.py` holds `scene.py` to no colour
+literal and `view3d.js` to its one `PAPER` block of paper colours. The only
+thing the browser works out for itself is the camera.
+
+### What is drawn, and what is not
+
+Every board `room.solid_parts` draws — sides, top, bottom, fronts, a blind
+corner's flush panel, a mitre's construction, independent panels — each
+`Part` taken into world plan coordinates through `room._placed_frame` and
+raised by `carcass_z`; plus the **backing board** (`room.back_part`, kept OUT
+of `solid_parts` so the Finish view does not move, positioned by
+`back_face_from_front` and sized by `back_size`, only where the engine cuts
+one — not on a mitre); plus the **plinth boards and fillers that were chosen**
+(`room.plinth_solids`, `room.filler_solids`), where the plan already draws
+them. **Not drawn, by ruling: shelves, supports, drawer boxes, legs, hardware,
+handles, worktops** — their positions are not modelled and nothing is guessed
+onto a drawing. The legend says so. A base unit therefore stands visibly on
+nothing at leg height where no plinth board was chosen; that is the truth.
+An ell, a bespoke cabinet or an entered non-rectangular outline is its
+footprint as one solid, with no fronts, as `solid_parts` rules.
+
+**The room**: the floor polygon, each wall as a single-sided plane from the
+floor to the ceiling facing into the room — so a wall between the camera and
+the room is simply not drawn, which is the "nearest wall hides" with no
+special code (Walls: auto / all / none) — openings as holes, obstructions as
+warning-colour boxes (`proud` > 0) or markers, never hidden. An unmeasured
+ceiling stops the walls `scene.DRAWING_MARGIN` (300) above the tallest item
+and the view says the ceiling is not measured. **No room**: the cabinets
+stand on the Run's own layout (`render.run_layout`, shared with
+`elevation_svg` byte for byte), panels not among them — a panel has no place
+in a line of carcasses — and a banner says there is no room.
+
+### The scene payload (`/api/scene`)
+
+Separate from `/api/compute` for the same reason `/api/plan` is: a view change
+costs a redraw, not a re-nest. Read-only with respect to the job (pinned). Per
+part: `id` (`"<number>:<role>:<n>"`, stable across calls, keyed by cabinet
+number never index), `cab`, `role`, `index`, `board`, `outline` (world plan
+mm), `z0`/`z1`, `grain` (a world unit vector, only to lay the picture),
+`line` (the cut-list designation, found by role, board and finished size —
+zero unmatched on every template cabinet in every job, pinned — or a reason:
+`footprint only — ell / bespoke`), `layer`, `hinge` (axis as two world points
+and the turn with its sign, off `room.door_hinges`, the same rule as the plan's
+arcs and the elevation's marks), `pull` (a drawer face's direction and the
+runner's length). Per cabinet a hash of its parts, so the browser rebuilds
+only cabinets that changed, and `room.geometry`'s width, height and depth for
+the dimension lines. Looks are sent once per board off `render.board_look`,
+the picture URL only on a grained board (`Fills.textured`'s rule) with
+`render.PICTURE_TILE_MM` — a drawing constant, 160, what 40 px comes to on a
+wall elevation at its usual scale; an SVG has no real-world tile size, so the
+figure had to be stated once. Overlays: the swing and pull-out envelopes the
+plan hovers with their height range and `room.clashes`' verdict, the overlaps,
+and each cabinet's issues from `validate` with the check id.
+
+### Room frame and render frame
+
+`room.py`'s world (X right, Y into the room from wall A, Z up; the plan drawn
+with no flip) is **left-handed**. Drawn as it stands in a right-handed renderer
+the room is its mirror image — facing wall A from inside the room its x ran to
+the left, and every door hung on the wrong side. So every solid lives under a
+root group that negates Y, and `toRender` / `toRoom` in `view3d.js` is the one
+place the two frames meet: points and vectors from the payload go in with Y
+negated, the camera, the raycasts and the labels work in the render frame,
+and what the checks read back (`project`, `unproject`, `bounds`, `camera`)
+is given in the room frame. The server's numbers are untouched.
+
+### Navigation
+
+Left-drag orbits about the point pressed on (raycast on the press, the orbit
+point set before camera-controls sees it, a pivot dot while orbiting; nothing
+hit keeps the current pivot). Right-, middle-, Shift+left- and Space+left-drag
+pan at that depth. The wheel, Ctrl+wheel and a trackpad pinch (a wheel with
+ctrlKey set) zoom about the point under the cursor: **this module's own**, a
+scaling of the camera about that point — exact by construction, clamped never
+to pass through it — because camera-controls' dolly-to-cursor holds the
+target's depth plane still and reads the target as the screen centre, which
+drifts on a nearer surface and breaks the moment an orbit pivot is set
+off-centre. camera-controls' `fitToBox` rounds the rotation to the nearest
+axis, so Fit projects the box's corners into the camera frame itself. Home
+looks from the side the runs face (the walls' inward normals weighted by what
+stands on them). `1`-`9` are face on to wall A, B, C… in orthographic, the 3D
+twin of the wall elevation; `P` switches projection keeping the size at the
+pivot. The view cube carries the wall letters. Render on demand: a loop runs
+only while something moves and stops itself — started by the input, never by
+camera-controls' `wake`, which is only raised from inside `update()`. Camera
+per job per session, never saved; a newly loaded job opens at Home.
+
+### One selection, one editor
+
+`S.sel` is the one selection. `selectCabinet(i, {isolate})` splits selecting
+from isolating: the cabinet table, Add, Duplicate and the 3D item list isolate
+(how a buried item is reached); a click in the plan, a press in the elevation
+and a click in 3D select **without** isolating, and isolate follows the
+selection while on. The single `#editor` is **moved** into whichever tab's
+dock is showing — Cabinets, a new column beside the plan on Room, and 3D —
+never cloned; its listeners are delegated on the element and travel with it.
+The dock collapses to a strip, resizes by dragging the strip, and remembers
+both per viewer in `localStorage` behind `try/catch`. The selected cabinet's
+own issues sit at the top of the dock, each a link to the Validation tab.
+The part card shows a clicked part's cut-list line read from the compute
+reply by the `line` the scene gave, with **Show in cut list** landing on that
+row; a part with no line says why. Layers in 3D are the plan's `S.layers`;
+the 3D Isolate toggle is the plan's isolate. Snapshot saves the view as a PNG
+through `/api/snapshot` into `output/<job>/<job>_3d_<n>.png`, never
+overwriting; the export folder is otherwise untouched.
+
+### Moving things in 3D (F6)
+
+A selected, placed item shows an arrow along its wall, an arrow up, and for a
+panel an arrow out from the wall. Dragging an arrow moves it on that axis
+only; a left-drag on the part itself still orbits. The press makes one
+`/api/drag` call, listening before it awaits and replaying the last move and a
+release once the model lands — the exact shape of `moveDrag` / `finishDrag`.
+The pointer is projected onto the axis (the point on the axis nearest the
+cursor's ray, camera maths), the grab offset held by construction, and the
+nearest candidate within `Standard.snap_tolerance` taken, ties to the nearest
+neighbour along the wall; z candidates are filtered by the stretch they apply
+over, and an underside at or below leg height is "on the floor". The drop
+writes `Placement.x`, `.z` (and `.y` for a panel) and nothing else; Esc
+restores. No moving onto another wall in 3D, no rotating.
 
 ## Drawings
 
@@ -533,12 +710,17 @@ cabinetgen/drawers.py      drawer stacks: equal, graduated, pinned or exact
 cabinetgen/validate.py     criticals block export, warnings do not
 cabinetgen/nest.py         guillotine nesting + sheet layout SVGs
 cabinetgen/render.py       SVG drawings: side-by-side elevation, plan, per-wall elevations
+cabinetgen/scene.py        the 3D scene, built here from room.solid_parts and only DRAWN
+                           in the browser. Nothing reads it back.
 cabinetgen/room.py         walls, corners, to_world. The only trigonometry.
 cabinetgen/store.py        job files: JSON save / load
 cabinetgen/export_plaza.py Plazaboard CSV + costing off the real rate card
 run_app.py                 starts the local server, opens the window
 app/api.py                 request handlers. Thin — they call cabinetgen.
 app/index.html             the whole UI. Vanilla JS, no build step.
+app/view3d.js              the 3D view: a module loaded the first time its tab opens
+app/vendor/three/          three.js 0.186.0 — three.module.js, three.core.js, LICENSE
+app/vendor/camera-controls/  camera-controls 3.1.2 — camera-controls.module.js, LICENSE
 jobs/                      job definitions. wardrobe_oct2025.py is the fixture.
                            Test_Panels.json is the cut-only panel fixture;
                            Test.json's cabinet 8 is the PLACED one.
@@ -558,6 +740,9 @@ tools/check_colour.py      board colour in the drawings, and the ink that reads 
 tools/check_panels.py      independent panels: the line they cut, and what they stay out of
 tools/check_pictures.py    board pictures: stored, served, drawn, grain-checked
 tools/check_accept.py      accepting a site-dependent critical, and the acceptance lapsing
+tools/check_scene.py       the 3D scene: ids, parts vs geometry, to_world, carcass_z, hinge
+                           sides, cut-list lines, Run order, read-only, no reader of it
+tools/ui_check_3d.py       the 3D view in the running app, with a real mouse (Playwright)
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
@@ -1498,13 +1683,18 @@ added cabinet is exactly that case: it is selected, and so isolated, before it
 has been given a wall.
 
 **Where it is set.** `S.isolate` in the browser, one number or null, sent to
-`/api/plan` and decided nowhere else. `selectCabinet(i)` is the single place it
-moves, and every selection goes through it — the cabinet table, Duplicate, Add
-cabinet (which is all P3 needs: a new cabinet is selected on creation, so it is
-isolated on creation) and a press in the wall elevation. Never a click in the
-plan. It ends on a click on empty plan canvas, on the `isolating N ×` pill
-beside the layer toggles, or by selecting something else, which isolates that
-instead. Loading or starting a job clears it.
+`/api/plan` and decided nowhere else. `selectCabinet(i, {isolate})` is the
+single place it moves. **Changed on 23 September 2026 (Part F):** a selection
+from the cabinet table, Duplicate, Add cabinet (a new cabinet is selected on
+creation, so it is isolated on creation) and the 3D item list still isolates;
+a click in the plan — which now selects, where before it did nothing — a
+press in the wall elevation and a click in 3D select **without** isolating,
+because an isolated view takes pointer events away from everything else and
+clicking to select would leave nothing else clickable. While isolate is on it
+follows the selection. It ends on a click on empty plan canvas, on the
+`isolating N ×` pill beside the layer toggles, on the 3D Isolate toggle, or by
+a list selection of something else, which isolates that instead. Loading or
+starting a job clears it. The 3D view mirrors it and decides nothing.
 
 ## Corner units
 
