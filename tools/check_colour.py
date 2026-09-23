@@ -96,6 +96,21 @@ def main():
     stray = sorted({h for h in re.findall(r'"#[0-9a-fA-F]{3,6}"', src)
                     if h.strip('"') not in paper})
     check("no hex literal in render.py but the paper colours", stray, [])
+    # The 3D view (Part F): scene.py states no colour at all — every look comes
+    # off board_look — and view3d.js keeps its own paper colours (background,
+    # grid, edges, the selection, the warning colour for an obstruction) in
+    # the one PAPER block at the top, with no literal anywhere else in it.
+    scene_src = open(os.path.join(ROOT, "cabinetgen", "scene.py"), encoding="utf-8-sig").read()
+    check("no hex literal at all in scene.py",
+          re.findall(r'"#[0-9a-fA-F]{3,6}"|0x[0-9a-fA-F]{6}\b', scene_src), [])
+    js = open(os.path.join(ROOT, "app", "view3d.js"), encoding="utf-8-sig").read()
+    block = re.search(r"const PAPER = \{.*?\n\};", js, re.S)
+    check("view3d.js has its PAPER block", block is not None, True)
+    outside = js[:block.start()] + js[block.end():] if block else js
+    check("no colour literal in view3d.js outside PAPER",
+          re.findall(r'"#[0-9a-fA-F]{3,6}"|\'#[0-9a-fA-F]{3,6}\'|0x[0-9a-fA-F]{6}\b', outside), [])
+    check("and no board is named in PAPER",
+          [w for w in ("MEL", "BROOKHILL", "GREY", "BACK", "DECOR") if block and w in block.group(0)], [])
     check("the fill comes back on the record's colour",
           R.board_look(MATS, "WOOD")["colour"], "#d2b36a")
     check("a board nobody coloured is neutral, and says so",

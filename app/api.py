@@ -3,6 +3,8 @@
 Nothing here decides a dimension. Every number in a response came out of the
 engine; this module only moves it from a dataclass into a dict.
 """
+import base64
+import binascii
 import glob
 import json
 import os
@@ -31,6 +33,7 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
                               material_record, material_thickness, tape_for)
 from cabinetgen.render import (elevation_svg, pictures_drawn, plan_svg,
                                wall_elevation_svg)
+from cabinetgen import scene as SCENE
 from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth,
                              arm_shelf_length, arm_shelf_max_depth,
                              blind_door_width, blind_opening,
@@ -1574,6 +1577,40 @@ def drag(payload):
     }
 
 
+def snapshot(payload):
+    """Save the 3D view the browser drew, as a PNG, into output/<job>/ under a
+    name that never overwrites: <job>_3d_<n>.png. The bytes are the browser's;
+    this only writes what it is sent, under `_safe_name`."""
+    name = _safe_name(payload.get("name"))
+    data = str(payload.get("png") or "")
+    head, _sep, b64 = data.partition(",")
+    if not head.startswith("data:image/png") or not b64:
+        return {"ok": False, "error": "no PNG to save"}
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        return {"ok": False, "error": f"bad PNG data: {exc}"}
+    if not raw.startswith(b"\x89PNG"):
+        return {"ok": False, "error": "not a PNG"}
+    outdir = os.path.join(OUT_DIR, name)
+    os.makedirs(outdir, exist_ok=True)
+    n = 1
+    while os.path.exists(os.path.join(outdir, f"{name}_3d_{n}.png")):
+        n += 1
+    path = os.path.join(outdir, f"{name}_3d_{n}.png")
+    with open(path, "wb") as fh:
+        fh.write(raw)
+    return {"ok": True, "file": os.path.relpath(path, ROOT).replace("\\", "/")}
+
+
+def scene(payload):
+    """The 3D scene: every placed cabinet and panel as world-space solids, the
+    room shell, the boards' looks, and the overlays. Separate from /api/compute
+    for the same reason /api/plan is — a view change costs a redraw, not a
+    re-nest — and read-only with respect to the job (pinned in check_scene)."""
+    return SCENE.build(_job(payload))
+
+
 def room_extend(payload):
     """Add a wall at either end of the room's wall sequence — how a straight run
     becomes an L or a U. The length is a starting figure to be measured, like the
@@ -1591,6 +1628,16 @@ def room_new(payload):
         int(payload.get("width") or 3000),
         name=str(payload.get("name") or "room")))}
 
+
+# What the page may fetch as a FILE (F1, 23 September 2026): the 3D module,
+# loaded only when the 3D tab is first opened, and the vendored libraries under
+# app/vendor/ — three.js and camera-controls, each with its LICENSE. Nothing
+# else in the repo is reachable this way; `Handler._static` refuses it.
+STATIC_FILES = {"/app/view3d.js": ("app", "view3d.js")}
+VENDOR_ROUTE = "/vendor/"
+VENDOR_DIR = os.path.join(ROOT, "app", "vendor")
+STATIC_TYPES = {".js": "text/javascript; charset=utf-8",
+                "": "text/plain; charset=utf-8"}        # a LICENSE, no extension
 
 ROUTES = {
     "/api/defaults": defaults,
@@ -1621,6 +1668,8 @@ ROUTES = {
     "/api/plan": plan,
     "/api/drag": drag,
     "/api/elevation": elevation,
+    "/api/scene": scene,
+    "/api/snapshot": snapshot,
     "/api/room-extend": room_extend,
 }
 
@@ -1658,7 +1707,42 @@ class Handler(BaseHTTPRequestHandler):
             return self._dispatch(path, {})
         if path.startswith("/pictures/"):
             return self._picture(path[len("/pictures/"):])
+        if path in STATIC_FILES or path.startswith(VENDOR_ROUTE):
+            return self._static(path)
         self._send(404, "not found", "text/plain")
+
+    def _static(self, path):
+        """Serve the 3D module and the vendored libraries, and nothing else.
+
+        Built the way `_picture` is (F1, 23 September 2026): a whitelist of
+        named files, plus `/vendor/<file>` resolved inside `app/vendor/` and
+        refused anywhere else, with the content type decided by the extension
+        — JavaScript, or plain text for a LICENSE — and the same no-store cache
+        header as every other reply. Everything the page loads comes off this
+        server, so the app works with the network off.
+        """
+        if path in STATIC_FILES:
+            full = os.path.join(ROOT, *STATIC_FILES[path])
+        else:
+            parts = [unquote(p) for p in path[len(VENDOR_ROUTE):].split("/")]
+            if not parts or any(p in ("", ".", "..") or ":" in p or "\\" in p for p in parts):
+                return self._send(404, "not found", "text/plain")
+            full = os.path.join(VENDOR_DIR, *parts)
+            inside = os.path.normcase(os.path.abspath(full)).startswith(
+                os.path.normcase(os.path.abspath(VENDOR_DIR)) + os.sep)
+            if not inside:
+                return self._send(404, "not found", "text/plain")
+        name = os.path.basename(full)
+        ext = os.path.splitext(name)[1].lower()
+        ctype = STATIC_TYPES.get(ext) if ext else (STATIC_TYPES[""] if name == "LICENSE" else None)
+        if ctype is None:
+            return self._send(404, "not found", "text/plain")
+        try:
+            with open(full, "rb") as fh:
+                body = fh.read()
+        except OSError:
+            return self._send(404, "not found", "text/plain")
+        self._send(200, body, ctype)
 
     def _picture(self, raw):
         """Serve one board picture out of `Pictures/`, and nothing else.

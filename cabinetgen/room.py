@@ -10,6 +10,10 @@ World axes: X to the right, Y into the room from wall A, Z up. Plan views map
 world (X, Y) straight onto SVG (x, y) with no flip, which is why Y runs the way
 it does.
 
+That frame is LEFT-handed (X right, Y into the room, Z up). The 3D view
+negates Y when it draws, in `app/view3d.js` (`toRender` / `toRoom`), so the
+room is not mirrored on screen; nothing here changes for it.
+
 Everything downstream — plan view, elevations, 3D, DXF, the SolidWorks table —
 calls `to_world`. Nothing else does its own trig. That is the whole point of
 this module: one place to be wrong, and one place to fix.
@@ -1137,6 +1141,55 @@ def _to_plan(frame, q) -> Point:
     return ox + dx * q[0] + nx * q[1], oy + dy * q[0] + ny * q[1]
 
 
+def _from_plan(frame, q) -> Point:
+    """The inverse of `_to_plan`: world plan -> the cabinet's own frame."""
+    (ox, oy), (dx, dy), (nx, ny) = frame
+    u, v = q[0] - ox, q[1] - oy
+    return u * dx + v * dy, u * nx + v * ny
+
+
+def back_part(cab, std: Standard = STANDARD, materials: dict = None) -> Optional[Part]:
+    """The backing board as a solid in the cabinet's frame — for the 3D view.
+
+    Kept OUT of `solid_parts` on purpose (23 September 2026): `return_faces`
+    reads that list for the Finish elevation, and a board inside the carcass
+    would change that drawing. The scene asks here as well.
+
+    Only where the engine actually cuts one: a straight template cabinet — a
+    blind corner included, it is a straight box — whose `back` is not 'none'.
+    A mitre's back is its two wall panels, already in `solid_parts`; an ell, a
+    bespoke cabinet and a panel cut no backing board through the engine's
+    template path, so none is drawn for them.
+
+    Positioned by `Standard.back_face_from_front` and sized by
+    `Standard.back_size`, exactly as the engine sizes it: the board's front face
+    is `back_face_from_front` in from the carcass front, so it lies between
+    `back_cavity` and `back_cavity + back_t` off the wall. Grooved into the sides
+    it starts `board_t - groove_engage` in from each edge — the same figure the
+    `W - 20` is made of — and runs `H - 20` between top and bottom on a four-way
+    back, or from the floor of the carcass to the top groove on a three-way one.
+    """
+    if cab.is_panel or cab.template == "none" or cab.corner_kind in ("mitre", "ell"):
+        return None
+    if cab.back == "none":
+        return None
+    mats = MATERIALS if materials is None else materials
+    parts = solid_parts(cab, std, mats)
+    if not parts or any(q.role == "carcass" for q in parts):
+        return None                      # footprint only: nothing is inside it
+    g = geometry(cab, std, mats)
+    xs = [x for x, _ in g.footprint]
+    W, H, t = max(xs) - min(xs), g.height, std.board_t
+    bw, bh = std.back_size(W, H, cab.back)
+    inset = t - std.groove_engage
+    y0 = std.back_cavity
+    y1 = y0 + std.back_t
+    z0 = inset if cab.back == "four" else 0
+    board = cab.back_board
+    return _box("back", board, inset, inset + bw, y0, y1, z0, z0 + bh,
+                "z" if bh >= bw else "x")
+
+
 def front_outlines(job, cab, p, std: Standard = STANDARD) -> List[Tuple[Part, List[Point]]]:
     """A cabinet's fronts in world plan coordinates, bottom first, for the plan.
 
@@ -1737,6 +1790,49 @@ def _corner_door_hinges(cab, g: CabinetGeometry, p):
     return [(*hinge, w)]
 
 
+def door_hinges(cab, g: CabinetGeometry, p):
+    """Where each door leaf hangs, in the cabinet's own frame.
+
+    One entry per leaf, in leaf order: `((x, y), closed angle, turn, width)` —
+    the hinge point on the outline's front edge, the direction the closed leaf
+    lies in from it, the sign of the turn that sweeps it into the room, and
+    the leaf's cut width. Factored out of `swing_envelopes` for the 3D view (23
+    September 2026), so the plan's arcs and a 3D door's hinge axis are the one
+    answer; the envelopes are unchanged by it.
+
+    Which edge each leaf hangs from is `model.hinge_side` — the per-leaf choice
+    on the cabinet, or the old rule when none is set: a pair at its outer edges
+    opening from the middle, a single door left unless the placement is
+    flipped. A corner unit hinges off its real front face instead — see
+    `_corner_door_hinges`.
+    """
+    if not g.door_widths:
+        return []
+    if g.source == "corner":
+        return _corner_door_hinges(cab, g, p)
+    xs = [x for x, _ in g.footprint]
+    left, right = min(xs), max(xs)
+    n = len(g.door_widths)
+
+    def front_at(x):    # the outline's front edge at that end, where a hinge sits
+        at = [y for px, y in g.footprint if px == x]
+        return max(at) if at else max(y for _, y in g.footprint)
+
+    # Each leaf hangs off its own end, not the carcass's: leaf i covers its
+    # share of the opening, and hinges left or right within that share. With
+    # no per-leaf choice set this is exactly what it always was — a single
+    # door on the carcass edge, a pair on the two outer edges.
+    hinge_specs = []
+    for i, w in enumerate(g.door_widths):
+        a = left + (right - left) * i / n
+        b = left + (right - left) * (i + 1) / n
+        if hinge_side(cab, i, n, p.flip) == "R":
+            hinge_specs.append(((b, front_at(b)), math.pi, -1, w))
+        else:
+            hinge_specs.append(((a, front_at(a)), 0.0, +1, w))
+    return hinge_specs
+
+
 def swing_envelopes(job, cab, p, std: Standard = STANDARD):
     """The quarter discs a cabinet's doors sweep, in world plan coordinates.
 
@@ -1754,30 +1850,7 @@ def swing_envelopes(job, cab, p, std: Standard = STANDARD):
         return []
     rm = job.room
     span = math.radians(std.door_open_deg)
-
-    if g.source == "corner":
-        hinge_specs = _corner_door_hinges(cab, g, p)
-    else:
-        xs = [x for x, _ in g.footprint]
-        left, right = min(xs), max(xs)
-        n = len(g.door_widths)
-
-        def front_at(x):    # the outline's front edge at that end, where a hinge sits
-            at = [y for px, y in g.footprint if px == x]
-            return max(at) if at else max(y for _, y in g.footprint)
-
-        # Each leaf hangs off its own end, not the carcass's: leaf i covers its
-        # share of the opening, and hinges left or right within that share. With
-        # no per-leaf choice set this is exactly what it always was — a single
-        # door on the carcass edge, a pair on the two outer edges.
-        hinge_specs = []
-        for i, w in enumerate(g.door_widths):
-            a = left + (right - left) * i / n
-            b = left + (right - left) * (i + 1) / n
-            if hinge_side(cab, i, n, p.flip) == "R":
-                hinge_specs.append(((b, front_at(b)), math.pi, -1, w))
-            else:
-                hinge_specs.append(((a, front_at(a)), 0.0, +1, w))
+    hinge_specs = door_hinges(cab, g, p)
 
     out = []
     for (hx, hy), a0, sign, w in hinge_specs:
@@ -2100,6 +2173,74 @@ def plinth_lengths(job, run: Run, std: Standard = STANDARD) -> List[Tuple[int, i
         out.append((cut - at, at))
         at = cut
     out.append((run.x1 - at, at))
+    return out
+
+
+def plinth_solids(job, std: Standard = STANDARD) -> List[dict]:
+    """The plinth boards that were CHOSEN, as solids in world plan coordinates —
+    for the 3D view (23 September 2026).
+
+    One per board `plinth_lengths` cuts, so a long run's joint is where the cut
+    list says it is. It stands where the plan draws its face: `plinth_setback`
+    behind the run's carcass front (`run.depth`, off `geometry`), one board
+    thick behind that line, from the floor to `leg_height` — which is the
+    board's own width, since it covers the legs. Board and edging are the lead
+    cabinet's carcass, as `engine.plinth_panels` cuts it. A run with no
+    `PlinthChoice`, or one hung off the floor, has nothing here.
+    """
+    rm = job.room
+    if rm is None:
+        return []
+    by_number = {c.number: c for c in job.cabinets}
+    out = []
+    for run in runs(job, std):
+        if run.z != 0:
+            continue
+        choice = plinth_choice_for(job, run)
+        if choice is None or not choice.fitted:
+            continue
+        lead = by_number[run.first]
+        face = max(run.depth - std.plinth_setback, 0)
+        back = max(face - std.board_t, 0)
+        pieces = plinth_lengths(job, run, std)
+        for i, (length, at) in enumerate(pieces):
+            local = [(at, back), (at + length, back), (at + length, face), (at, face)]
+            out.append({"wall": run.wall, "layer": run.layer, "first": run.first,
+                        "cabinets": list(run.cabinets), "piece": i, "pieces": len(pieces),
+                        "board": lead.carcass_board, "length": length,
+                        "outline": [to_world(rm, run.wall, x, y)[:2] for x, y in local],
+                        "z0": 0, "z1": std.leg_height})
+    return out
+
+
+def filler_solids(job, std: Standard = STANDARD) -> List[dict]:
+    """The fillers that were CHOSEN, as solids in world plan coordinates — for
+    the 3D view (23 September 2026).
+
+    A filler stands in the gap it fills: `gap_outline`, the run's depth, from
+    the underside of the cabinet that bounds it (`carcass_z`, so a base run's
+    filler stands on the legs' height like the carcasses beside it) up the
+    gap's height. It is drawn at the gap, not at the oversize it is cut to —
+    the scribe allowance is trimmed on site and the drawing shows the room.
+    """
+    rm = job.room
+    if rm is None:
+        return []
+    by_number = {c.number: c for c in job.cabinets}
+    out = []
+    for g in gaps(job, std):
+        if g.treatment != "filler":
+            continue
+        n = g.after if g.after is not None else g.before
+        cab = by_number.get(n)
+        p = placement_for(job, n) if cab is not None else None
+        if cab is None or p is None:
+            continue
+        z0 = carcass_z(cab, p, std)
+        out.append({"wall": g.wall, "layer": g.layer, "after": g.after,
+                    "before": g.before, "board": g.board, "height": g.height,
+                    "width": g.filler_width(std),
+                    "outline": gap_outline(rm, g), "z0": z0, "z1": z0 + g.height})
     return out
 
 

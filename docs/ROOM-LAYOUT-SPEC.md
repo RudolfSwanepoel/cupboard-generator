@@ -283,23 +283,49 @@ to today's side-by-side drawing unchanged.
 This is where the existing "no dimension lines, no hardware positions" gap gets
 closed, because now there is a datum to dimension from.
 
-## 3D view
+## 3D view — Part F, built 23 September 2026
 
-three.js, **vendored into `app/vendor/`** — not a CDN. The app runs locally and
-must work offline. Modern three.js is ESM only; load it with an import map
-pointing at the local files, which needs no build step and works in both the
-browser and the pywebview window.
+three.js 0.186.0 and camera-controls 3.1.2, **vendored under `app/vendor/`**
+with their licences and served by the app itself — no CDN; the tab opens with
+the network off. An import map in `index.html` points at the local files; the
+3D code is its own module, `app/view3d.js`, imported the first time the tab is
+opened, so start-up is untouched.
 
-Render the actual panels, not solid boxes. The panel data already exists, so a
-real-panel model doubles as an assembly check and costs almost nothing extra.
+**The scene is built on the server and only drawn in the browser.**
+`cabinetgen/scene.py` composes what `room.py` already answers —
+`solid_parts`, the placement frame, `carcass_z`, `door_hinges`, the envelopes,
+the chosen plinths and fillers — into world-space solids with their cut-list
+designations, and `/api/scene` hands it over. The panels drawn are the real
+ones: sides, top, bottom, fronts, the backing board, a blind corner's flush
+panel, a mitre's construction, independent panels, plus the chosen plinth
+boards and fillers. **Not drawn, by ruling:** shelves, supports, drawer boxes,
+legs, hardware, handles, worktops — their positions are not modelled and
+nothing is guessed onto a drawing; the legend says so.
 
-- Room shell: floor and walls; the wall nearest the camera auto-hides.
-- Doors and drawer faces as separate surfaces, with an open / closed toggle so
-  clearances can be seen.
-- Orbit, pan, zoom. Click a panel to show its label, size and cut-list line.
+- Room shell: floor and single-sided walls facing into the room, so the wall
+  between the camera and the room is not drawn; openings as holes;
+  obstructions never hidden.
+- Doors turn about their hinge axes by the angle the server sends, drawer
+  faces slide out by the runner's length; Clearances shows the swing and
+  pull-out envelopes, red where `room.clashes` reports a clash.
+- Orbit about the pressed point, pan at its depth, zoom about the point under
+  the cursor; a view cube, named views, `1`-`9` face on to a wall in
+  orthographic.
+- **Click a part to see its label, size and cut-list line** — the part card,
+  with Show in cut list landing on that row. This is the point that matters
+  most for bespoke work: a panel cannot be admired in 3D and wrong on the list.
+- One editor across Cabinets, Room and 3D (the same `#editor`, docked and
+  moved, never copied); a click in any drawing selects without isolating.
+- A selected item is moved on handles along its wall, up, and (a panel) out
+  from the wall, through the same `/api/drag` and snaps as the plan.
 
-That last point is the one that matters most for bespoke work: it ties the
-picture to the order, so a panel cannot be admired in 3D and wrong on the list.
+**One correction to the frame as this spec had it.** World X right, Y into the
+room, Z up, with the plan mapping onto SVG with no flip, is a left-handed
+frame. A right-handed renderer draws it mirrored, hinge sides included, so the
+3D view draws everything under a root that negates Y (`toRender` / `toRoom`
+in `view3d.js`). `room.py` is unchanged; the plan and the elevations are
+unchanged; only the 3D view's mapping onto the screen is the mirror the
+drawings always implied.
 
 ## Independent panels — Part D, built 20 September 2026
 
@@ -429,7 +455,8 @@ Each phase ends with `regen_check.py` and `check_examples.py` clean.
    what ships, and the plan's panel footprints take no pointer events so they
    cannot swallow a cabinet drag), and `PanelSpec.anchor`, which still nothing
    reads.
-6. **3D.**
+6. **3D.** — **done** (Part F, 23 September 2026): see **3D view** above and
+   CLAUDE.md → **The 3D view**.
 7. **CAD export** riding on the same coordinates — DXF plus the SolidWorks
    parameter table already on the not-built-yet list.
 

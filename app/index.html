@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CupboardApp</title>
+<!-- The 3D view's libraries, vendored under app/vendor/ and served by the app
+     itself, so the 3D tab works with the network off. three.js 0.186.0
+     (three.module.js imports ./three.core.js beside it) and camera-controls
+     3.1.2. The map has to be here, before any module is imported. -->
+<script type="importmap">
+{"imports": {"three": "/vendor/three/three.module.js",
+             "camera-controls": "/vendor/camera-controls/camera-controls.module.js"}}
+</script>
 <style>
   :root{
     /* the elevation and nest SVGs already use these — the page matches them */
@@ -85,8 +93,120 @@
   #elevation svg .epanel{cursor:grab}
   #elevation svg .epanel:hover .epan{stroke-width:2.6}
   #cablist{flex:1;min-width:0}
+
+  /* The 3D tab: toolbar over a three-column row — item list, viewport, dock —
+     over a status line. The row takes whatever height the tab has, and the
+     viewport takes whatever width the two side columns leave. */
+  #v3d{display:flex;flex-direction:column;gap:8px;min-height:240px}
+  #v3dbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:24px}
+  #v3dbar button{padding:2px 9px;font-size:11px}
+  #v3dbar button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  #v3dmain{display:flex;gap:8px;flex:1;min-height:0}
+  #v3dview{flex:1;min-width:0;position:relative;background:#eef0ec;
+           border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  #v3dview canvas{display:block;width:100%;height:100%;outline:none;touch-action:none}
+  #v3dview .v3dnote{position:absolute;left:0;right:0;top:0;padding:8px 12px;
+                    font-size:12px;color:var(--muted);background:rgba(255,255,255,.85);
+                    pointer-events:none}
+  #v3dstatus{font-size:11.5px;color:var(--muted);min-height:16px;white-space:nowrap;
+             overflow:hidden;text-overflow:ellipsis}
+  /* overlays inside the viewport: labels, dimension figures, the view cube,
+     the legend, the help card; and the toolbar's dropdowns */
+  #v3dview .v3dlabel{position:absolute;padding:1px 6px;border-radius:9px;
+                     background:rgba(255,255,255,.92);border:1px solid var(--rule);
+                     font-size:11px;font-weight:600;cursor:pointer;user-select:none;
+                     line-height:14px}
+  #v3dview .v3dlabel.sel{background:#1f6fd0;color:#fff;border-color:#1f6fd0}
+  #v3dview .v3dbadge{position:absolute;width:16px;height:16px;line-height:14px;text-align:center;
+                     border-radius:8px;font-size:10px;font-weight:700;cursor:pointer;
+                     border:1px solid transparent;color:#fff}
+  #v3dview .v3dbadge.critical{background:var(--crit)}
+  #v3dview .v3dbadge.warning{background:var(--warn)}
+  #v3dview .v3dbadge.accepted{background:var(--rule)}
+  #v3dview .v3ddim{position:absolute;transform:translate(-50%,-50%);font-size:11px;
+                   color:#1f6fd0;background:rgba(255,255,255,.88);padding:0 4px;
+                   border-radius:3px;pointer-events:none;white-space:nowrap}
+  #v3dview .v3dcube{position:absolute;right:10px;top:10px;cursor:pointer;touch-action:none}
+  #v3dview .v3dlegend{position:absolute;right:10px;bottom:10px;max-width:280px;
+                      background:rgba(255,255,255,.93);border:1px solid var(--line);
+                      border-radius:5px;padding:6px 9px;font-size:11px}
+  .v3dlegend .hd{font-weight:600;display:flex;justify-content:space-between;gap:8px;
+                 align-items:center}
+  .v3dlegend .hd .tog{padding:0 6px;font-size:11px;line-height:14px}
+  .v3dlegend.closed .rows,.v3dlegend.closed .nd{display:none}
+  .v3dlegend .row{display:flex;gap:6px;align-items:center;margin-top:3px}
+  .v3dlegend .sw{width:22px;height:14px;border:1px solid var(--rule);border-radius:2px;
+                 display:inline-block;flex:none}
+  .v3dlegend .nd{margin-top:5px;color:var(--muted)}
+  #v3dview .v3dhelp{position:absolute;left:10px;top:10px;max-width:540px;
+                    background:rgba(255,255,255,.96);border:1px solid var(--line);
+                    border-radius:5px;padding:8px 10px;font-size:11.5px;line-height:1.5}
+  #v3dbar{position:relative}
+  #v3dbar .v3dmenu{position:absolute;top:26px;z-index:20;background:var(--panel);
+                   border:1px solid var(--line);border-radius:5px;padding:3px;
+                   display:flex;flex-direction:column;min-width:190px;
+                   box-shadow:0 4px 14px rgba(0,0,0,.12)}
+  #v3dbar .v3dmenu[hidden]{display:none}
+  #v3dbar .v3dmenu button{text-align:left;border:none;background:none;padding:4px 8px;
+                          font-size:11.5px}
+  #v3dbar .v3dmenu button:hover{background:var(--carc)}
+  #v3dbar .v3dmenu button.on{font-weight:700}
+  #v3dbar .sep{width:1px;height:18px;background:var(--line);margin:0 3px}
   #editor{width:560px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
           overflow:auto}
+  /* The docked editor (F4): a thin strip with a chevron on its left, the
+     editor beside it; closed, only the strip. On the 3D tab it fills the
+     tab's height instead of sticking to the page. */
+  .dock{display:flex;flex:none;align-items:flex-start;gap:0}
+  .dockstrip{width:16px;flex:none;align-self:stretch;display:flex;align-items:flex-start;
+             justify-content:center;padding-top:6px}
+  .dockstrip .docktog{padding:0 2px;font-size:10px;line-height:16px;border:none;
+                      background:none;color:var(--muted);cursor:pointer}
+  .dock.closed #editor{display:none}
+  .dock.closed .docktog{transform:rotate(180deg)}
+  #roomwrap{display:flex;gap:14px;align-items:flex-start}
+  #v3ddock{align-self:stretch;min-height:0}
+  #v3ddock #editor{position:static;max-height:100%;height:100%;margin-top:0}
+  #roomdock #editor{margin-top:0}
+  #editor .dockissues{padding:6px 12px 0;font-size:11.5px}
+  #editor .dockissues div{margin:2px 0;cursor:pointer}
+  #editor .dockissues .critical{color:var(--crit)}
+  #editor .dockissues .warning{color:var(--warn)}
+  #editor .dockissues .accepted{color:var(--muted)}
+  #plan .cab.sel{stroke:#1f6fd0 !important;stroke-width:2 !important}
+  #elevation .ecabg.sel .ecab,#elevation .ecabg.sel .epan{stroke:#1f6fd0 !important;stroke-width:2.5 !important}
+  #cutlist tr.flash td{background:#dbe7f7}
+  /* the 3D tab's item list and part card */
+  #v3dlist{width:190px;flex:none;font-size:11.5px;display:flex;flex-direction:column;
+           min-height:0;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+  #v3dlist.closed{width:22px}
+  #v3dlist .hd{display:flex;justify-content:space-between;align-items:center;padding:5px 8px;
+               border-bottom:1px solid var(--line);font-size:10.5px;text-transform:uppercase;
+               letter-spacing:.05em;color:var(--muted)}
+  #v3dlist.closed .hd span,#v3dlist.closed .rows{display:none}
+  #v3dlist .hd button{padding:0 4px;border:none;background:none;font-size:11px}
+  #v3dlist .rows{overflow:auto;flex:1}
+  #v3dlist .row{display:flex;gap:6px;align-items:center;padding:3px 8px;cursor:pointer;
+                border-bottom:1px solid var(--line)}
+  #v3dlist .row:hover{background:var(--carc)}
+  #v3dlist .row.sel{background:var(--door)}
+  #v3dlist .row.off{color:var(--muted)}
+  #v3dlist .row .n{width:22px;font-weight:600;text-align:right}
+  #v3dlist .row .d{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #v3dlist .row .eye{padding:0 4px;border:none;background:none;font-size:12px;opacity:.7}
+  #v3dlist .row.hidden3d .eye{opacity:.25}
+  #v3dview .v3dcard{position:absolute;left:10px;bottom:10px;max-width:min(340px,calc(100% - 310px));
+                    background:rgba(255,255,255,.95);border:1px solid var(--line);
+                    border-radius:5px;padding:7px 10px;font-size:11.5px;line-height:1.45}
+  #v3dview .v3dcard b{font-size:12px}
+  #v3dview .v3dcard .x{float:right;padding:0 5px;border:none;background:none}
+  #v3dview .v3dcard button.go{margin-top:4px;padding:2px 8px;font-size:11px}
+  #v3dview .v3dctx{position:absolute;z-index:30;background:var(--panel);border:1px solid var(--line);
+                   border-radius:5px;padding:3px;display:flex;flex-direction:column;min-width:170px;
+                   box-shadow:0 4px 14px rgba(0,0,0,.12)}
+  #v3dview .v3dctx button{text-align:left;border:none;background:none;padding:4px 8px;font-size:11.5px}
+  #v3dview .v3dctx button:hover{background:var(--carc)}
+  #v3dview .v3dctx[hidden]{display:none}
   #cablist tr.sel td{background:var(--door)}
   #cablist tbody tr{cursor:pointer}
   #cablist tbody tr:hover td{background:var(--carc)}
@@ -292,6 +412,7 @@
   <button data-tab="cabinets" class="on">Cabinets</button>
   <button data-tab="boards">Boards</button>
   <button data-tab="room">Room</button>
+  <button data-tab="view3d">3D view</button>
   <button data-tab="cutlist">Cut list</button>
   <button data-tab="nesting">Nesting</button>
   <button data-tab="validation">Validation</button>
@@ -313,7 +434,11 @@
           <div class="scroll" id="cabtable"></div>
         </div>
       </div>
-      <div class="card" id="editor"></div>
+      <!-- The ONE editor. It is moved, never copied, into whichever tab's dock
+           is showing (Cabinets, Room, 3D), so there is one thing that can be
+           edited and nothing that can disagree with it. -->
+      <div class="dock" id="cabdock"><div class="dockstrip"><button class="docktog" title="collapse the editor">&#x276F;</button></div>
+        <div class="card" id="editor"></div></div>
     </div>
   </section>
 
@@ -322,12 +447,15 @@
   </section>
 
   <section id="tab-room" hidden>
-    <div class="card">
-      <h2>Plan <span id="planzoombar" class="zoombar"><button data-zoom="0.8"
-        title="zoom out">&minus;</button><button data-zoom="reset"
-        id="planzoom" title="back to 100%">100%</button><button data-zoom="1.25"
-        title="zoom in">+</button></span> <span id="layers"></span></h2>
-      <div class="scroll" id="plan" style="padding:8px 12px"></div>
+    <div id="roomwrap">
+      <div class="card" style="flex:1;min-width:0">
+        <h2>Plan <span id="planzoombar" class="zoombar"><button data-zoom="0.8"
+          title="zoom out">&minus;</button><button data-zoom="reset"
+          id="planzoom" title="back to 100%">100%</button><button data-zoom="1.25"
+          title="zoom in">+</button></span> <span id="layers"></span></h2>
+        <div class="scroll" id="plan" style="padding:8px 12px"></div>
+      </div>
+      <div class="dock" id="roomdock"><div class="dockstrip"><button class="docktog" title="collapse the editor">&#x276F;</button></div></div>
     </div>
     <div class="split">
       <div class="card" style="flex:1;min-width:0">
@@ -361,6 +489,21 @@
 
   <section id="tab-validation" hidden>
     <div class="card"><h2>Validation</h2><div id="validation"></div></div>
+  </section>
+
+  <!-- The 3D view (Part F). The viewport fills the window below the tab bar
+       and never makes the page scroll; the module app/view3d.js is loaded the
+       first time this tab is opened, so start-up is untouched. -->
+  <section id="tab-view3d" hidden>
+    <div id="v3d">
+      <div id="v3dbar"></div>
+      <div id="v3dmain">
+        <div id="v3dlist"></div>
+        <div id="v3dview"></div>
+        <div class="dock" id="v3ddock"><div class="dockstrip"><button class="docktog" title="collapse the editor">&#x276F;</button></div></div>
+      </div>
+      <div id="v3dstatus"></div>
+    </div>
   </section>
 </main>
 
@@ -497,6 +640,7 @@ async function compute() {
   if (S.tab === "boards" && S.lib) drawBoards();
   renderElevation();
   renderList();
+  refreshScene();          // the 3D view catches up, now or when next shown
   renderTab();
 }
 
@@ -607,6 +751,7 @@ async function renderElevation() {
     $("elevation").innerHTML = ((S.res && S.res.elevation) || "")
       + `<div id="elevdrag"></div>`;
     applyZoom("elevation");
+  markSelected();
     return;
   }
   const seq = ++elevSeq;
@@ -615,6 +760,7 @@ async function renderElevation() {
   if (!r.ok) { toast(r.error, true); return; }
   $("elevation").innerHTML = r.svg + `<div id="elevdrag"></div>`;
   applyZoom("elevation");
+  markSelected();
 }
 
 // The settings panel starts level with the line under the Run / Wall buttons —
@@ -1225,7 +1371,7 @@ function pickedValue(sel) {
 function renderEditor() {
   const box = $("editor");
   if (S.sel === null || S.sel === undefined || !S.job.cabinets[S.sel]) {
-    box.innerHTML = `<h2>Cabinet</h2><div class="empty">Select a cabinet to edit it.</div>`;
+    box.innerHTML = `<h2>Cabinet</h2><div class="empty">Select a cabinet in the drawing or the list.</div>`;
     S.selRendered = -2;
     return;
   }
@@ -1233,13 +1379,20 @@ function renderEditor() {
   const c = S.job.cabinets[S.sel];
   const sets = SECTIONS.filter((sec) => !sec.when || sec.when(c))
     .map((sec) => sectionHTML(c, sec)).join("");
+  // This cabinet's own criticals and warnings, one line each, at the top of
+  // the dock (F4). They come from the compute reply; clicking one opens the
+  // Validation tab. Nothing is decided here.
+  const own = cabinetIssues(c.number);
+  const issues = own.length ? `<div class="dockissues">${own.map((i) =>
+    `<div class="${i.level === "critical" && i.accepted ? "accepted" : i.level}" data-goto="validation">${
+      i.level === "critical" ? (i.accepted ? "accepted" : "critical") : "warning"} — ${esc(i.message)}</div>`).join("")}</div>` : "";
 
   const bespoke = c.template === "none"
     ? `<div class="bespoke"><b>Bespoke cabinet.</b> The template generates nothing;
        its ${c.bespoke.length} panel${c.bespoke.length === 1 ? " is" : "s are"} specified
        by hand in the job file. Size and finish fields above do not drive them.</div>` : "";
 
-  const html = `<h2>Cabinet ${c.number}</h2><div class="body">${sets}${bespoke}</div>`;
+  const html = `<h2>Cabinet ${c.number}</h2>${issues}<div class="body">${sets}${bespoke}</div>`;
 
   // A different cabinet is a different editor and there is nothing on screen
   // worth protecting, so it is built outright. The same cabinet is painted over
@@ -3656,7 +3809,7 @@ $("elevation").addEventListener("pointerdown", async (e) => {
   // starts nothing: it is the list, drawn. The same for a job with no room.
   if (!track || !S.job.room) {
     const i = S.job.cabinets.findIndex((x) => x.number === number);
-    if (i >= 0 && i !== S.sel) { selectCabinet(i); renderList(); refreshPlan(); }
+    if (i >= 0 && i !== S.sel) { selectCabinet(i, {isolate: false}); renderList(); refreshPlan(); }
     return;
   }
   const p = S.job.placements.find((x) => x.cabinet === number);
@@ -3673,7 +3826,7 @@ $("elevation").addEventListener("pointerdown", async (e) => {
              last: null, released: false};
   EDRAG = d;
   grp.classList.add("dragging");
-  selectCabinet(S.job.cabinets.findIndex((x) => x.number === number));
+  selectCabinet(S.job.cabinets.findIndex((x) => x.number === number), {isolate: false});
   window.addEventListener("pointermove", onElevDrag);
   window.addEventListener("pointerup", endElevDrag);
   window.addEventListener("pointercancel", endElevDrag);
@@ -4024,10 +4177,40 @@ S.isolate = null;
 // list, the editor, or a press in the wall elevation. Never a click in the plan:
 // see above. A newly added or duplicated cabinet comes through here too, which
 // is all P3 needs — it is selected on creation, so it is isolated on creation.
-function selectCabinet(i) {
+// Selecting and isolating are separate for a click in a DRAWING (Part F, 23
+// September 2026). From the list, Add, Duplicate and the 3D item list a
+// selection still isolates — that is how a cabinet hidden under another is
+// reached. From a click in the plan, a press in the elevation or a click in 3D
+// it does not: an isolated view takes pointer events away from everything
+// else, so clicking to select would leave nothing else clickable. While
+// isolate is on, it follows the selection.
+function selectCabinet(i, opts) {
   S.sel = i;
   const c = i === null ? null : S.job.cabinets[i];
-  S.isolate = c ? c.number : null;
+  const number = c ? c.number : null;
+  if (opts && opts.isolate === false) {
+    if (S.isolate !== null) S.isolate = number;
+  } else {
+    S.isolate = number;
+  }
+  sync3D();
+  markSelected();
+}
+
+// The 3D view follows the one selection and the one isolate.
+function sync3D() {
+  if (!V3D) return;
+  V3D.select(selNumber());
+  V3D.isolate(S.isolate);
+}
+
+// The plan and the elevation show the selection too (F4): a class on the
+// selected cabinet's group, so a drawing is never re-fetched for it.
+function markSelected() {
+  const n = selNumber();
+  document.querySelectorAll("#plan .cab, #elevation .ecabg").forEach((el) => {
+    el.classList.toggle("sel", n !== null && +el.dataset.cab === n);
+  });
 }
 
 // "panels" is not one of room.LAYERS — those are the three CABINET layers, and
@@ -4088,6 +4271,7 @@ async function renderPlan() {
     + (un.length ? `<div class="note" style="padding:6px 2px">
         Not placed, so not drawn: ${un.join(", ")}</div>` : "");
   applyZoom("plan");
+  markSelected();
 }
 
 /* ---------- drag placement ------------------------------------------------
@@ -4332,6 +4516,11 @@ function finishDrag(d) {
   });
   const out = $("dragreadout");
   if (out) out.style.display = "none";
+  // A press and release without moving is a CLICK, and a click in the plan
+  // selects — without isolating (F4, 23 September 2026). A drag selects what
+  // it dragged, the same way.
+  const idx = S.job.cabinets.findIndex((x) => x.number === d.place.cabinet);
+  if (idx >= 0 && idx !== S.sel) { selectCabinet(idx, {isolate: false}); renderList(); }
   if (!d.moved) return;
   if (d.panel) {
     // Only the placement moves: x along the wall and y off it. z, the wall and
@@ -4364,6 +4553,7 @@ $("layers").addEventListener("click", (e) => {
   const i = on.indexOf(b.dataset.layer);
   if (i >= 0) on.splice(i, 1); else on.push(b.dataset.layer);
   renderPlan();
+  if (V3D) V3D.setLayers(planLayers());    // one toggle: the 3D view follows it
 });
 
 /* ---------- placements ---------------------------------------------------- */
@@ -4684,6 +4874,16 @@ $("plinth").addEventListener("change", (e) => {
 
 /* ---------- cut list ----------------------------------------------------- */
 
+// The issues that belong to one cabinet: named by its number, or by a
+// designation of one of its panels (the cabinet number followed by a code).
+function cabinetIssues(number) {
+  const n = String(number);
+  return ((S.res && S.res.issues) || []).filter((i) => {
+    const w = String(i.where || "");
+    return w === n || (/^\d+$/.test(w) && w.startsWith(n) && w.length >= n.length + 2);
+  });
+}
+
 function issueIndex() {
   const byLabel = {}, byCab = {};
   ((S.res && S.res.issues) || []).forEach((i) => {
@@ -4714,7 +4914,7 @@ function renderCutlist() {
 
     const rows = groups[cab].map((p) => {
       const iss = byLabel[p.label] || [];
-      const main = `<tr class="${iss.length ? "hasissue" : ""}">
+      const main = `<tr class="${iss.length ? "hasissue" : ""}" data-label="${esc(p.label)}">
         <td class="mono">${esc(p.label)}</td><td>${esc(p.role)}</td>
         <td>${esc(p.material)}</td>
         <td class="n">${p.length}</td><td class="n">${p.width}</td>
@@ -4887,6 +5087,7 @@ function renderTab() {
   else if (S.tab === "room") {
     renderRoom(); renderPlaces(); renderGaps(); renderPlinth(); renderPlan();
   }
+  else if (S.tab === "view3d") render3D();
   else if (S.tab === "cutlist") renderCutlist();
   else if (S.tab === "nesting") renderNest();
   else if (S.tab === "validation") renderValidation();
@@ -4895,14 +5096,279 @@ function renderTab() {
 document.querySelector("nav").addEventListener("click", (e) => {
   const b = e.target.closest("[data-tab]");
   if (!b) return;
+  const was = S.tab;
   S.tab = b.dataset.tab;
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("on", x === b));
-  ["cabinets", "boards", "room", "cutlist", "nesting", "validation"].forEach((t) => {
+  ["cabinets", "boards", "room", "view3d", "cutlist", "nesting", "validation"].forEach((t) => {
     $("tab-" + t).hidden = t !== S.tab;
   });
+  // Nothing renders in 3D while its tab is hidden: a laptop left on another
+  // tab must not run its fan for a view nobody is looking at.
+  if (was === "view3d" && S.tab !== "view3d" && V3D) V3D.setVisible(false);
+  dockEditor();
   renderTab();
   alignEditor();          // measured, so only once the tab is showing
+  markSelected();
 });
+
+/* ---------- the one docked editor (F4) --------------------------------------
+   `#editor` is MOVED into whichever tab's dock is showing — never cloned. Its
+   listeners are delegated on the element itself, so they travel with it, and
+   `paint` goes on working on the DOM that is already there. Open/closed and
+   the width are remembered per viewer in localStorage, every access wrapped,
+   and the app works without it. */
+
+const DOCKS = {cabinets: "cabdock", room: "roomdock", view3d: "v3ddock"};
+
+function dockPref(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem("cupboard." + key);
+    if (value === null) localStorage.removeItem("cupboard." + key);
+    else localStorage.setItem("cupboard." + key, String(value));
+  } catch (e) { /* private window, blocked storage: the default is fine */ }
+  return null;
+}
+
+function dockEditor() {
+  const id = DOCKS[S.tab];
+  const ed = $("editor");
+  const closed = dockPref("dock") === "closed";
+  const width = parseInt(dockPref("dockwidth") || "", 10);
+  document.querySelectorAll(".dock").forEach((d) => d.classList.toggle("closed", closed));
+  if (width >= 320 && width <= 900) ed.style.width = width + "px";
+  if (!id) return;
+  const host = $(id);
+  if (ed.parentElement !== host) host.appendChild(ed);
+  if (S.tab !== "cabinets") ed.style.marginTop = "";
+  if (S.tab === "view3d") size3D();
+}
+
+document.addEventListener("click", (e) => {
+  const tog = e.target.closest(".docktog");
+  if (!tog) return;
+  const closed = !tog.closest(".dock").classList.contains("closed");
+  dockPref("dock", closed ? "closed" : "open");
+  document.querySelectorAll(".dock").forEach((d) => d.classList.toggle("closed", closed));
+  if (V3D) V3D.resize();
+});
+
+// Drag the strip to resize the editor; the width is remembered.
+document.addEventListener("pointerdown", (e) => {
+  const strip = e.target.closest(".dockstrip");
+  if (!strip || e.target.closest(".docktog") || strip.closest(".dock").classList.contains("closed")) return;
+  const ed = $("editor");
+  const start = e.clientX, w0 = ed.getBoundingClientRect().width;
+  const move = (ev) => {
+    const w = Math.max(320, Math.min(900, Math.round(w0 - (ev.clientX - start))));
+    ed.style.width = w + "px";
+    if (V3D) V3D.resize();
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    dockPref("dockwidth", Math.round(ed.getBoundingClientRect().width));
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  e.preventDefault();
+});
+
+// A validation line in the dock opens the Validation tab.
+$("editor").addEventListener("click", (e) => {
+  const go = e.target.closest("[data-goto]");
+  if (go) document.querySelector(`nav [data-tab="${go.dataset.goto}"]`).click();
+});
+
+// Open the Cut list tab scrolled to one designation, highlighted (F4).
+function showInCutList(label) {
+  if (!label) return;
+  document.querySelector('nav [data-tab="cutlist"]').click();
+  const row = document.querySelector(`#cutlist tr[data-label="${CSS.escape(String(label))}"]`);
+  document.querySelectorAll("#cutlist tr.flash").forEach((r) => r.classList.remove("flash"));
+  if (!row) { toast(`${label} is not on the cut list.`, true); return; }
+  row.classList.add("flash");
+  row.scrollIntoView({block: "center"});
+}
+
+dockEditor();            // the remembered open/closed state, from the start
+
+/* ---------- 3D view (Part F) ---------------------------------------------
+   The whole of the 3D code is app/view3d.js, a module of a different kind of
+   code, loaded the FIRST time the tab is opened and never before — so
+   start-up is exactly as fast as it was. index.html talks to it through a
+   small interface: mount, update, select, setLayers, setVisible, dispose. */
+
+let V3D = null;          // the module, once loaded
+let v3dLoading = null;   // the one in-flight import, so two clicks load it once
+S.sceneStale = true;     // the 3D view has not seen the job as it now stands
+S.sceneJob = null;       // which job object the view last drew: a new one opens at Home
+
+function size3D() {
+  const box = $("v3d");
+  if (!box || $("tab-view3d").hidden) return;
+  // Fill the window below the tab bar: measured, because the header wraps at
+  // narrow widths and the strip's height depends on what is in it.
+  const top = box.getBoundingClientRect().top;
+  box.style.height = Math.max(window.innerHeight - top - 14, 240) + "px";
+  if (V3D) V3D.resize();
+}
+window.addEventListener("resize", size3D);
+
+function selNumber() {
+  const c = S.sel !== null && S.job && S.job.cabinets[S.sel];
+  return c ? c.number : null;
+}
+
+async function render3D() {
+  if (!V3D) {
+    if (!v3dLoading) {
+      v3dLoading = import("/app/view3d.js").then((m) => {
+        V3D = m;
+        V3D.mount({view: $("v3dview"), bar: $("v3dbar"), list: $("v3dlist"),
+                   dock: $("v3ddock"), status: $("v3dstatus")}, {
+          // a click in 3D selects without isolating; the item list isolates
+          select: (number, part, opts) => select3D(number, part, opts),
+          // the layer toggle is the plan's: one answer to "what am I looking at"
+          toggleLayer: (k) => {
+            const on = planLayers();
+            const i = on.indexOf(k);
+            if (i >= 0) on.splice(i, 1); else on.push(k);
+            V3D.setLayers(planLayers());
+            if (S.tab === "room") renderPlan();
+          },
+          // the 3D Isolate toggle is the plan's isolate: one answer
+          isolate: (number) => { S.isolate = number; sync3D(); if (S.tab === "room") renderPlan(); },
+          card: (number, part) => showPartCard(number, part),
+          showLine: (label) => showInCutList(label),
+          snapshot: (dataUrl) => snapshot3D(dataUrl),
+          // F6: one /api/drag per press, the same the plan and the elevation
+          // make; the drop writes the placement and nothing else, then the
+          // one compute redraws every view
+          dragModel: (number) => post("/api/drag", {job: S.job, cabinet: number}),
+          drop: (number, at) => {
+            const p = (S.job.placements || []).find((x) => x.cabinet === number);
+            if (!p) return;
+            p.x = at.x;
+            p.z = at.z;
+            if (at.y !== undefined) p.y = at.y;
+            placesSig = null;            // the placements table shows the new numbers
+            compute();
+          },
+        });
+        $("v3dview").appendChild(cardEl());
+      }).catch((err) => {
+        v3dLoading = null;
+        $("v3dview").innerHTML = `<div class="empty">The 3D view could not load: ${esc(err && err.message || err)}</div>`;
+        throw err;
+      });
+    }
+    await v3dLoading;
+  }
+  size3D();
+  V3D.setVisible(true);
+  if (S.sceneStale && sceneTimer === null) fetchScene();
+  else V3D.select(selNumber());
+}
+
+// After every compute: the 3D view asks /api/scene, debounced, and only while
+// its tab is showing — a hidden tab refreshes when it is next shown. Nothing
+// is computed for the 3D view that the plan or the validation does not
+// already compute; the scene is one more read-only view of the job.
+let sceneSeq = 0, sceneTimer = null;
+function refreshScene() {
+  S.sceneStale = true;
+  if (S.tab !== "view3d" || !V3D) return;
+  clearTimeout(sceneTimer);
+  sceneTimer = setTimeout(() => { sceneTimer = null; fetchScene(); }, 40);
+}
+
+async function fetchScene() {
+  clearTimeout(sceneTimer);
+  sceneTimer = null;
+  if (!V3D || !S.job) return;
+  const seq = ++sceneSeq;
+  const t0 = performance.now();
+  const r = await post("/api/scene", {job: S.job});
+  if (seq !== sceneSeq) return;                    // a newer job is on its way
+  if (!r.ok) { toast(r.error, true); return; }
+  S.sceneStale = false;
+  const fresh = S.sceneJob !== S.job;              // a newly loaded job opens at Home
+  S.sceneJob = S.job;
+  V3D.setLayers(planLayers());
+  V3D.update(r, {fresh: fresh});
+  V3D.select(selNumber());
+  S.sceneMs = Math.round(performance.now() - t0);
+}
+
+// A selection made in the 3D view: the one selection, the one editor.
+function select3D(number, part, opts) {
+  const i = number === null ? -1 : S.job.cabinets.findIndex((c) => c.number === number);
+  selectCabinet(i >= 0 ? i : null, {isolate: !!(opts && opts.isolate)});
+  renderList();
+  refreshPlan();
+}
+
+/* ---------- the part card (F4) ----------------------------------------------
+   Clicking a part shows its cabinet, its role and its CUT-LIST LINE, read from
+   the compute reply by the designation the scene gave — designation, finished
+   L x W x thickness, board, grain, edging — and a button that lands on that
+   row of the cut list. A part with no line says why. That is the spec's rule:
+   a panel cannot be admired in 3D and wrong on the list. */
+
+let cardBox = null;
+function cardEl() {
+  if (!cardBox) {
+    cardBox = document.createElement("div");
+    cardBox.className = "v3dcard";
+    cardBox.hidden = true;
+    cardBox.addEventListener("click", (e) => {
+      if (e.target.closest(".x")) { cardBox.hidden = true; return; }
+      const go = e.target.closest("[data-line]");
+      if (go) showInCutList(go.dataset.line);
+    });
+  }
+  return cardBox;
+}
+
+function showPartCard(number, part) {
+  const box = cardEl();
+  if (number === null && !part) { box.hidden = true; return; }
+  const c = number !== null && S.job.cabinets.find((x) => x.number === number);
+  const g = c && S.res && S.res.geometry && S.res.geometry[String(number)];
+  const kind = c ? (c.kind === "panel" ? "Panel" : c.kind + (g && g.corner && g.corner.kind ? " · " + g.corner.kind : "")) : "";
+  const roleNames = {side: "Side", top: "Top", bottom: "Bottom", door: "Door leaf", drawer: "Drawer face",
+                     blind: "Blind panel", panel: "Panel", back: "Backing", carcass: "Carcass",
+                     plinth: "Plinth board", filler: "Filler"};
+  let role = part ? (roleNames[part.role] || part.role) : "";
+  if (part && (part.role === "door" || part.role === "drawer")) role += " " + (part.index + 1);
+  let line = "";
+  if (part && part.line) {
+    const p = (S.res.panels || []).find((x) => x.label === part.line);
+    const mat = S.res.materials && S.res.materials[part.board];
+    const t = mat && mat.thickness ? ` × ${mat.thickness}` : "";
+    line = p
+      ? `<div><span class="mono"><b>${esc(p.label)}</b></span> ${esc(p.role)} · ${p.length} × ${p.width}${t} · ${esc(p.material)}
+         · ${p.grain ? `locked along L ${p.length}` : "free"}${p.edge_material ? " · " + esc(p.edge_material) : ""}${
+           p.qty > 1 ? ` · qty ${p.qty}` : ""}</div>
+         <button class="go" data-line="${esc(p.label)}">Show in cut list</button>`
+      : `<div class="note">${esc(part.line)} is not on the cut list as computed.</div>`;
+  } else if (part) {
+    line = `<div class="note">No cut-list line: ${esc(part.reason || "not matched")}.</div>`;
+  }
+  box.innerHTML = `<button class="x" title="close">×</button>
+    <b>${number !== null ? `${number} · ${esc(kind)}` : esc(role)}</b>${number !== null && role ? ` — ${esc(role)}` : ""}${
+    part ? ` <span class="note">${esc(part.board)}</span>` : ""}${line}`;
+  box.hidden = false;
+}
+
+// Snapshot (F5): the view as a PNG, written by the server into output/<job>/
+// under a name that never overwrites. The toast names the file.
+async function snapshot3D(dataUrl) {
+  if (!dataUrl) return;
+  const r = await post("/api/snapshot", {name: S.job.name, png: dataUrl});
+  if (!r.ok) { toast(r.error, true); return; }
+  toast(`Saved ${r.file}`);
+}
 
 /* ---------- job files ----------------------------------------------------- */
 
