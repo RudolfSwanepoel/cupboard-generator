@@ -202,6 +202,41 @@ PANEL_GRAB = 16
 # door shows the grain running rather than one smeared close-up of it.
 PICTURE_TILE = 40
 
+# The same tile in the 3D view, in MILLIMETRES of board (23 September 2026).
+# An SVG has no real-world tile size — `PICTURE_TILE` is drawing pixels at
+# whatever scale the drawing happens to be — so the 3D view, which draws in
+# millimetres, needs the figure stated once. This is what 40 px comes to on a
+# wall elevation at its usual scale (a 4 m wall in 1100 px). A drawing
+# constant, sent to the browser with each board's look; nothing else reads it.
+PICTURE_TILE_MM = 160
+
+# The Run: the cabinets side by side, `RUN_GAP` mm apart, each at the width
+# `run_widths` gives it. The 3D view with no room stands its cabinets on the
+# same layout (`run_layout`) rather than deriving one of its own.
+RUN_GAP = 20
+
+
+def run_widths(job: Job, cabs) -> dict:
+    """Number -> width along the Run. A corner unit's width along its wall is
+    its geometry, never the declared label (hard rule 1): a mitre drawn at its
+    declared 1200 when its arm is 1000 was one of the things that made the
+    corner unit look broken."""
+    return {c.number: (geometry(c, job.std, job.materials).width if c.corner_on else c.width)
+            for c in cabs}
+
+
+def run_layout(job: Job) -> list:
+    """`(cabinet, x)` for every cabinet in the Run, in list order, `x` being
+    where it starts along the run in mm. Panels are not in it — a panel has no
+    place in a line of carcasses — exactly as `elevation_svg` leaves them out."""
+    cabs = [c for c in job.cabinets if not c.is_panel]
+    gw = run_widths(job, cabs)
+    out, x = [], 0
+    for c in cabs:
+        out.append((c, x))
+        x += gw[c.number] + RUN_GAP
+    return out
+
 
 class Fills:
     r"""The board fills one drawing uses, and the ``<defs>`` they need.
@@ -473,15 +508,14 @@ def _elevation_svg(job: Job, max_width: int, pictures: str) -> str:
     # A corner unit's width along its wall is its geometry, never the declared
     # label (hard rule 1): a mitre drawn at its declared 1200 when its arm is 1000
     # was one of the things that made the corner unit look broken.
-    gw = {c.number: (geometry(c, job.std, job.materials).width if c.corner_on else c.width)
-          for c in cabs}
+    gw = run_widths(job, cabs)
     if not cabs:
         return ('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60">'
                 f'<text x="10" y="34" font-size="13" fill="{MUTED}" '
                 'font-family="sans-serif">No cabinets yet</text></svg>')
 
     std = job.std
-    gap_mm = 20
+    gap_mm = RUN_GAP
     total_w = sum(gw[c.number] for c in cabs) + gap_mm * (len(cabs) - 1)
     max_h = max(c.height for c in cabs)
     pad = 46

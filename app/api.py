@@ -31,6 +31,7 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
                               material_record, material_thickness, tape_for)
 from cabinetgen.render import (elevation_svg, pictures_drawn, plan_svg,
                                wall_elevation_svg)
+from cabinetgen import scene as SCENE
 from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth,
                              arm_shelf_length, arm_shelf_max_depth,
                              blind_door_width, blind_opening,
@@ -1574,6 +1575,14 @@ def drag(payload):
     }
 
 
+def scene(payload):
+    """The 3D scene: every placed cabinet and panel as world-space solids, the
+    room shell, the boards' looks, and the overlays. Separate from /api/compute
+    for the same reason /api/plan is — a view change costs a redraw, not a
+    re-nest — and read-only with respect to the job (pinned in check_scene)."""
+    return SCENE.build(_job(payload))
+
+
 def room_extend(payload):
     """Add a wall at either end of the room's wall sequence — how a straight run
     becomes an L or a U. The length is a starting figure to be measured, like the
@@ -1631,6 +1640,7 @@ ROUTES = {
     "/api/plan": plan,
     "/api/drag": drag,
     "/api/elevation": elevation,
+    "/api/scene": scene,
     "/api/room-extend": room_extend,
 }
 
