@@ -441,7 +441,180 @@ def stage_f3(pw):
     browser.close()
 
 
-STAGES = {"f1": stage_f1, "f3": stage_f3}
+
+# ---------------------------------------------------------------------------
+
+def stage_f4(pw):
+    print("\nF4 — selection, the part card, one editor across views")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    page.goto(URL)
+    page.wait_for_function("() => S.def !== null", timeout=15000)
+    page.evaluate("() => { try { localStorage.clear(); } catch (e) {} }")
+    load_job(page, "Test")
+    open_3d(page)
+    wait_scene(page)
+    scene = page.request.post(URL.rstrip("/") + "/api/scene",
+                              data=json.dumps({"job": page.evaluate("() => S.job")}),
+                              headers={"Content-Type": "application/json"}).json()
+    items = {it["number"]: it for it in scene["items"]}
+    left, top, w, hgt = viewport_origin(page)
+
+    def click_part(number, role="door"):
+        # find a screen point where THAT cabinet's part is really under the cursor
+        parts = items[number]["parts"]
+        part = next((q for r in (role, "drawer", "door", "side") for q in parts if q["role"] == r), parts[0])
+        x = sum(px for px, _ in part["outline"]) / len(part["outline"])
+        y = sum(py for _, py in part["outline"]) / len(part["outline"])
+        z = (part["z0"] + part["z1"]) / 2
+        pr = project(page, x, y, z)
+        hit = page.evaluate(f"() => V3D.unproject({left + pr['x']}, {top + pr['y']})")
+        if hit is None:
+            raise AssertionError(f"cabinet {number} not under the cursor")
+        page.mouse.click(left + pr["x"], top + pr["y"])
+        return part
+
+    # 7. click cabinet 7 in 3D
+    page.keyboard.press("h")
+    settle(page)
+    part = click_part(7)
+    time.sleep(0.3)
+    check("cabinet 7 is the selection", page.evaluate("() => S.job.cabinets[S.sel].number"), 7)
+    check("and nothing is isolated by a click", page.evaluate("() => S.isolate"), None)
+    check("the dock shows cabinet 7", page.locator("#v3ddock #editor h2").first.text_content().strip(), "Cabinet 7")
+    check("the part card names the part's cut-list line",
+          page.locator("#v3dview .v3dcard").inner_text().find(part["line"]) >= 0, True)
+    check("the 3D list marks it", page.locator("#v3dlist .row.sel").get_attribute("data-n"), "7")
+    page.click("#v3dview .v3dcard button.go")
+    page.wait_for_function("() => S.tab === 'cutlist'")
+    flash = page.locator("#cutlist tr.flash")
+    check("Show in cut list lands on that row", flash.get_attribute("data-label"), part["line"])
+    check_true("and the row is in view", page.evaluate("() => { const r = document.querySelector('#cutlist tr.flash').getBoundingClientRect(); return r.top >= 0 && r.bottom <= window.innerHeight; }"))
+    page.click('nav [data-tab="room"]')
+    page.wait_for_function("() => document.querySelector('#plan .cab.sel') !== null", timeout=10000)
+    check("the plan shows it selected", page.locator("#plan .cab.sel").first.get_attribute("data-cab"), "7")
+    page.click('nav [data-tab="cabinets"]')
+    page.wait_for_function("() => document.querySelector('#elevation .ecabg.sel') !== null", timeout=10000)
+    check("and the elevation", page.locator("#elevation .ecabg.sel").first.get_attribute("data-cab"), "7")
+    check("the cabinet table too", page.locator("#cabtable tr.sel").first.get_attribute("data-i"),
+          str(page.evaluate("() => S.sel")))
+
+    # 10. the dock: one element, on three tabs, collapses, remembers
+    page.evaluate("() => { document.getElementById('editor').dataset.mark = 'one'; }")
+    check("Cabinets: the editor sits in its dock", page.evaluate("() => document.getElementById('editor').parentElement.id"), "cabdock")
+    page.click('nav [data-tab="room"]')
+    check("Room: the same element moved into the plan's dock",
+          page.evaluate("() => [document.getElementById('editor').parentElement.id, document.getElementById('editor').dataset.mark]"), ["roomdock", "one"])
+    page.click('nav [data-tab="view3d"]')
+    check("3D: the same element again", page.evaluate("() => [document.getElementById('editor').parentElement.id, document.getElementById('editor').dataset.mark]"), ["v3ddock", "one"])
+    check("it still shows cabinet 7", page.locator("#v3ddock #editor h2").first.text_content().strip(), "Cabinet 7")
+    check("one editor: one h2", page.locator("#editor h2").count(), 1)
+    page.click("#v3ddock .docktog")
+    check("the dock collapses to a strip", page.evaluate("() => document.getElementById('v3ddock').classList.contains('closed')"), True)
+    page.reload()
+    page.wait_for_function("() => S.def !== null", timeout=15000)
+    check("and remembers it across a reload", page.evaluate("() => document.getElementById('cabdock').classList.contains('closed')"), True)
+    page.click("#cabdock .docktog")
+    check("and opens again", page.evaluate("() => document.getElementById('cabdock').classList.contains('closed')"), False)
+    load_job(page, "Test")
+    check("with nothing selected the dock says what to do",
+          "Select a cabinet" in page.locator("#editor").inner_text(), True)
+
+    # 8. change cabinet 7's width in the dock -> 3D rebuilds 7 only, camera still
+    open_3d(page)
+    wait_scene(page)
+    page.evaluate("() => selectCabinet(S.job.cabinets.findIndex((c) => c.number === 7))")
+    page.evaluate("() => renderList()")
+    page.wait_for_function("() => document.querySelector('#v3ddock #editor input[data-k=\"width\"]') !== null")
+    ids0 = page.evaluate("() => V3D.groupIds()")
+    cam0 = page.evaluate("() => V3D.camera()")
+    seq = page.evaluate("() => sceneSeq")
+    t0 = time.time()
+    page.fill('#v3ddock #editor input[data-k="width"]', "380")
+    page.dispatch_event('#v3ddock #editor input[data-k="width"]', "input")
+    page.wait_for_function(f"() => sceneSeq > {seq} && !S.sceneStale && sceneTimer === null", timeout=15000)
+    dt = (time.time() - t0) * 1000
+    ids1 = page.evaluate("() => V3D.groupIds()")
+    changed = sorted(n for n in ids0 if ids0[n] != ids1.get(n))
+    check("only cabinet 7 was rebuilt", changed, ["7"])
+    check("the camera did not move", page.evaluate("() => V3D.camera()"), cam0)
+    b7 = page.evaluate("() => V3D.bounds(7)")
+    check("3D shows the new width", round(b7["max"][0] - b7["min"][0]), 380)
+    check("the engine agrees", page.evaluate("() => S.res.geometry['7'].width"), 380)
+    print(f"      the edit reached 3D in {dt:.0f} ms (compute debounce included)")
+    check_true("within a second of the keystroke", dt < 1500, f"{dt:.0f} ms")
+
+    # 9. click in the plan selects without isolating; the list still isolates
+    page.click('nav [data-tab="room"]')
+    page.wait_for_function("() => document.querySelector('#plan .cab[data-cab=\"3\"]') !== null", timeout=10000)
+    if page.locator("#unisolate").count():
+        page.click("#unisolate")               # the plan's own way out of isolate
+        page.wait_for_function("() => S.isolate === null && document.querySelector('#plan .cab[data-cab=\"3\"]').getAttribute('pointer-events') !== 'none'", timeout=10000)
+    page.locator('#plan .cab[data-cab="3"]').first.click()
+    page.wait_for_function("() => S.job.cabinets[S.sel] && S.job.cabinets[S.sel].number === 3", timeout=5000)
+    check("plan click: cabinet 3 selected", page.evaluate("() => S.job.cabinets[S.sel].number"), 3)
+    check("without isolating", page.evaluate("() => S.isolate"), None)
+    page.locator('#plan .cab[data-cab="4"]').first.click()
+    page.wait_for_function("() => S.job.cabinets[S.sel] && S.job.cabinets[S.sel].number === 4", timeout=5000)
+    check("click another: that one", page.evaluate("() => S.job.cabinets[S.sel].number"), 4)
+    check("still not isolating", page.evaluate("() => S.isolate"), None)
+    page.click('nav [data-tab="cabinets"]')
+    page.locator('#cabtable tr[data-i]').nth(1).click()
+    check("the cabinet table still isolates", page.evaluate("() => [S.job.cabinets[S.sel].number, S.isolate]"),
+          [2, 2])
+    page.click('nav [data-tab="view3d"]')
+    time.sleep(0.3)
+    check("3D mirrors the isolate", page.evaluate("() => V3D.state().isolate"), 2)
+    door3 = next(q for q in items[3]["parts"] if q["role"] == "door")["id"]
+    info = page.evaluate("() => V3D.partInfo(%s)" % json.dumps(door3))
+    check("everything else is ghosted in 3D", info["ghost"], True)
+    page.click("#v3dbar button:has-text('Isolate')")
+    check("the 3D Isolate toggle clears the plan's isolate too", page.evaluate("() => S.isolate"), None)
+
+    # the item list and the context menu
+    check("the item list has a row per item", page.locator("#v3dlist .row").count(), 13)
+    page.locator('#v3dlist .row[data-n="13"]').click()
+    settle(page)
+    check("a list click selects and isolates", page.evaluate("() => [S.job.cabinets[S.sel].number, S.isolate]"), [13, 13])
+    page.click("#v3dbar button:has-text('Isolate')")
+    page.locator('#v3dlist .row[data-n="5"] .eye').click()
+    info5 = page.evaluate("() => V3D.partInfo(%s)" % json.dumps(items[5]["parts"][0]["id"]))
+    check("the eye hides an item in 3D", info5["visible"], False)
+    page.locator('#v3dlist .row[data-n="5"] .eye').click()
+    page.mouse.move(left + w / 2, top + hgt / 2)     # keys act with the pointer over the view
+    page.keyboard.press("h")
+    settle(page)
+    part2 = next(q for q in items[2]["parts"] if q["role"] == "door")
+    pr = project(page, (part2["outline"][0][0] + part2["outline"][1][0]) / 2, part2["outline"][1][1], (part2["z0"] + part2["z1"]) / 2)
+    page.mouse.click(left + pr["x"], top + pr["y"], button="right")
+    time.sleep(0.2)
+    menu = page.locator("#v3dview .v3dctx")
+    check("a right-click without a drag opens the context menu", menu.is_visible(), True)
+    labels = menu.locator("button").all_inner_texts()
+    check_true("with Fit, Isolate, fronts, Hide and Select in cut list",
+               any("Fit" in l for l in labels) and any("Isolate" in l for l in labels)
+               and any("fronts" in l for l in labels) and any("Hide" in l for l in labels)
+               and any("cut list" in l for l in labels), f"{labels}")
+    hit_line = [l for l in labels if "cut list" in l][0].split()[1]
+    menu.locator("button:has-text('cut list')").click()
+    page.wait_for_function("() => S.tab === 'cutlist'")
+    check("Select in cut list lands on the row", page.locator("#cutlist tr.flash").get_attribute("data-label"), hit_line)
+
+    # validation in the dock
+    with_issue = page.evaluate("() => { const s = new Set(); (S.res.issues || []).forEach((i) => { if (/^\\d+$/.test(i.where)) s.add(+i.where); }); return [...s]; }")
+    if with_issue:
+        n = with_issue[0]
+        page.click('nav [data-tab="cabinets"]')
+        page.evaluate("() => { selectCabinet(S.job.cabinets.findIndex((c) => c.number === %d)); renderList(); }" % n)
+        check(f"the dock lists cabinet {n}'s own issues", page.locator("#editor .dockissues div").count() > 0, True)
+        page.locator("#editor .dockissues div").first.click()
+        check("and a line opens the Validation tab", page.evaluate("() => S.tab"), "validation")
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+STAGES = {"f1": stage_f1, "f3": stage_f3, "f4": stage_f4}
 
 with sync_playwright() as pw:
     for name, fn in STAGES.items():

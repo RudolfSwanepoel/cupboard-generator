@@ -1217,8 +1217,9 @@ function onPointerUp(e) {
   if (moved) return;
   if (p.button === 2) { openContextMenu(e); return; }
   if (p.button !== 0) return;
+  closeMenus();
   const hit = pick(e, false);
-  if (hit) doSelect(hit.object.userData.number, hit.object.userData.part);
+  if (hit) doSelect(hit.object.userData.number || null, hit.object.userData.part);
   else doSelect(null, null);
 }
 
@@ -1226,7 +1227,7 @@ function onDblClick(e) {
   const hit = pick(e, false);
   if (hit && hit.object.userData.number) {
     doSelect(hit.object.userData.number, hit.object.userData.part);
-    fitSelection(true);
+    flyTo(hit.object.userData.number);
   } else {
     fitAll(true);
   }
@@ -1289,6 +1290,7 @@ function onKey(e) {
   else if (k === "l") { V.labels = !V.labels; updateBar(); requestRender(); }
   else if (k === "escape") {
     if (V.dragging) { cancelDrag(); return; }
+    if (V.ctxEl && !V.ctxEl.hidden) { closeMenus(); return; }
     closeMenus();
     doSelect(null, null);
   }
@@ -1343,7 +1345,8 @@ function buildBar() {
   B.walls = h("button", {text: "Walls: auto ▾", title: "which walls are drawn"});
   B.ceiling = h("button", {text: "Ceiling", title: "draw the ceiling", onclick: () => { V.ceiling = !V.ceiling; applyWalls(); updateBar(); }});
   B.labels = h("button", {text: "Labels", title: "L: item numbers", onclick: () => { V.labels = !V.labels; updateBar(); requestRender(); }});
-  B.isolate = h("button", {text: "Isolate", title: "ghost everything but the selection", onclick: () => setIsolate(V.isolate === null ? V.sel : null)});
+  B.isolate = h("button", {text: "Isolate", title: "ghost everything but the selection (the plan's isolate too)",
+                           onclick: () => setIsolate(V.isolate === null ? V.sel : null)});
   B.snap = h("button", {text: "Snapshot", title: "save this view as a PNG into output/<job>/", onclick: () => snapshot()});
   B.fit = h("button", {text: "Fit", title: "F: fit the selection, or everything", onclick: () => fitSelection(true)});
   B.help = h("button", {text: "?", title: "shortcuts", onclick: () => toggleHelp()});
@@ -1417,12 +1420,18 @@ function toggleHelp() {
 
 /* ---------- selection ---------------------------------------------------------- */
 
-function doSelect(number, part) {
+// A click in the view selects WITHOUT isolating; the item list selects AND
+// isolates, as the cabinet table does. index.html holds the one selection and
+// the one isolate, and tells this view back through `select` / `isolate`.
+function doSelect(number, part, opts) {
   V.sel = number;
-  if (V.isolate !== null && number !== null) V.isolate = number;    // isolate follows the selection
+  const isolate = !!(opts && opts.isolate);
+  if (isolate) V.isolate = number;
+  else if (V.isolate !== null && number !== null) V.isolate = number;    // follows the selection
   applyGhosting();
   updateBar();
-  if (V.hooks.select) V.hooks.select(number, part);
+  updateList();
+  if (V.hooks.select) V.hooks.select(number, part, {isolate: isolate});
   showCard(number, part);
 }
 
@@ -1430,21 +1439,114 @@ function showCard(number, part) {
   if (V.hooks.card) V.hooks.card(number, part);
 }
 
-function setIsolate(number) {
+function setIsolate(number, silent) {
   V.isolate = number === undefined ? null : number;
   applyGhosting();
   updateBar();
+  updateList();
+  if (!silent && V.hooks.isolate) V.hooks.isolate(V.isolate);
+}
+
+function setHidden(number, hidden) {
+  if (hidden) V.hidden.add(number); else V.hidden.delete(number);
+  applyGhosting();
+  updateList();
+}
+
+/* ---------- the item list (left, collapsible) ----------------------------------- */
+
+function buildList() {
+  const box = V.els.list;
+  if (!box) return;
+  if (!box.querySelector(".hd")) {
+    box.innerHTML = `<div class="hd"><span>Items</span><button class="tog" title="collapse">–</button></div><div class="rows"></div>`;
+    box.querySelector(".tog").addEventListener("click", (e) => {
+      box.classList.toggle("closed");
+      e.target.textContent = box.classList.contains("closed") ? "+" : "–";
+      try { localStorage.setItem("cupboard.3dlist", box.classList.contains("closed") ? "closed" : "open"); } catch (err) { /* fine */ }
+      resize();
+    });
+    try { if (localStorage.getItem("cupboard.3dlist") === "closed") { box.classList.add("closed"); box.querySelector(".tog").textContent = "+"; } } catch (err) { /* fine */ }
+    box.addEventListener("click", (e) => {
+      const eye = e.target.closest(".eye");
+      const row = e.target.closest(".row");
+      if (!row) return;
+      const n = +row.dataset.n;
+      if (eye) { setHidden(n, !V.hidden.has(n)); e.stopPropagation(); return; }
+      if (!V.groups.has(n)) { doSelect(n, null, {isolate: true}); return; }
+      // from the list: select, isolate, and fly to it — how an item buried
+      // behind others is reached
+      doSelect(n, null, {isolate: true});
+      flyTo(n);
+    });
+  }
+  updateList();
+}
+
+function updateList() {
+  const box = V.els.list;
+  if (!box || !V.payload) return;
+  const rows = box.querySelector(".rows");
+  if (!rows) return;
+  rows.innerHTML = V.payload.items.map((it) => {
+    const d = it.dims || {};
+    const kind = it.panel ? "panel" : it.kind + (it.corner ? " " + it.corner : "");
+    const desc = it.placed ? `${d.width}×${d.height}×${d.depth}` : "not placed";
+    const cls = ["row", it.number === V.sel ? "sel" : "", it.placed ? "" : "off",
+                 V.hidden.has(it.number) ? "hidden3d" : ""].join(" ");
+    return `<div class="${cls}" data-n="${it.number}" title="${kind} ${desc}"><span class="n">${it.number}</span>` +
+      `<span class="d">${kind} · ${desc}</span>` +
+      (it.placed ? `<button class="eye" title="hide / show in 3D">${V.hidden.has(it.number) ? "○" : "●"}</button>` : "") +
+      `</div>`;
+  }).join("");
+}
+
+/* ---------- the context menu (right-click without a drag) ------------------------ */
+
+function openContextMenu(e) {
+  closeMenus();
+  const hit = pick(e, false);
+  const number = hit && hit.object.userData.number ? hit.object.userData.number : (V.sel);
+  const part = hit ? hit.object.userData.part : null;
+  if (!V.ctxEl) {
+    V.ctxEl = h("div", {class: "v3dctx"});
+    V.ctxEl.hidden = true;
+    V.els.view.appendChild(V.ctxEl);
+    V.ctxEl.addEventListener("click", (ev) => ev.stopPropagation());
+  }
+  const items = [];
+  if (number) {
+    items.push({label: `Fit to ${number}`, run: () => { doSelect(number, part); flyTo(number); }});
+    items.push({label: V.isolate === number ? "Stop isolating" : `Isolate ${number}`,
+                run: () => { doSelect(number, part); setIsolate(V.isolate === number ? null : number); }});
+    items.push({label: (V.openFor && V.openFor.has(number)) ? `Close ${number}'s fronts` : `Open ${number}'s fronts`,
+                run: () => toggleFrontsFor(number)});
+    items.push({label: `Hide ${number} in 3D`, run: () => setHidden(number, true)});
+  }
+  if (V.hidden.size || V.isolate !== null) items.push({label: "Show all", run: () => { V.hidden.clear(); setIsolate(null); }});
+  if (part && part.line) items.push({label: `Select ${part.line} in cut list`,
+                                     run: () => { doSelect(number, part); if (V.hooks.showLine) V.hooks.showLine(part.line); }});
+  if (!items.length) return;
+  V.ctxEl.innerHTML = "";
+  for (const it of items) V.ctxEl.appendChild(h("button", {text: it.label, onclick: () => { closeMenus(); it.run(); }}));
+  const r = V.els.view.getBoundingClientRect();
+  V.ctxEl.style.left = Math.min(e.clientX - r.left, r.width - 190) + "px";
+  V.ctxEl.style.top = Math.min(e.clientY - r.top, r.height - 40 * items.length - 10) + "px";
+  V.ctxEl.hidden = false;
 }
 
 /* ---------- stubs filled in by later stages ------------------------------------ */
 
-function toggleFronts() { V.frontsOpen = !V.frontsOpen; if (V.hooks.fronts) V.hooks.fronts(V.frontsOpen); updateBar(); }
+function toggleFronts() { V.frontsOpen = !V.frontsOpen; updateBar(); }
+function toggleFrontsFor(number) {
+  if (!V.openFor) V.openFor = new Set();
+  if (V.openFor.has(number)) V.openFor.delete(number); else V.openFor.add(number);
+}
 function toggleClearances() { V.clearances = !V.clearances; buildOverlays(); updateBar(); }
 function buildOverlays() {
   if (V.overlays) { V.scene.remove(V.overlays); disposeObject(V.overlays); V.overlays = null; }
   requestRender();
 }
-function openContextMenu(e) { if (V.hooks.context) V.hooks.context(e, pick(e, false)); }
 function snapshot() { if (V.hooks.snapshot) V.hooks.snapshot(); }
 function cancelDrag() {}
 
@@ -1544,17 +1646,20 @@ export function update(payload, opts) {
   updateLegend();
   say(payload.banner || (payload.room && !payload.ceiling_measured
     ? "The ceiling is not measured: the walls stop a drawing margin above the tallest item." : ""));
-  if (fresh) { setProjection(false, false); viewHome(false); }
+  if (fresh) { V.hidden.clear(); setProjection(false, false); viewHome(false); }
+  buildList();
   if (V.hooks.updated) V.hooks.updated(payload);
   requestRender();
 }
 
+// index.html tells the view the one selection; nothing is decided here
 export function select(number) {
-  if (number === V.sel) { applySelection(); requestRender(); return; }
+  if (number === V.sel) { applySelection(); updateList(); requestRender(); return; }
   V.sel = number;
-  if (V.isolate !== null && number !== null) V.isolate = number;
   applyGhosting();
   updateBar();
+  updateList();
+  if (number === null) showCard(null, null);
 }
 
 export function setLayers(list) {
@@ -1563,7 +1668,11 @@ export function setLayers(list) {
   updateBar();
 }
 
-export function isolate(number) { setIsolate(number); }
+// and the one isolate — mirrored here, never decided here
+export function isolate(number) {
+  if (number === V.isolate) return;
+  setIsolate(number, true);
+}
 
 export function flyTo(number) {
   const grp = V.groups.get(number);
@@ -1603,6 +1712,12 @@ export function debugCam() {
           focal: fo.toArray(), cam: V.camera.position.toArray(), fov: V.persp.fov,
           polar: c.polarAngle, azimuth: c.azimuthAngle, zoom: V.camera.zoom, running: V.running,
           active: c.active};
+}
+
+export function groupIds() {
+  const out = {};
+  for (const [n, grp] of V.groups) out[n] = grp.uuid;
+  return out;
 }
 
 export function debugShell() {
