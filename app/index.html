@@ -75,6 +75,8 @@
   #layers,#elevpick,.zoombar{float:right;margin-top:-3px;display:flex;gap:3px}
   #layers button,#elevpick button,.zoombar button{padding:2px 9px;font-size:11px;
                                   text-transform:none;letter-spacing:0}
+  #elevpick .elevmode{display:flex;gap:3px;margin-left:10px;padding-left:10px;
+                      border-left:1px solid var(--line)}
   #layers button.on,#elevpick button.on{background:var(--ink);color:#fff;
                                         border-color:var(--ink)}
   .zoombar{margin-left:10px}
@@ -210,6 +212,14 @@
   .issue .where{flex:none;width:70px;color:var(--muted);font-variant-numeric:tabular-nums}
   .issue .msg{flex:1}
   .issue .ref{flex:none;color:var(--muted);font-size:11px}
+  .issue.accepted{color:var(--muted);background:#f4f5f3}
+  .issue.accepted .lvl{color:var(--muted)}
+  .issue .why{display:block;font-size:11.5px;margin-top:2px}
+  .issue .acts{flex:none;display:flex;gap:6px;align-items:baseline}
+  .acceptform{display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap}
+  .acceptform input{width:260px}
+  .lapsenote{padding:6px 12px;border-bottom:1px solid var(--line);font-size:12px;
+             color:var(--warn);background:#fbf7ea}
   tr.hasissue td{background:#fdf6f7}
   .rowissue{font-size:11.5px;padding:2px 8px 5px 18px}
   .rowissue.critical{color:var(--crit)}
@@ -222,6 +232,10 @@
   #toast.bad{background:var(--crit)}
   #plan svg .cab{cursor:grab}
   #plan svg .cab.dragging{cursor:grabbing}
+  /* A label is drawn over the middle of its cabinet — exactly where a cabinet is
+     grabbed — and a panel's number sits beside it, over the next cabinet. Text
+     that took the press left dead spots where a drag did nothing (22 Sept 2026). */
+  #plan svg text{pointer-events:none}
   #plan svg .front{transition:opacity .08s}
   #plan.showfronts svg .front{opacity:1 !important}
   #dragreadout{position:absolute;background:var(--ink);color:#fff;font-size:11px;
@@ -476,12 +490,46 @@ async function compute() {
   if (seq !== computeSeq) return;   // a newer job is already being computed
   S.res = res;
   if (!res.ok) toast(res.error, true);
+  dropLapsed(res.lapsed || []);
   renderStrip();
   if (S.tab === "boards" && S.lib) drawBoards();
   renderElevation();
   renderList();
   renderTab();
 }
+
+/* ---------- accepted criticals --------------------------------------------
+   A site-dependent critical can be accepted with a reason, and the export then
+   goes ahead (ruled 22 September 2026; today the tip-up check alone). Which
+   checks can be accepted, and the fingerprint an acceptance is stored with, are
+   the engine's answers — `/api/accept` and `validate.ACCEPTABLE`. The browser
+   stores what comes back and decides nothing.
+
+   An acceptance lapses when what the check read has changed. The engine says
+   which in `lapsed`; they are taken out of the job here and said out loud, and
+   the critical blocks again.                                                 */
+
+S.lapsedNotes = [];
+
+function acceptances() {
+  if (!Array.isArray(S.job.acceptances)) S.job.acceptances = [];
+  return S.job.acceptances;
+}
+
+function dropLapsed(lapsed) {
+  if (!lapsed.length) return;
+  const gone = (a) => lapsed.some((l) => l.check === a.check && String(l.where) === String(a.where));
+  S.job.acceptances = acceptances().filter((a) => !gone(a));
+  if (!S.job.acceptances.length) delete S.job.acceptances;   // written only when present
+  lapsed.forEach((l) => S.lapsedNotes.push(
+    `Acceptance for ${l.where} (${l.check}) was cleared because the cabinet or the ` +
+    `ceiling changed — it blocks again until it is looked at afresh.`));
+  markDirty(true);
+  toast(S.lapsedNotes.slice(-lapsed.length).join("\n"), true);
+}
+
+// A critical that still blocks: not accepted.
+function blocksExport(i) { return i.level === "critical" && !i.accepted; }
 
 /* ---------- summary strip ----------------------------------------------- */
 
@@ -506,14 +554,16 @@ function renderStrip() {
   cell("Estimated", "R&nbsp;" + (r.cost.total_incl_vat || 0)
     .toLocaleString("en-ZA", {minimumFractionDigits: 2, maximumFractionDigits: 2}));
 
-  const crit = r.issues.filter((i) => i.level === "critical").length;
-  const warn = r.issues.length - crit;
+  const crit = r.issues.filter(blocksExport).length;
+  const took = r.issues.filter((i) => i.level === "critical" && i.accepted).length;
+  const warn = r.issues.filter((i) => i.level !== "critical").length;
   let v;
   if (!r.ok) v = `<span class="pill crit">engine error</span>`;
   else if (crit) v = `<span class="pill crit">${crit} critical</span>` +
     (warn ? ` <span class="pill warn">${warn} warning${warn > 1 ? "s" : ""}</span>` : "");
   else if (warn) v = `<span class="pill warn">${warn} warning${warn > 1 ? "s" : ""}</span>`;
   else v = `<span class="pill ok">clear</span>`;
+  if (r.ok && took) v += ` <span class="pill">${took} accepted</span>`;
   cell("Validation", v);
 
   $("strip").innerHTML = cells.join("");
@@ -528,23 +578,30 @@ function renderStrip() {
 S.elev = null;
 let elevSeq = 0;
 
+// Finish (board colours and pictures) or Line (white fronts, grey lines). A view
+// setting and nothing more: not saved in the job, and it moves no geometry.
+S.elevMode = "finish";
+
 async function renderElevation() {
   const rm = S.job.room;
   if (!rm || !rm.walls.some((w) => w.id === S.elev)) S.elev = null;
-  $("elevpick").innerHTML = rm && rm.walls.length
+  const modes = `<span class="elevmode">` + [["finish", "Finish"], ["line", "Line"]]
+    .map(([k, label]) => `<button data-elevmode="${k}" class="${
+      S.elevMode === k ? "on" : ""}">${label}</button>`).join("") + `</span>`;
+  $("elevpick").innerHTML = (rm && rm.walls.length
     ? [["", "Run"]].concat(rm.walls.map((w) => [w.id, "Wall " + w.id]))
         .map(([k, label]) => `<button data-elev="${esc(k)}" class="${
           (S.elev || "") === k ? "on" : ""}">${esc(label)}</button>`).join("")
-    : "";
+    : "") + modes;
   alignEditor();
-  if (S.elev === null) {
+  if (S.elev === null && S.elevMode === "finish") {
     $("elevation").innerHTML = ((S.res && S.res.elevation) || "")
       + `<div id="elevdrag"></div>`;
     applyZoom("elevation");
     return;
   }
   const seq = ++elevSeq;
-  const r = await post("/api/elevation", {job: S.job, wall: S.elev});
+  const r = await post("/api/elevation", {job: S.job, wall: S.elev, mode: S.elevMode});
   if (seq !== elevSeq) return;             // a newer wall or job has been asked for
   if (!r.ok) { toast(r.error, true); return; }
   $("elevation").innerHTML = r.svg + `<div id="elevdrag"></div>`;
@@ -566,6 +623,8 @@ function alignEditor() {
 window.addEventListener("resize", alignEditor);
 
 $("elevpick").addEventListener("click", (e) => {
+  const m = e.target.closest("[data-elevmode]");
+  if (m) { S.elevMode = m.dataset.elevmode; renderElevation(); return; }
   const b = e.target.closest("[data-elev]");
   if (!b) return;
   S.elev = b.dataset.elev || null;
@@ -4026,8 +4085,17 @@ function tracks() {
     const x1 = +t.getAttribute("x1"), y1 = +t.getAttribute("y1");
     const x2 = +t.getAttribute("x2"), y2 = +t.getAttribute("y2");
     return {wall: t.dataset.wall, len: +t.dataset.len,
-            x1: x1, y1: y1, dx: x2 - x1, dy: y2 - y1};
+            x1: x1, y1: y1, dx: x2 - x1, dy: y2 - y1,
+            nx: +t.dataset.nx || 0, ny: +t.dataset.ny || 0};
   });
+}
+
+// How far a point stands off a wall INTO THE ROOM, in mm — the engine's normal
+// for that wall, read off the drawing. Only a panel's drag asks: its y.
+function offWall(track, px, py) {
+  const len = Math.hypot(track.dx, track.dy);
+  if (!len) return 0;
+  return ((px - track.x1) * track.nx + (py - track.y1) * track.ny) * track.len / len;
 }
 
 // Where a point falls along a wall: how far along it in mm, and how far off it.
@@ -4075,10 +4143,26 @@ $("plan").addEventListener("pointerdown", async (e) => {
   // was listening, and the cabinet then stuck to the pointer — the same fault
   // the elevation drag was cured of, and the same cure.
   e.preventDefault();
-  const d = {model: null, poly: poly, place: p, from: {wall: p.wall, x: p.x},
-             tracks: tracks(), moved: false, last: null, released: false};
+  // A PANEL moves along its wall and off it (22 September 2026): its drawn
+  // footprint and its grab area both carry data-panel, and both move together.
+  const panel = !!poly.dataset.panel;
+  const shapes = panel
+    ? [...document.querySelectorAll(`#plan [data-panel="${number}"]`)] : [poly];
+  const d = {model: null, poly: poly, shapes: shapes, panel: panel, place: p,
+             from: {wall: p.wall, x: p.x, y: p.y || 0}, at: {x: p.x, y: p.y || 0},
+             tracks: tracks(), moved: false, last: null, released: false,
+             grab: null, grabY: 0};
+  // Where along the cabinet it was grabbed, so it does not jump to put its
+  // middle under the pointer — the elevation drag's rule, read off the same
+  // track the drag projects onto. Null until known; the middle is the fallback.
+  // A panel keeps how far off its back it was grabbed, for the same reason.
+  const own = d.tracks.find((t) => t.wall === p.wall);
+  const sp = svgPoint(e);
+  const at = own && project(own, sp.x, sp.y);
+  if (at) d.grab = at.mm - p.x;
+  if (own && panel) d.grabY = offWall(own, sp.x, sp.y) - (p.y || 0);
   DRAG = d;
-  poly.classList.add("dragging");
+  shapes.forEach((el) => el.classList.add("dragging"));
   // On the window, not the element: a drag that runs off the plan must still
   // finish rather than stick to the pointer.
   window.addEventListener("pointermove", onDragMove);
@@ -4105,6 +4189,7 @@ function onDragMove(e) {
 }
 
 function moveDrag(d, e) {
+  if (d.panel) { movePanelDrag(d, e); return; }
   const DRAG = d;                          // this drag, whatever the global says now
   const pt = svgPoint(e);
   let best = null;
@@ -4116,12 +4201,17 @@ function moveDrag(d, e) {
 
   const wall = DRAG.model.walls[best.t.wall];
   if (!wall) return;
-  let x = Math.max(0, Math.min(best.pr.mm - Math.round(DRAG.model.width / 2),
-                               wall.max_x));
-  let why = "";
+  const grab = DRAG.grab !== null && DRAG.grab >= 0 && DRAG.grab <= DRAG.model.width
+    ? DRAG.grab : DRAG.model.width / 2;
+  let x = Math.max(0, Math.min(Math.round(best.pr.mm - grab), wall.max_x));
+  // The NEAREST candidate within tolerance, not the first one found — the
+  // elevation's rule since 21 September 2026, and now the plan's too.
+  let why = "", pick = null, near = DRAG.model.tolerance + 1;
   for (const s of wall.snaps) {
-    if (Math.abs(s.x - x) <= DRAG.model.tolerance) { x = s.x; why = s.why; break; }
+    const off = Math.abs(s.x - x);
+    if (off < near) { near = off; pick = s; }
   }
+  if (pick) { x = pick.x; why = pick.why; }
 
   DRAG.moved = true;
   DRAG.place.wall = best.t.wall;
@@ -4146,6 +4236,59 @@ function moveDrag(d, e) {
   }
 }
 
+// A panel in the plan: along its OWN wall and off it, never onto another wall
+// and never up or down — its z is the elevation's business. Both axes pick the
+// nearest candidate the engine named (`snaps`, `y_snaps`), within tolerance.
+function movePanelDrag(d, e) {
+  const t = d.tracks.find((k) => k.wall === d.from.wall);
+  const wall = t && d.model.walls[t.wall];
+  if (!wall) return;
+  const pt = svgPoint(e);
+  const pr = project(t, pt.x, pt.y);
+  if (!pr) return;
+  const tol = d.model.tolerance;
+  const grab = d.grab !== null && d.grab >= 0 && d.grab <= d.model.width
+    ? d.grab : d.model.width / 2;
+  let x = Math.max(0, Math.min(Math.round(pr.mm - grab), wall.max_x));
+  let why = "", pick = null, near = tol + 1;
+  for (const sn of wall.snaps) {
+    const off = Math.abs(sn.x - x);
+    if (off < near) { near = off; pick = sn; }
+  }
+  if (pick) { x = pick.x; why = pick.why; }
+
+  let y = Math.max(0, Math.round(offWall(t, pt.x, pt.y) - d.grabY));
+  // Several faces can share one depth — a run of base units all 570 deep. The
+  // one nearest along the wall at the panel's LIVE position is the one named,
+  // the elevation's tie-break; it picks between candidates, it invents none.
+  const w = d.model.width;
+  const away = (sn) => sn.x0 === null || sn.x0 === undefined ? 0
+    : Math.max(0, sn.x0 - (x + w), x - sn.x1);
+  let whyY = "", yPick = null, yNear = tol + 1, yAway = 0;
+  for (const sn of (wall.y_snaps || [])) {
+    const off = Math.abs(sn.y - y), gap = away(sn);
+    if (off < yNear || (off === yNear && gap < yAway)) { yNear = off; yAway = gap; yPick = sn; }
+  }
+  if (yPick) { y = yPick.y; whyY = yPick.why; }
+
+  d.moved = true;
+  d.at = {x: x, y: y};
+  const unit = Math.hypot(t.dx, t.dy) || 1;
+  const along = (x - d.from.x) * pr.pxPerMm, off = (y - d.from.y) * pr.pxPerMm;
+  const tx = t.dx / unit * along + t.nx * off, ty = t.dy / unit * along + t.ny * off;
+  d.shapes.forEach((el) => el.setAttribute("transform",
+    `translate(${tx.toFixed(2)} ${ty.toFixed(2)})`));
+
+  const out = $("dragreadout");
+  if (out) {
+    out.style.display = "block";
+    out.style.left = (e.clientX - pt.rect.left + 14) + "px";
+    out.style.top = (e.clientY - pt.rect.top + 14) + "px";
+    out.textContent = `panel ${d.place.cabinet} · wall ${t.wall} · ${x} mm` +
+      (why ? ` (${why})` : "") + ` · ${y} mm off the wall` + (whyY ? ` (${whyY})` : "");
+  }
+}
+
 function endDrag() {
   const d = DRAG;
   if (!d) return;
@@ -4163,12 +4306,24 @@ function finishDrag(d) {
   window.removeEventListener("pointermove", onDragMove);
   window.removeEventListener("pointerup", endDrag);
   window.removeEventListener("pointercancel", endDrag);
-  d.poly.classList.remove("dragging");
-  d.poly.removeAttribute("transform");
-  d.poly.removeAttribute("opacity");
+  (d.shapes || [d.poly]).forEach((el) => {
+    el.classList.remove("dragging");
+    el.removeAttribute("transform");
+    el.removeAttribute("opacity");
+  });
   const out = $("dragreadout");
   if (out) out.style.display = "none";
   if (!d.moved) return;
+  if (d.panel) {
+    // Only the placement moves: x along the wall and y off it. z, the wall and
+    // every dimension stay exactly as they were.
+    if (d.at.x === d.from.x && d.at.y === d.from.y) return;
+    d.place.x = d.at.x;
+    d.place.y = d.at.y;
+    placesSig = null;            // the placements table shows the new numbers
+    compute();
+    return;
+  }
   if (d.place.wall !== d.from.wall) placesSig = null;   // the table's shape changed
   compute();
 }
@@ -4534,8 +4689,9 @@ function renderCutlist() {
 
   const out = Object.keys(groups).map(Number).sort((a, b) => a - b).map((cab) => {
     const cabIssues = (byCab[String(cab)] || []).map((i) =>
-      `<tr><td colspan="12" class="rowissue ${i.level}">${esc(i.message)}${
-        i.ref ? " [" + esc(i.ref) + "]" : ""}</td></tr>`).join("");
+      `<tr><td colspan="12" class="rowissue ${i.accepted ? "note" : i.level}">${
+        esc(i.message)}${i.ref ? " [" + esc(i.ref) + "]" : ""}${
+        i.accepted ? " — accepted: " + esc(i.accepted) : ""}</td></tr>`).join("");
 
     const rows = groups[cab].map((p) => {
       const iss = byLabel[p.label] || [];
@@ -4562,7 +4718,16 @@ function renderCutlist() {
       + cabIssues + rows;
   }).join("");
 
-  $("cutlist").innerHTML = `<table>
+  // What was accepted rather than cleared goes out with this list, reasons and
+  // all — here and in the export folder, never in the Plazaboard CSV.
+  const took = r.issues.filter((i) => i.level === "critical" && i.accepted);
+  const acceptedBlock = took.length
+    ? `<div class="body" style="border-bottom:1px solid var(--line)"><b>Accepted</b>
+       — site-dependent criticals this cut list goes out with:${took.map((i) =>
+        `<div class="note">${esc(i.where)} — ${esc(i.message)} <b>Accepted: ${
+          esc(i.accepted)}</b></div>`).join("")}</div>`
+    : "";
+  $("cutlist").innerHTML = acceptedBlock + `<table>
     <thead><tr><th>Label</th><th>Role</th><th>Mat</th><th class="n">Length</th>
       <th class="n">Width</th><th class="n">Qty</th><th>Edges</th><th>Edge mat</th>
       <th class="n">Edging m</th><th class="n">Holes</th>
@@ -4611,24 +4776,90 @@ function renderValidation() {
     head = `<div class="issue critical"><span class="lvl">Engine</span>
       <span class="where"></span><span class="msg">${esc(r.error)}</span></div>`;
   }
+  const notes = S.lapsedNotes.map((n) => `<div class="lapsenote">${esc(n)}</div>`).join("");
   if (!r.issues.length && r.ok) {
-    $("validation").innerHTML = `<div class="empty">No issues. Export is allowed.</div>`;
+    $("validation").innerHTML = notes +
+      `<div class="empty">No issues. Export is allowed.</div>`;
     return;
   }
-  const crit = r.issues.filter((i) => i.level === "critical").length;
+  const crit = r.issues.filter(blocksExport).length;
+  const took = r.issues.filter((i) => i.level === "critical" && i.accepted).length;
+  const warn = r.issues.filter((i) => i.level !== "critical").length;
   const banner = `<div class="matline" style="border-bottom:1px solid var(--line)">
     ${crit ? `<span class="pill crit">${crit} critical — export blocked</span>`
            : `<span class="pill ok">no criticals — export allowed</span>`}
-    <span class="note">${r.issues.length - crit} warning(s) do not block.</span></div>`;
+    ${took ? `<span class="pill">${took} accepted</span>` : ""}
+    <span class="note">${warn} warning(s) do not block.</span></div>`;
 
-  $("validation").innerHTML = banner + head + r.issues.map((i) =>
-    `<div class="issue ${esc(i.level)}">
-      <span class="lvl">${i.level === "critical" ? "Critical" : "Warning"}</span>
+  $("validation").innerHTML = banner + notes + head + r.issues.map((i) => {
+    const key = i.check + "|" + i.where;
+    let lvl = i.level === "critical" ? "Critical" : "Warning";
+    let cls = i.level, why = "", acts = "";
+    if (i.level === "critical" && i.accepted) {
+      lvl = "Accepted"; cls = "accepted";
+      why = `<span class="why">Accepted: ${esc(i.accepted)}</span>`;
+      acts = `<button data-unaccept="${esc(key)}">Undo</button>`;
+    } else if (i.level === "critical" && i.acceptable) {
+      acts = S.acceptOpen === key ? "" : `<button data-accept="${esc(key)}">Accept…</button>`;
+      if (S.acceptOpen === key) {
+        why = `<span class="acceptform">
+          <button data-acceptpreset="${esc(key)}">Assembled in place</button>
+          <input id="acceptreason" placeholder="or type the reason (required)"
+                 value="${esc(S.acceptDraft || "")}">
+          <button data-acceptok="${esc(key)}">Accept</button>
+          <button data-acceptcancel="1">Cancel</button></span>`;
+      }
+    }
+    return `<div class="issue ${esc(cls)}">
+      <span class="lvl">${lvl}</span>
       <span class="where">${esc(i.where)}</span>
-      <span class="msg">${esc(i.message)}</span>
+      <span class="msg">${esc(i.message)}${why}</span>
       <span class="ref" title="see docs/RULES.md">${i.ref ? esc(i.ref) : ""}</span>
-    </div>`).join("");
+      <span class="acts">${acts}</span>
+    </div>`;
+  }).join("");
+  const box = $("acceptreason");
+  if (box) box.focus();
 }
+
+async function acceptIssue(key, reason) {
+  reason = (reason || "").trim();
+  if (!reason) { toast("Give a reason for accepting it — it is required.", true); return; }
+  const [check, where] = key.split("|");
+  const r = await post("/api/accept", {job: S.job, check: check, where: where});
+  if (!r.ok) { toast(r.error, true); return; }
+  const list = acceptances().filter((a) => !(a.check === check && String(a.where) === where));
+  list.push({check: check, where: where, reason: reason, fingerprint: r.fingerprint});
+  S.job.acceptances = list;
+  S.acceptOpen = null; S.acceptDraft = "";
+  markDirty(true);
+  compute();
+}
+
+$("validation").addEventListener("input", (e) => {
+  if (e.target.id === "acceptreason") S.acceptDraft = e.target.value;
+});
+
+$("validation").addEventListener("keydown", (e) => {
+  if (e.target.id === "acceptreason" && e.key === "Enter") acceptIssue(S.acceptOpen, e.target.value);
+});
+
+$("validation").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.accept) { S.acceptOpen = b.dataset.accept; S.acceptDraft = ""; renderValidation(); }
+  else if (b.dataset.acceptcancel) { S.acceptOpen = null; renderValidation(); }
+  else if (b.dataset.acceptpreset) acceptIssue(b.dataset.acceptpreset, "Assembled in place");
+  else if (b.dataset.acceptok) acceptIssue(b.dataset.acceptok, ($("acceptreason") || {}).value);
+  else if (b.dataset.unaccept) {
+    const [check, where] = b.dataset.unaccept.split("|");
+    S.job.acceptances = acceptances().filter((a) =>
+      !(a.check === check && String(a.where) === where));
+    if (!S.job.acceptances.length) delete S.job.acceptances;
+    markDirty(true);
+    compute();
+  }
+});
 
 /* ---------- tabs ---------------------------------------------------------- */
 
@@ -4668,6 +4899,8 @@ function adopt(job) {
   markDirty(false);          // what is on screen is what is on disk
   S.sel = null;
   S.isolate = null;
+  S.lapsedNotes = [];
+  S.acceptOpen = null;
   S.selRendered = -2;
   roomSig = null;
   placesSig = null;
@@ -4774,7 +5007,9 @@ $("export").addEventListener("click", async () => {
     document.querySelector('nav [data-tab="validation"]').click();
     return;
   }
-  toast("Wrote " + r.files.length + " files to\n" + r.dir);
+  toast("Wrote " + r.files.length + " files to\n" + r.dir +
+        ((r.accepted || []).length ? "\nWith " + r.accepted.length + " accepted critical(s): " +
+          r.accepted.map((i) => `${i.where} (${i.accepted})`).join(", ") : ""));
 });
 
 $("jobname").addEventListener("input", schedule);

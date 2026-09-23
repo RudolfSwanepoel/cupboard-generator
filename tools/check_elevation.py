@@ -366,6 +366,98 @@ def main() -> int:
           (rsvg.count('class="eside"'), 'data-cab="1"' in rsvg.split('class="eside"')[0]),
           (2, False))
 
+    print("\nevery wall drawn by one rule, whatever the room (22 Sept 2026)")
+    from cabinetgen.model import Room as _Room, Wall as _Wall, PanelSpec as _PS  # noqa: E402
+
+    def walled(walls, closed):
+        cabs, pl, n = [], [], 1
+        for wid, length in walls:
+            for x, kind, h in ((0, "base", 720), (length - 600, "tall", 2100)):
+                cabs.append(_Cab(n, 600, h, 580, kind=kind))
+                pl.append(_Pl(n, wid, x))
+                n += 1
+        return _Job(name="w", cabinets=cabs, placements=pl,
+                    room=_Room(name="r", walls=[_Wall(w, ln) for w, ln in walls],
+                               closed=closed, ceiling=2600))
+
+    three = walled([("A", 3000), ("B", 2400), ("C", 3000)], False)
+    check("three walls, open: each end wall sees only the wall it meets",
+          {w: sorted({r["wall"] for r in return_profiles(three, w)}) for w in "ABC"},
+          {"A": ["B"], "B": ["A", "C"], "C": ["B"]})
+    four = walled([("A", 3600), ("B", 2400), ("C", 3600), ("D", 2400)], True)
+    check("four walls, closed: every wall sees the two it meets, never the one opposite",
+          {w: sorted({r["wall"] for r in return_profiles(four, w)}) for w in "ABCD"},
+          {"A": ["B", "D"], "B": ["A", "C"], "C": ["B", "D"], "D": ["A", "C"]})
+    svg = wall_elevation_svg(four, "A")
+    labels = re.findall(r'class="esidelabel" data-wall="(\w)"[^>]*>([^<]*)<', svg)
+    check("one label per neighbouring wall, naming its wall and its numbers",
+          sorted(t for _w, t in labels), ["B: 3, 4", "D: 7, 8"])
+    check("A's own cabinets are drawn in full, as cabinets",
+          sorted(re.findall(r'<g class="ecabg" data-cab="(\d+)"', svg)), ["1", "2"])
+    svg3 = wall_elevation_svg(three, "A")
+    check("an end with no wall beside it has nothing drawn there",
+          [w for w, _t in re.findall(r'class="esidelabel" data-wall="(\w)"[^>]*>([^<]*)<',
+                                     svg3)], ["B"])
+    # a panel standing on the neighbouring wall is seen end on like a carcass
+    pan = _Cab(9, 600, 2100, 16, kind="panel",
+               panel=_PS(board="MEL", orientation="end", a=580, b=2100))
+    three.cabinets.append(pan)
+    three.placements.append(_Pl(9, "B", 700, z=0))
+    check("a placed panel on the wall beside is in the end-on outlines too",
+          [r["cabinet"] for r in return_profiles(three, "A") if r.get("panel")], [9])
+
+    print("\na corner unit belongs to its own wall")
+    # Built here rather than read from jobs/Test.json: a check never pins a
+    # fact on live workshop data. Test.json cabinet 13 is the case this came
+    # from — a left-handed tall mitre at the start of wall B, turning onto A.
+    mitre = _Cab(13, 1000, 2400, 500, kind="tall", doors=1, corner_unit=True,
+                 corner_style="mitre", corner_hand="L", arm_a=1000, arm_b=1000,
+                 face_a=600, face_b=600)
+    tj = _Job(name="m", cabinets=[_Cab(11, 600, 2400, 600, kind="tall", doors=2), mitre,
+                                  _Cab(1, 600, 2400, 600, kind="tall", doors=2)],
+              room=rectangular(4000, 3000, ceiling=2600),
+              placements=[_Pl(13, "B", 0), _Pl(11, "B", 1000), _Pl(1, "A", 200)])
+    tj.room.closed = False
+    tj.room.walls = tj.room.walls[:2]
+    for k, colour in (("MEL", "#f4f4f0"), ("BROOKHILL", "#c4a35a")):
+        if isinstance(tj.materials.get(k), dict):
+            tj.materials[k] = dict(tj.materials[k], colour=colour)
+    b = wall_elevation_svg(tj, "B")
+    a = wall_elevation_svg(tj, "A")
+    check("no 'side on the return wall' label on the wall it stands on",
+          "return wall" in b or "side on the" in b, False)
+    check("drawn in full there", '<g class="ecabg" data-cab="13"' in b, True)
+    check("and only as an outline on the wall it turns onto, named with the rest",
+          ('<g class="ecabg" data-cab="13"' in a,
+           [t for _w, t in re.findall(
+               r'class="esidelabel" data-wall="(\w)"[^>]*>([^<]*)<', a)]),
+          (False, ["B: 11, 13"]))
+
+    print("\nFinish and Line views (22 Sept 2026)")
+    check("Finish is the default: the drawing is unchanged by naming it",
+          wall_elevation_svg(tj, "A", mode="finish") == wall_elevation_svg(tj, "A"), True)
+    line = wall_elevation_svg(tj, "B", mode="line")
+    fills = set(re.findall(r'fill="(#[0-9a-f]{6})"', line))
+    check("Finish draws the board colours", "#c4a35a" in b, True)
+    check("Line draws none of them", sorted(fills & {"#f4f4f0", "#c4a35a"}), [])
+    check("and no picture", ("<image" in line, "url(#bpic" in line), (False, False))
+    check("and no dark ink: lines and text are grey", '"#191c1a"' in line, False)
+    doors = r'class="edoor" data-cab="(\d+)" data-door="\d+"[^>]*x="([\d.]+)"'
+    check("but the same parts in the same places",
+          re.findall(doors, line) == re.findall(doors, b) != [], True)
+    check("the job is untouched by drawing it in Line",
+          tj.materials["BROOKHILL"].get("colour"), "#c4a35a")
+    plain = kitchen()
+    plain.room = None
+    check("no room: Finish is still the Run, byte for byte",
+          wall_elevation_svg(plain, "A", mode="finish") == elevation_svg(plain), True)
+    check("and Line is the Run in Line",
+          wall_elevation_svg(plain, "A", mode="line") == elevation_svg(plain, mode="line"),
+          True)
+    check("the Run in Line keeps its numbers and sizes",
+          len(re.findall(r'<g class="ecabg erun"', elevation_svg(plain, mode="line")))
+          == len(re.findall(r'<g class="ecabg erun"', elevation_svg(plain))), True)
+
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0
 

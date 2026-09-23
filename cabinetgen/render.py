@@ -4,6 +4,7 @@ Cabinets are drawn side by side to scale, with doors, drawer faces and shelf
 lines shown. It is a sanity check, not a working drawing: if a cabinet looks
 wrong here it is wrong in the cut list too.
 """
+from dataclasses import replace
 from html import escape
 from typing import List
 
@@ -35,6 +36,35 @@ LAYER_STROKE = {"base": ("1.3", ""),
                 "wall": ("1.3", ' stroke-dasharray="7 4"'),
                 "tall": ("2.2", "")}
 LEGEND_ROW = 15
+
+# How an elevation is drawn — a view setting, never saved in the job and never a
+# change to any geometry. FINISH is every part in its board's colour or picture;
+# LINE is the same drawing on white paper, fronts white, lines and text in grey.
+VIEW_MODES = ("finish", "line")
+LINE_INK = MUTED
+
+
+def _line_job(job: Job) -> Job:
+    """The job as the LINE view draws it: every board white, plain, pictureless.
+
+    Only what a board LOOKS like changes — the record is otherwise the one the
+    job carries (`material_record`, normalised), so tape names, thickness and
+    every size read exactly as in the Finish view. A copy: the job is untouched.
+    """
+    mats = {}
+    for k in (job.materials or {}):
+        rec = dict(material_record(job.materials, k))
+        rec.update(colour=PAPER, grain="plain", picture="")
+        mats[k] = rec
+    return replace(job, materials=mats)
+
+
+def _line_ink(svg: str) -> str:
+    """Every dark ink in a drawing turned to the grey the end-on outlines use,
+    and a board nobody coloured drawn as paper like the rest. Red stays red: a
+    clash is still a clash in the Line view."""
+    return (svg.replace(f'"{INK}"', f'"{LINE_INK}"')
+               .replace(f'"{NO_COLOUR}"', f'"{PAPER}"'))
 
 
 def board_look(job, board_id: str) -> dict:
@@ -430,8 +460,11 @@ def _tape_note(job: Job, x, y, width) -> list:
 
 
 def elevation_svg(job: Job, max_width: int = 1100,
-                  pictures: str = PIC.ROUTE) -> str:
+                  pictures: str = PIC.ROUTE, mode: str = "finish") -> str:
     """The Run: the cabinet list drawn side by side.
+
+    `mode` is the view: "finish" (the default, and exactly what this has always
+    drawn) or "line" — see `VIEW_MODES`.
 
     Panels are not in it, deliberately. A panel is not part of a cupboard run —
     it has no place in a line of carcasses — and keeping it out is also what
@@ -440,6 +473,12 @@ def elevation_svg(job: Job, max_width: int = 1100,
 
     `pictures` is where a board picture is fetched from — see `Fills`.
     """
+    if mode == "line":
+        return _line_ink(_elevation_svg(_line_job(job), max_width, pictures, False))
+    return _elevation_svg(job, max_width, pictures, True)
+
+
+def _elevation_svg(job: Job, max_width: int, pictures: str, legend: bool) -> str:
     cabs = [c for c in job.cabinets if not c.is_panel]
     # A corner unit's width along its wall is its geometry, never the declared
     # label (hard rule 1): a mitre drawn at its declared 1200 when its arm is 1000
@@ -458,7 +497,8 @@ def elevation_svg(job: Job, max_width: int = 1100,
     pad = 46
     scale = min((max_width - pad * 2) / total_w, 520 / max_h)
     W = int(total_w * scale) + pad * 2
-    rows = _legend_rows(job, _boards_drawn(job, cabs), W - pad * 2)
+    # the board key says what each colour is; the Line view has no colours
+    rows = _legend_rows(job, _boards_drawn(job, cabs), W - pad * 2) if legend else []
     leg = _legend_height(rows)
     H = int(max_h * scale) + pad * 2 + 14 + leg   # under the floor: tapes, then boards
 
@@ -589,7 +629,7 @@ def _dim_v(y_top, y_bot, x, value):
 
 
 def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100,
-                       pictures: str = PIC.ROUTE) -> str:
+                       pictures: str = PIC.ROUTE, mode: str = "finish") -> str:
     """One wall, face on, as a dimensioned working drawing.
 
     Cabinets at their true positions and heights, with the wall, its openings and
@@ -597,11 +637,29 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100,
     Widths are chained from the wall's start corner and heights from the floor.
     With no room there is no datum, so it falls back to the side-by-side sanity
     check, unchanged. `pictures` is where a board picture is fetched from —
-    see `Fills`.
+    see `Fills`. `mode` is the view, "finish" or "line" (`VIEW_MODES`).
+
+    Every wall is drawn by the same rule, whatever the room's shape: standing in
+    the room facing this wall, left and right as you see them, what is placed on
+    it is drawn in full; the runs on the walls either side of it — found off the
+    room's chain of corners (`return_profiles`), never off a letter — are grey
+    outlines end on at the ends they meet it, labelled with their wall and their
+    numbers; and an end with no wall beside it has nothing drawn there. A corner
+    unit belongs to the wall it is placed on: drawn in full there, an outline
+    end on everywhere else.
     """
     rm = job.room
     if rm is None:
-        return elevation_svg(job, max_width, pictures)
+        return elevation_svg(job, max_width, pictures, mode)
+    if mode == "line":
+        return _line_ink(_wall_elevation_svg(_line_job(job), wall_id, max_width,
+                                             pictures, False))
+    return _wall_elevation_svg(job, wall_id, max_width, pictures, True)
+
+
+def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
+                        legend: bool) -> str:
+    rm = job.room
     wall = next((w for w in rm.walls if w.id == wall_id), None)
     if wall is None:
         return _note_svg(f"No wall {escape(str(wall_id))}")
@@ -625,12 +683,14 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100,
     bad_panels = {c.panel for c in panel_clashes(job, std) if c.wall == wall_id}
 
     length, top = wall.length, dims["top"]
-    pad_l, pad_r, pad_t, pad_b = 72, 30, 64, 80
+    # pad_b leaves the three footnotes clear of the overall dimension under the
+    # floor chain — at 80 the first of them was written across it
+    pad_l, pad_r, pad_t, pad_b = 72, 30, 64, 96
     scale = min((max_width - pad_l - pad_r) / length, 540 / top)
     W = int(length * scale) + pad_l + pad_r
-    rows = _legend_rows(job, _boards_drawn(job, [c for c, _p, _l, _g in on_wall] +
-                                           [c for c, _p, _g in on_panels]),
-                        W - pad_l - pad_r)
+    rows = (_legend_rows(job, _boards_drawn(job, [c for c, _p, _l, _g in on_wall] +
+                                            [c for c, _p, _g in on_panels]),
+                         W - pad_l - pad_r) if legend else [])
     leg = _legend_height(rows)
     H = int(top * scale) + pad_t + pad_b + leg
 
@@ -723,7 +783,7 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100,
     # this wall's own cabinets, so none of them hides another: the drawing is
     # about this wall. Cabinets that land on exactly the same outline share one
     # label rather than stacking their numbers on one spot.
-    shapes = {}
+    shapes, walls_seen = {}, {}
     for r in return_profiles(job, wall_id, std):
         shapes.setdefault((r["x0"], r["x1"], r["z0"], r["height"], r["wall"]),
                           []).append(r["cabinet"])
@@ -734,17 +794,34 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100,
                    f'<rect x="{sx:.1f}" y="{sy:.1f}" width="{sw_:.1f}" height="{sh:.1f}" '
                    f'fill="{FAINT}" fill-opacity="0.35" stroke="{MUTED}" '
                    f'stroke-width="0.9"/>')
-        if sw_ >= 14 and sh >= 14:
-            # at the outline's right edge: two outlines level at the top but of
-            # different depths (a wall unit beside a tall one) then label apart
-            out.append(f'<text x="{sx + sw_ - 3:.1f}" y="{sy + 10:.1f}" font-size="8" '
-                       f'text-anchor="end" fill="{MUTED}">{escape(other)}: '
-                       f'{", ".join(map(str, sorted(nums)))}</text>')
         out.append('</g>')
+        seen = walls_seen.setdefault(other, [x0, x1, z0 + hgt, set()])
+        seen[0], seen[1] = min(seen[0], x0), max(seen[1], x1)
+        seen[2] = max(seen[2], z0 + hgt)
+        seen[3].update(nums)
+    # The outlines' lines and labels go on again over this wall's own cabinets,
+    # below — see there.
+    end_on = []
+    for (x0, x1, z0, hgt, other), nums in shapes.items():
+        end_on.append(f'<rect class="esideline" x="{X(x0):.1f}" y="{Y(z0 + hgt):.1f}" '
+                      f'width="{(x1 - x0) * scale:.1f}" height="{hgt * scale:.1f}" '
+                      f'fill="none" stroke="{MUTED}" stroke-width="0.8" '
+                      f'stroke-dasharray="5 3" pointer-events="none"/>')
+    # ONE label per neighbouring wall, over the top of everything of it that is
+    # seen end on: "B: 11, 13". A label per outline put one number on top of
+    # another wherever two outlines shared a top edge, and the one underneath
+    # vanished — which is how cabinet 13 went unnamed on wall A.
+    for other, (x0, x1, ztop, nums) in walls_seen.items():
+        mid = (X(x0) + X(x1)) / 2
+        end_on.append(f'<text class="esidelabel" data-wall="{escape(other)}" '
+                      f'x="{mid:.1f}" y="{Y(ztop) - 4:.1f}" font-size="8.5" '
+                      f'text-anchor="middle" fill="{MUTED}" pointer-events="none">'
+                      f'{escape(other)}: '
+                      f'{", ".join(map(str, sorted(nums)))}</text>')
     if shapes:
         out.append(f'<text x="{pad_l}" y="{H - 32 - leg}" font-size="8.5" fill="{MUTED}">'
-                   f'Shaded outlines at the corners are the runs on the walls either side, '
-                   f'seen end on.</text>')
+                   f'Shaded outlines at the ends are the runs on the walls either side, '
+                   f'seen end on, labelled with their wall and numbers.</text>')
 
     for c, p, lay, g in on_wall:
         z0 = carcass_z(c, p, std)
@@ -805,6 +882,13 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100,
             out.append(f'<text x="{px + pw + 3:.1f}" y="{py - 3:.1f}" font-size="8.5" '
                        f'fill="{INK}">{c.number} · {line.length}x{line.width}</text>')
         out.append('</g>')
+
+    # A neighbour seen end on is often NEARER the viewer than this wall's own
+    # front — a return run standing in front of a corner unit's far arm — so
+    # its outline is drawn again over the top, dashed and unfilled, where it
+    # can be seen, and its label with it. The fill stays underneath: the
+    # drawing is still about this wall.
+    out += end_on
 
     if any(c.door_count for c, _p, _lay, _g in on_wall):
         out.append(f'<text x="{pad_l}" y="{H - 20 - leg}" font-size="8.5" fill="{MUTED}">'
@@ -925,6 +1009,7 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
 
     out += _plan_walls(rm, corners, T, scale)
     out += _plan_gaps(job, show, T)
+    under_at = len(out)          # a wide panel's grab area goes here, under the cabinets
     # ghosted first so the selected layers sit on top of them
     if isolate is None:
         solid = [i for i in items if i[2] in show]
@@ -946,14 +1031,25 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     # visible against the thing it fouls
     out += _plan_fronts(job, solid, clashing, T, std)
     # Panels over the cabinets, thin and in their own board's colour: a bulkhead
-    # front is in front of the units it caps. Not draggable here — a panel is
-    # placed by typing, and the plan drag knows nothing about y.
+    # front is in front of the units it caps. Draggable here since 22 September
+    # 2026, along the wall and off it, through a grab area of their own — see
+    # `_plan_panel_hit`. A THIN one's grab area goes on top; a wide one (a
+    # bulkhead underside over the run) was spliced in under the cabinets above,
+    # so it never takes a press from a cabinet it lies over.
     bad_panels = {c.panel for c in panel_clashes(job, std)}
+    live = [(cab, p) for cab, p in pans
+            if (cab.number == isolate if isolate is not None else "panels" in show)]
     for cab, p in pans:
         out += _plan_panel(job, rm, cab, p, T, std,
                            faint=(cab.number != isolate if isolate is not None
                                   else "panels" not in show),
                            bad=cab.number in bad_panels)
+    for cab, p in live:
+        hit, thin = _plan_panel_hit(job, rm, cab, p, T, std, scale)
+        if thin or cab.number == isolate:
+            out += hit
+        else:
+            out[under_at:under_at] = hit
     # labels after every shape: an overhead sits over the base run it belongs to,
     # and a number you cannot read is worse than no number
     for cab, p, lay in solid:
@@ -1094,10 +1190,16 @@ def _plan_tracks(rm, corners, T):
     The browser projects the pointer onto one of these. Every number it needs —
     the wall's ends and its length — comes from here, computed by the engine.
     """
+    frames = wall_frames(rm)
     out = ['<g id="tracks" style="pointer-events:none">']
     for i, w in enumerate(rm.walls):
         (ax, ay), (bx, by) = T(corners[i]), T(corners[i + 1])
+        # The unit direction INTO THE ROOM off this wall, on the drawing. The
+        # plan maps world onto the page with one scale and no flip, so it is the
+        # wall's own normal; a panel's drag reads its depth off the wall with it.
+        _s, _d, (nx, ny) = frames[w.id]
         out.append(f'<line class="track" data-wall="{escape(w.id)}" data-len="{w.length}" '
+                   f'data-nx="{nx + 0.0:.6f}" data-ny="{ny + 0.0:.6f}" '
                    f'x1="{ax:.2f}" y1="{ay:.2f}" x2="{bx:.2f}" y2="{by:.2f}" '
                    f'stroke="none"/>')
     out.append("</g>")
@@ -1178,14 +1280,12 @@ def _plan_panel(job, rm, cab, p, T, std, faint=False, bad=False):
     """One panel's footprint: a thin rectangle in the board it is cut from.
 
     16 mm on plan is under a pixel at most scales, so the outline is what is
-    actually seen and the fill is there for the colour. It carries no `.cab`
-    class and no drag: a panel is placed by typing, and the plan drag has no
-    idea what `y` is.
+    actually seen and the fill is there for the colour.
 
-    And it takes no pointer events at all. A bulkhead underside is 570 deep on
-    plan and covers the whole run beneath it, so left grabbable it would have
-    put an undraggable sheet over every cabinet it caps — the plan drag looks
-    for `.cab` under the pointer and would have found the panel instead.
+    It takes no pointer events itself. A panel is picked up by its grab area,
+    `_plan_panel_hit`, which is placed so that a bulkhead underside 570 deep on
+    plan never puts a sheet over the cabinets it caps. `data-panel` is what the
+    drag moves with it.
     """
     fp = [T(q) for q in cabinet_footprint(rm, p, cab, std, job.materials)]
     pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in fp)
@@ -1195,6 +1295,31 @@ def _plan_panel(job, rm, cab, p, T, std, faint=False, bad=False):
             f'fill="{"#f6e0e3" if bad else colour}" fill-opacity="0.9" '
             f'stroke="{CRIT if bad else INK}" pointer-events="none" '
             f'stroke-width="{"2" if bad else "1.3"}"{op}/>']
+
+
+def _plan_panel_hit(job, rm, cab, p, T, std, scale):
+    """The invisible area a panel is picked up by in the plan, and whether the
+    panel is THIN there (either extent under `PANEL_GRAB` pixels).
+
+    A 16 mm panel is under three pixels on plan, so, as in the elevation (E4),
+    its footprint is grown about its middle to at least `PANEL_GRAB` pixels each
+    way, in the wall's own frame so it turns with the wall. It carries `.cab` —
+    one press handler, one `/api/drag` — with `data-layer="panels"`, which is the
+    toggle that says whether it is live, and `data-panel` so the drag knows to
+    move it off the wall as well as along it.
+    """
+    g = geometry(cab, std, job.materials)
+    grow = PANEL_GRAB / max(scale, 1e-9)            # PANEL_GRAB pixels, in mm
+    w, d = max(g.width, grow), max(g.depth, grow)
+    x0 = p.x + g.width / 2 - w / 2
+    y0 = int(getattr(p, "y", 0) or 0) + g.depth / 2 - d / 2
+    pts = [T(to_world(rm, p.wall, x, y)[:2])
+           for x, y in ((x0, y0), (x0 + w, y0), (x0 + w, y0 + d), (x0, y0 + d))]
+    thin = min(g.width, g.depth) * scale < PANEL_GRAB
+    return ([f'<polygon class="cab panhit" data-cab="{cab.number}" '
+             f'data-panel="{cab.number}" data-layer="panels" '
+             f'points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in pts)}" '
+             f'fill="none" stroke="none" pointer-events="all"/>'], thin)
 
 
 def _plan_label(rm, cab, p, T, std: Standard = STANDARD, materials: dict = None):
@@ -1470,19 +1595,15 @@ def _corner_interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
                 leaf(x0, x0 + span, i, True, f"{doors[i]}")
             if flip is not None:
                 out += _hinge_marks(c, px(s0), top, span, dh, door_h, flip, std, mats)
-        # the open-face side on the return wall, square on to this one
+        # The open-face side at the end of the other arm, square on to this
+        # wall: part of this cabinet, drawn in the board it is cut from and
+        # nothing else. It used to carry a "side on the return wall" label,
+        # which read as a second, different thing standing in the corner —
+        # every wall now draws a neighbour the one way, as an outline end on.
         e0, e1 = (a - fb, a) if hand == "R" else (0, fb)
         out.append(f'<line x1="{px(e0 if hand == "R" else e1):.1f}" y1="{y:.1f}" '
                    f'x2="{px(e0 if hand == "R" else e1):.1f}" y2="{y + h:.1f}" '
                    f'stroke="{RULE}" stroke-width="0.8"/>')
-        if (e1 - e0) * scale > 40:
-            body = board_look(mats, c.carcass_board)
-            out.append(f'<text x="{px((e0 + e1) / 2):.1f}" y="{y + h / 2:.1f}" '
-                       f'font-size="8.5" text-anchor="middle" '
-                       f'fill="{muted_on(body["colour"])}">side on the</text>'
-                       f'<text x="{px((e0 + e1) / 2):.1f}" y="{y + h / 2 + 11:.1f}" '
-                       f'font-size="8.5" text-anchor="middle" '
-                       f'fill="{muted_on(body["colour"])}">return wall</text>')
     elif kind == "blind":
         B = int(c.blind_width or 0)
         spans = blind_spans(c, std)

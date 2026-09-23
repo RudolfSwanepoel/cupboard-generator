@@ -42,11 +42,12 @@ from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth,
                              panel_clashes as room_panel_clashes, placed_panels,
                              placement_for, plinth_choice_for, plinth_lengths,
                              rectangular, runs as room_runs, snap_points,
-                             z_snap_points)
+                             y_snap_points, z_snap_points)
 from cabinetgen.standard import STANDARD
 from cabinetgen.store import (job_from_dict, job_to_dict, load, next_number,
                               room_from_dict, room_to_dict, save)
-from cabinetgen.validate import (ALLOWED_EDGE, BOARD_GUIDELINE, blocking,
+from cabinetgen.validate import (ACCEPTABLE, ALLOWED_EDGE, BOARD_GUIDELINE,
+                                 blocking, fingerprint, lapsed_acceptances,
                                  validate)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1003,7 +1004,7 @@ def board_swap(payload):
            "merged": merged,
            "new_issues": [as_dict(i) for i in fresh],
            "fixed_issues": [as_dict(i) for i in gone],
-           "blocks": any(i.level == "critical" for i in now_issues),
+           "blocks": blocking(now_issues),
            "moved_by_board": _moved_by_board(before_panels, after_panels),
            "grain": _grain_change(before_panels, after_panels),
            "rotation": _rotation_cost(job, before_panels, after_panels, before, after),
@@ -1100,7 +1101,7 @@ def compute(payload):
         "materials": {k: _board_payload(job, k) for k in (job.materials or {})},
         "room": _room_info(job),
         "elevation": elevation_svg(job),
-        "panels": [], "issues": [], "blocking": False,
+        "panels": [], "issues": [], "blocking": False, "lapsed": [],
         "summary": {"materials": {}, "edging": {}, "potholes": 0},
         "cost": {"lines": [], "total_incl_vat": 0.0},
         "nest": {}, "rejects": [],
@@ -1119,6 +1120,10 @@ def compute(payload):
     issues = validate(job, panels)
     out["issues"] = [asdict(i) for i in issues]
     out["blocking"] = blocking(issues)
+    # Acceptances that no longer hold — the cabinet or the ceiling they were
+    # given for has changed. The browser drops them from the job and says so;
+    # nothing here writes to the job.
+    out["lapsed"] = [asdict(a) for a in lapsed_acceptances(job)]
     out["panels"] = [_panel_row(p, job.std) for p in panels]
     # what each cabinet actually is, off its panels — the editor shows it beside
     # the declared figures so a bespoke cabinet's label cannot pass for its size
@@ -1247,10 +1252,14 @@ def export(payload):
     panels = generate_job(job)
     issues = validate(job, panels)
     if blocking(issues):
-        crit = [asdict(i) for i in issues if i.level == "critical"]
+        crit = [asdict(i) for i in issues if i.blocks]
         return {"ok": False,
                 "error": f"Export blocked by {len(crit)} critical issue(s).",
                 "issues": crit}
+    # What was accepted rather than cleared, with the reasons. Reported with the
+    # export and written beside it for whoever opens the folder — never into the
+    # Plazaboard CSV, whose format is theirs.
+    accepted = [asdict(i) for i in issues if i.level == "critical" and i.accepted]
 
     job.name = _safe_name(job.name)          # it names files; it must not name paths
     outdir = os.path.join(OUT_DIR, job.name)
@@ -1277,7 +1286,35 @@ def export(payload):
             fh.write(svg)
         written.append(path)
     written += _export_pictures(job, outdir)
-    return {"ok": True, "dir": outdir, "files": [os.path.basename(p) for p in written]}
+    if accepted:
+        path = os.path.join(outdir, f"{job.name}_accepted.txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("Criticals accepted for this export, with the reason given:\n\n")
+            for i in accepted:
+                fh.write(f"{i['where']}  {i['message']}\n    accepted: {i['accepted']}\n")
+        written.append(path)
+    return {"ok": True, "dir": outdir, "files": [os.path.basename(p) for p in written],
+            "accepted": accepted}
+
+
+def accept(payload):
+    """The fingerprint to store with an acceptance of one critical.
+
+    Asked when the operator accepts a site-dependent critical. The browser
+    stores what comes back, with the reason, in the job's acceptances; it works
+    none of it out. A critical that is not in `validate.ACCEPTABLE` is refused —
+    one that protects the cut list cannot be accepted, however it is asked.
+    """
+    job = _job(payload)
+    check = str(payload.get("check") or "")
+    where = str(payload.get("where") or "")
+    if check not in ACCEPTABLE:
+        return {"ok": False, "error": f"the {check or 'unnamed'} check cannot be "
+                                      f"accepted — it protects the cut list"}
+    fp = fingerprint(job, check, where)
+    if fp is None:
+        return {"ok": False, "error": f"nothing to accept for {where}"}
+    return {"ok": True, "check": check, "where": where, "fingerprint": fp}
 
 
 def job_list(payload):
@@ -1427,7 +1464,11 @@ def elevation(payload):
     """
     job = _job(payload)
     wall = payload.get("wall")
-    svg = wall_elevation_svg(job, str(wall)) if wall else elevation_svg(job)
+    # Finish or Line: a view setting only, never saved in the job, and it moves
+    # no geometry — the same drawing with or without the boards' colours.
+    mode = "line" if payload.get("mode") == "line" else "finish"
+    svg = (wall_elevation_svg(job, str(wall), mode=mode) if wall
+           else elevation_svg(job, mode=mode))
     return {"ok": True, "svg": svg}
 
 
@@ -1507,6 +1548,8 @@ def drag(payload):
         "depth": g.depth,
         "layer": layer_of(cab, here),
         "leg_lift": lift,
+        # where it stands off the wall now — 0 for every carcass
+        "y": int(getattr(here, "y", 0) or 0) if here else 0,
         "tolerance": job.std.snap_tolerance,
         "ceiling": ceiling,
         # How high the underside may go. 0 is the floor, where the carcass stands
@@ -1523,7 +1566,10 @@ def drag(payload):
                          # every height, each with the stretch of wall it
                          # applies over — the cabinet crosses several on the way
                          "z_snaps": z_snap_points(job, number, w.id, job.std,
-                                                  spans=True)}
+                                                  spans=True),
+                         # how far off the wall a PANEL may rest, for the plan
+                         # drag; a carcass has no y, and gets none
+                         "y_snaps": y_snap_points(job, number, w.id, job.std)}
                   for w in job.room.walls},
     }
 
@@ -1563,6 +1609,7 @@ ROUTES = {
     "/api/drop-picture": drop_picture,
     "/api/picture-grain": picture_grain,
     "/api/export": export,
+    "/api/accept": accept,
     "/api/jobs": job_list,
     "/api/save": job_save,
     "/api/job-delete": job_delete,

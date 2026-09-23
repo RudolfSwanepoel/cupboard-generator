@@ -31,6 +31,7 @@ python tools/check_swap.py
 python tools/check_colour.py
 python tools/check_panels.py
 python tools/check_pictures.py
+python tools/check_accept.py
 python tools/snapshot.py --compare baseline.json
 ```
 
@@ -54,6 +55,64 @@ line, and `regen_check` says so rather than failing. Every other figure in this
 list comes out of the engine and is checked on any machine.
 
 ## Status
+
+**Placed panels drag in the plan (22 September 2026, follow-up brief).** Along
+their wall and off it, z untouched, through the same `/api/drag` and a new depth
+snap, `room.y_snap_points`. See **Dragging a panel in the plan** under **Placing
+a panel**. Exercised with a real mouse in headless Chromium on Test.json's end
+panel 8 and an upright panel: grabbed on its grab area and not its number, no
+jump off-centre, nearest snap on both axes (y 19 lands on 14 "front level with
+1", not on the wall), a quick drag, z unchanged, the elevation at the new x
+straight after, the reverse, and cabinets dragging exactly as before. Benchmark
+and every check unchanged.
+
+**Plan drag, accepting criticals, wall elevations on one rule, Line / Finish
+view (22 September 2026, brief `claude-code-brief` of that date, items 1-5).**
+Benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50);
+every `check_*.py` passes, sixteen of them now; `snapshot.py --compare` against
+the tree before this work moves no panel, issue, summary or total on any job —
+only Test.json's drawings, which is the point of items 3 and 4.
+
+1. **Plan drag.** The listen-before-await race the brief describes had already
+   been fixed that morning (919e73c) and was not the stutter. Measured in a
+   headless browser with a real mouse, three faults were: every plan label took
+   the pointer, so a press on the MIDDLE of a cabinet — on its number — did
+   nothing, and a panel's number beside it left a dead strip over the next
+   cabinet (`#plan svg text{pointer-events:none}`); the drag put the cabinet's
+   middle under the pointer, so grabbing it off-centre jumped it ~180 mm on the
+   first move (it now keeps the grab offset, as the elevation always has); and
+   it took the first snap within tolerance, not the nearest (the elevation's
+   rule since 21 September). Panels are still not dragged in the plan — the
+   existing ruling — and drag in the elevation, checked the same way.
+2. **Accepting a site-dependent critical.** See **Accepting a critical** below.
+   Tip-up only.
+3. **Every wall drawn by one rule.** See **Per-wall elevations**. The "white box
+   labelled side on the return wall" was a MITRE's own open-face side, drawn by
+   `_corner_interior` with that label; the label is gone and the side stays in
+   its board. Blind corners were already drawing their panel in its own board.
+4. **Line / Finish** in the elevation header. See **Drawings**.
+5. **"Shelf 968 deep fouls the back at 965" was a MITRE, not a blind corner.**
+   Reproduced exactly: a tall mitre with arms 1000 and a mitred shelf cuts that
+   shelf as the 968 x 968 blank the top and bottom are, and D3 measures it
+   against a 3 mm back the mitre does not have (its back is the melamine wall
+   panels; `back` stays "four" in the file). Derived shelves on blind corners —
+   base 600, wall 600 and 350, tall 1000 — never trip it, pinned in
+   `check_drag.py`. **Left as is — ruled** (below).
+
+Also: `check_edging.py` was failing on `Test.json` cabinet 13 before any of
+this — a mitre keeps its support rows and cuts none, exactly as a panel does,
+and the check now skips it the same way.
+
+**Ruled on these results the same day:** the classification of criticals is
+accepted as proposed — **tip-up is the only acceptable critical**, and every
+other one blocks, above-ceiling, ceiling-measured, wall-length and room-closure
+included. And **`shelf-fouls-back` on a mitre stays as it is**: Rudolf ruled
+against skipping it when no back panel is cut. Do not change it.
+
+Rulings recorded with this brief: **blind corners are intended mainly for base
+and wall-hung units; tall corners are mitres. External corners** (outside
+angles, peninsulas, walls not at 90°) **are awaiting Rudolf's sketch of his own
+kitchen — build nothing towards them yet.**
 
 **A blind corner's panel is INSET, selectable, and edged on one robust edge
 (22 September 2026, Rudolf's final ruling; brief in
@@ -269,6 +328,17 @@ difference nobody looked at.
 
 ## Drawings
 
+**Finish and Line** (22 September 2026). A two-way toggle in the elevation
+header, beside Run / Wall A / Wall B, for the Run and every wall. FINISH is the
+default and is exactly the drawing described below. LINE is the same drawing
+with every board white and plain and no picture — `render._line_job` hands the
+renderer a COPY of the job whose board records differ only in how they look, so
+tape names, thicknesses and every size read the same — and every dark ink turned
+to the grey of the end-on outlines (`_line_ink`); red stays red. The board key
+is left off, having no colours to explain. It is a view setting: not saved in
+the job (`S.elevMode`), no geometry moves, and with no room the wall elevation
+in Finish is still `elevation_svg` byte for byte (`check_elevation.py`).
+
 **A drawing is a read-only view of the model. Nothing reads one back.** The
 colours, the grain lines and the legend are output; no check, no cut list and
 no validation derives anything from them.
@@ -407,6 +477,7 @@ tools/check_swap.py        a swap moves every use of a board, and says what it d
 tools/check_colour.py      board colour in the drawings, and the ink that reads on it
 tools/check_panels.py      independent panels: the line they cut, and what they stay out of
 tools/check_pictures.py    board pictures: stored, served, drawn, grain-checked
+tools/check_accept.py      accepting a site-dependent critical, and the acceptance lapsing
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
@@ -1155,11 +1226,37 @@ rectangle at least `render.PANEL_GRAB` (16) px across** with `pointer-events`
 on. Without it a bulkhead front cannot be picked up at all.
 
 **In the plan a panel is a thin rectangle in its own board's colour, drawn over
-the cabinets and taking no pointer events.** `y` is visible there and nowhere
-else. It is not draggable in the plan — a panel is placed by typing, and the
-plan drag knows nothing about y — and a bulkhead underside is 570 deep on plan,
-so left grabbable it would have put an undraggable sheet over every cabinet it
-caps.
+the cabinets.** `y` is visible there and nowhere else. The drawn rectangle takes
+no pointer events; the panel is picked up by its own grab area — see **Dragging
+a panel in the plan** below.
+
+**Dragging a panel in the plan** (22 September 2026, replacing E5's "not
+built"). Along its OWN wall (x) and off it (y); never onto another wall and never
+up or down — z is the elevation's. One press handler and one `/api/drag`, as for
+a cabinet:
+
+- `render._plan_panel_hit` is the grab area: the footprint grown about its middle
+  to at least `PANEL_GRAB` px each way, in the wall's frame, class `cab panhit`,
+  `data-layer="panels"` so the Panels toggle decides whether it is live. A THIN
+  panel's goes over the cabinets (E4, as in the elevation); a WIDE one — a
+  bulkhead underside over the run — goes under them, so it never takes a press
+  from a cabinet it lies over, and is reached where it is clear or by isolating
+  it. Plan text takes no pointer events, so its number never catches the press.
+- `room.y_snap_points` is the depth twin of `snap_points`: the wall (0), each
+  carcass or panel's front ("in front of N"), fronts level ("front level with
+  N"), and another panel's back ("back level with N", "behind N"). NOT filtered
+  by height — a bulkhead front lines up with base-unit fronts far below it. Each
+  carries N's stretch of wall only for the tie-break. `/api/drag` hands it over
+  per wall as `y_snaps`, and a carcass gets none.
+- Each track carries `data-nx`/`data-ny`, the wall's own normal into the room;
+  the plan is one scale and no flip, so that IS the direction on the page. The
+  browser reads y off it and works out no dimension.
+- Both axes keep the grab offset and take the NEAREST candidate within
+  tolerance, ties to the nearest along the wall at the live position.
+- The drop writes `Placement.x` and `Placement.y` of that panel and nothing
+  else, then recomputes: the clash warnings, the plan and the elevation all come
+  from that one compute. `check_drag.py` pins that only placements move and the
+  cut list does not.
 
 **Grain lines on a panel run the way the cut list cuts it, or not at all.**
 `render._panel_grain_vertical` maps the grain direction onto the drawing through
@@ -1203,8 +1300,8 @@ which is also why cabinet 6 is 570 deep rather than 500. `check_panels.py` and
 `check_edging`'s support-row comparison skips panels, because a panel keeps its
 support rows in the file and the engine cuts none of them.
 
-**Not built, and not asked for: dragging a panel in the plan, and `PanelSpec.anchor`.**
-A panel still stays where it is put and does not follow a cabinet.
+**Not built, and not asked for: `PanelSpec.anchor`.** A panel still stays where it
+is put and does not follow a cabinet. (Dragging one in the plan is built — above.)
 
 ## Zoom
 
@@ -1311,9 +1408,9 @@ The thing that is hidden is hidden UNDER something, and that something would
 still swallow the click. Only isolate does this — a layer ghosted by the toggle
 keeps its events, which is what reveals its door swing on hover.
 
-**A panel isolates exactly as a cabinet does**: it is occluded the same way. It
-is still not draggable in the plan, isolated or not — that is the existing
-ruling, unchanged.
+**A panel isolates exactly as a cabinet does**: it is occluded the same way, and
+isolated its grab area goes on top whatever its size, so a bulkhead underside
+lying over the run can always be got at and dragged.
 
 **`plan_svg(isolate=...)` falls back to the ordinary plan when the number names
 nothing it draws**, rather than greying out the whole room for nothing. A newly
@@ -1937,7 +2034,43 @@ A run whose cabinets sit off the floor gets no plinth and a warning saying why.
 A `PlinthChoice` whose run no longer starts at that cabinet is orphaned: no
 panel, and a warning — the safe way round.
 
+## Accepting a critical
+
+**Ruled 22 September 2026.** Some criticals depend on the SITE, not on the cut
+list; the operator can accept one with a reason and the export goes ahead. A
+critical that protects the cut list always blocks. **Today only tip-up is
+acceptable**, and the mitre door swing is deliberately not.
+
+- Every critical carries a stable **check id** (`Issue.check`, e.g. `tip-up`,
+  `overlap`, `mitre-door-swing`). Never rename one: acceptances are stored
+  against it.
+- A check becomes acceptable by an entry in `validate.ACCEPTABLE` and nowhere
+  else — its id and the function that FINGERPRINTS exactly the inputs it read.
+  Tip-up's is `room.tip_inputs`, the same dict `tip_problems` works from:
+  height and depth off `geometry` (never declared), legs, setback, underside and
+  ceiling, written readably into the job file.
+- `Job.acceptances` holds `{check, where, reason, fingerprint}`, written only
+  when there is one, so every job on disk round-trips byte for byte.
+- `validate` marks each critical `acceptable`, `accepted` (the reason) or
+  `lapsed`, and never writes to the job. `blocking` ignores accepted ones.
+  `/api/compute` returns `lapsed`; the BROWSER drops those from the job, marks
+  it unsaved and says why in one line. A stored acceptance for a check that is
+  not acceptable is lapsed by definition — it can never unblock anything.
+- `/api/accept` hands back the fingerprint and refuses any check not in
+  `ACCEPTABLE`. The reason is required; "Assembled in place" is a one-click
+  preset.
+- Accepted items stay in the Validation list greyed with an Undo, show on the
+  cut list, and go into the export folder as `<job>_accepted.txt`. **Never into
+  the Plazaboard CSV.**
+
 ## Drag placement
+
+**Three things a press in the plan must get right** (22 September 2026, all
+measured with a real mouse in a headless browser): text in the plan takes no
+pointer events, or the number over a cabinet's middle swallows the press; the
+drag keeps where along the cabinet it was grabbed (`d.grab`, projected on the
+press onto the cabinet's own wall track), or it jumps to centre on the first
+move; and it takes the NEAREST snap within tolerance.
 
 **The browser computes no dimension.** That is the spec's rule and it shapes the
 whole design. On pointerdown the UI asks `/api/drag` for that cabinet's snap
@@ -2010,6 +2143,20 @@ reads the result back. The elevation only draws leaves for template cabinets
 bespoke cabinet's leaf is turned round from the editor rather than the drawing.
 
 ## Per-wall elevations
+
+**One rule for every wall, however many there are** (22 September 2026).
+Standing in the room facing the wall: what is placed on it is drawn in full; the
+runs on the walls either side are grey outlines end on, at their true depth and
+height off `room.geometry`, **one label per neighbouring wall** naming its
+numbers ("B: 11, 13") — a label per outline hid one number under another, which
+is how cabinet 13 went unnamed on wall A; an end with no wall beside it has
+nothing drawn. The neighbours come off the chain of corners in
+`room.return_profiles`, never a letter, and include placed PANELS. A corner unit
+belongs to the wall it is placed on. The end-on outlines are filled under this
+wall's cabinets as before, and their dashed lines and labels drawn again OVER
+them: a return run often stands nearer the viewer than a corner unit's far arm,
+and was being hidden behind it. Checked on three- and four-wall rooms in
+`check_elevation.py`.
 
 **The runs either side show end on** (18 September 2026). Face on to wall B, wall
 A's run comes towards you at B's start corner, and what you see is the cabinets'

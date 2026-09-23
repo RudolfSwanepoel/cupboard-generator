@@ -1135,6 +1135,26 @@ class PlinthChoice:
 
 
 @dataclass
+class Acceptance:
+    """A critical the operator has accepted, with the reason why.
+
+    Only a site-dependent critical can be accepted — one that says something
+    about the room rather than about the cut list (`validate.ACCEPTABLE` is the
+    list, and today it is the tip-up check alone). A critical that protects the
+    cut list is never accepted, whatever is stored here.
+
+    `fingerprint` is exactly the inputs the check used when the acceptance was
+    given, as `validate.fingerprint` wrote them. When they no longer match, the
+    acceptance has lapsed: it was given for a different cabinet or a different
+    ceiling, and the critical blocks again until somebody looks at it afresh.
+    """
+    check: str                 # the stable id of the check, e.g. "tip-up"
+    where: str                 # what the issue names — for tip-up, the cabinet number
+    reason: str
+    fingerprint: str = ""
+
+
+@dataclass
 class Job:
     name: str
     cabinets: List[Cabinet] = field(default_factory=list)
@@ -1151,6 +1171,11 @@ class Job:
     # "whatever `materials` already carries", which is how every job written
     # before the library reads.
     boards: List[str] = field(default_factory=list)
+
+    # Site-dependent criticals the operator has accepted, each with its reason.
+    # Written to the job file only when there is one, so every job saved before
+    # acceptances existed reads and writes byte for byte.
+    acceptances: List[Acceptance] = field(default_factory=list)
 
     # board id -> the record this job was quoted with. A snapshot taken when the
     # board was selected, never a pointer at the library: editing a board's price

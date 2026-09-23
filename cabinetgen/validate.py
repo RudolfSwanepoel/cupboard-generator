@@ -18,7 +18,8 @@ from .room import (above_ceiling, arm_shelf_depth, arm_shelf_max_depth,
                    clashes as room_clashes, closure_error, corner_offset,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
                    panel_clashes as room_panel_clashes, placed,
-                   plinth_choice_for, run_key, runs as room_runs, tip_problems,
+                   plinth_choice_for, run_key, runs as room_runs, tip_inputs,
+                   tip_problems,
                    triangulate)
 from .engine import mitre_door_width
 from .standard import Standard, STANDARD
@@ -46,11 +47,97 @@ class Issue:
     where: str
     message: str
     ref: str = ""
+    # The stable id of the rule that raised it. Every critical carries one; it
+    # is what an acceptance is stored against, so it never changes once given.
+    check: str = ""
+    # Filled in by `validate` from the job's acceptances, never by a rule:
+    # whether this critical may be accepted at all (`ACCEPTABLE`), the reason it
+    # was accepted with, and whether an acceptance was given and has lapsed.
+    acceptable: bool = False
+    accepted: str = ""
+    lapsed: bool = False
+
+    @property
+    def blocks(self) -> bool:
+        """A critical blocks the export unless it has been accepted."""
+        return self.level == CRITICAL and not self.accepted
 
     def __str__(self):
         tag = "CRITICAL" if self.level == CRITICAL else "warning"
+        if self.level == CRITICAL and self.accepted:
+            tag = "ACCEPTED"
         ref = f"  [{self.ref}]" if self.ref else ""
-        return f"{tag:>8}  {self.where:<12} {self.message}{ref}"
+        why = f"  — accepted: {self.accepted}" if self.accepted else ""
+        return f"{tag:>8}  {self.where:<12} {self.message}{ref}{why}"
+
+
+# --- accepting a site-dependent critical -------------------------------------
+#
+# Ruled 22 September 2026. Some criticals say something about the SITE rather
+# than about the cut list, and the operator can accept one of those with a
+# reason; the export then goes ahead. A critical that protects the cut list's
+# integrity always blocks.
+#
+# A check becomes acceptable by being given an entry here and nowhere else: its
+# id, and the function that fingerprints exactly the inputs it read. The
+# fingerprint is what makes an acceptance lapse — it was given for one cabinet
+# in one room, and if either changes it no longer holds.
+#
+# Today that is the tip-up check alone. The mitre door-swing critical was ruled
+# blocking on purpose and is deliberately NOT here.
+
+def _tip_fingerprint(job: Job, where: str):
+    """The tip-up check's inputs for one cabinet: its geometry off the panel set
+    (never the declared sizes), its legs, where it stands and the ceiling."""
+    rm = job.room
+    if rm is None:
+        return None
+    for cab, p, _lay in placed(job):
+        if str(cab.number) == str(where):
+            t = tip_inputs(cab, p, rm.ceiling, job.std)
+            return (f"height {t['height']} · depth {t['depth']} · legs {t['legs']} · "
+                    f"setback {t['setback']} · underside {t['underside']} · "
+                    f"ceiling {t['ceiling']}")
+    return None
+
+
+ACCEPTABLE = {
+    "tip-up": _tip_fingerprint,
+}
+
+
+def fingerprint(job: Job, check: str, where: str):
+    """What an acceptance of this critical is stored with, or None if it cannot
+    be accepted (not an acceptable check, or nothing there to fingerprint)."""
+    fn = ACCEPTABLE.get(check)
+    return fn(job, where) if fn else None
+
+
+def lapsed_acceptances(job: Job) -> list:
+    """The acceptances in the job that no longer hold: the check is no longer an
+    acceptable one, or what it read has changed since it was given.
+
+    Read-only, like everything else here. Dropping them from the job is the
+    caller's business — the browser does it and says so.
+    """
+    return [a for a in (job.acceptances or [])
+            if fingerprint(job, a.check, a.where) != a.fingerprint]
+
+
+def _apply_acceptances(job: Job, issues: List[Issue]):
+    """Mark each critical as acceptable, accepted or lapsed, off the job."""
+    given = {(a.check, str(a.where)): a for a in (job.acceptances or [])}
+    for i in issues:
+        if i.level != CRITICAL or i.check not in ACCEPTABLE:
+            continue
+        i.acceptable = True
+        a = given.get((i.check, str(i.where)))
+        if a is None:
+            continue
+        if fingerprint(job, i.check, i.where) == a.fingerprint:
+            i.accepted = a.reason.strip() or "accepted"
+        else:
+            i.lapsed = True
 
 
 def validate(job: Job, panels: List[Panel]) -> List[Issue]:
@@ -85,6 +172,7 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     out += _blind_clearance(job, std)
     out += _room_heights(job, std)
     out += _outlines(job, std)
+    _apply_acceptances(job, out)
     return sorted(out, key=lambda i: (i.level != CRITICAL, i.where))
 
 
@@ -114,7 +202,7 @@ def _panel_fits_board(panels, std):
             out.append(Issue(CRITICAL, p.label,
                              f"{p.length}x{p.width} does not fit a "
                              f"{std.sheet_l}x{std.sheet_w} board{how}",
-                             "W2"))
+                             "W2", check="panel-fits-board"))
     return out
 
 
@@ -125,14 +213,14 @@ def _cabinet_structure(cabinets, std):
         if c.is_panel:
             continue                       # not a box: see _panels
         if c.door_count and c.width <= 0:
-            out.append(Issue(CRITICAL, str(c.number), "door on a cabinet with no width"))
+            out.append(Issue(CRITICAL, str(c.number), "door on a cabinet with no width", check="door-no-width"))
         if c.drawer_list:
             runner = std.pick_runner(c.depth)
             if runner is None:
                 out.append(Issue(
                     CRITICAL, str(c.number),
                     f"{c.depth} mm deep is too shallow for any runner "
-                    f"(shortest is {min(std.runner_lengths)}, needs {std.runner_clearance} behind)"))
+                    f"(shortest is {min(std.runner_lengths)}, needs {std.runner_clearance} behind)", check="runner-depth"))
         if c.shelves and c.back == "none":
             out.append(Issue(WARNING, str(c.number),
                              "shelves in a cabinet with no back — check the shelf depth is intentional"))
@@ -153,7 +241,7 @@ def _front_stacks(cabinets, std):
             level = CRITICAL if abs(gap) > 2 * std.stack_gap else WARNING
             out.append(Issue(level, str(c.number),
                              f"front stack is {actual} in a {expected} opening ({gap:+d} mm)",
-                             "W5"))
+                             "W5", check="front-stack"))
     return out
 
 
@@ -177,7 +265,7 @@ def _shelf_clears_back(cabinets, panels, std):
         for p in mine[c.number]:
             if p.role == "Shelve" and p.width > limit:
                 out.append(Issue(CRITICAL, p.label,
-                                 f"shelf {p.width} deep fouls the back at {limit}", "D3"))
+                                 f"shelf {p.width} deep fouls the back at {limit}", "D3", check="shelf-fouls-back"))
     return out
 
 
@@ -225,7 +313,7 @@ def _edge_materials(job, panels, covered=frozenset()):
             # which is what a board swap onto a board that does not offer the
             # kind produces. The wording is unchanged; check_edging.py pins it.
             out.append(Issue(CRITICAL, p.label, "edges specified but no edge material",
-                             EDGING_REF))
+                             EDGING_REF, check="edge-material"))
     return out
 
 
@@ -238,7 +326,7 @@ def _grain_on_boards(job, panels):
     """
     return [Issue(CRITICAL, p.label,
                   f"{material_board(job.materials, p.material)} is a grained board "
-                  f"and this panel has grain not set", "W8")
+                  f"and this panel has grain not set", "W8", check="grain-on-board")
             for p in panels
             if grain_of(job.materials, p.material) and not p.grain]
 
@@ -267,12 +355,12 @@ def _drawer_boxes(cabinets):
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"drawer {i}: face height is {d.face_height} — the fixed "
                                  f"faces over-run the opening, leaving nothing for the "
-                                 f"shared ones"))
+                                 f"shared ones", check="drawer-face-overrun"))
                 continue
             if d.box_height >= d.face_height:
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"drawer {i}: box {d.box_height} is not shorter than "
-                                 f"its face {d.face_height}"))
+                                 f"its face {d.face_height}", check="drawer-box-height"))
     return out
 
 
@@ -299,17 +387,17 @@ def _panels(job: Job):
         if not spec.board:
             out.append(Issue(CRITICAL, where,
                              "panel with no board — pick what it is cut from in "
-                             "Panel design"))
+                             "Panel design", check="panel-board"))
         if spec.orientation not in PANEL_ORIENTATIONS:
             out.append(Issue(CRITICAL, where,
                              f"panel orientation {spec.orientation!r} is not one of "
                              f"{', '.join(PANEL_ORIENTATIONS)} — it cannot be drawn "
-                             f"or placed until it is one of them"))
+                             f"or placed until it is one of them", check="panel-orientation"))
         for name, v in (("a", spec.a), ("b", spec.b)):
             if int(v or 0) <= 0:
                 out.append(Issue(CRITICAL, where,
                                  f"panel size {name} is {int(v or 0)} — both extents "
-                                 f"have to be a real finished size"))
+                                 f"have to be a real finished size", check="panel-size"))
         # Edging asked for that the board does not sell. Same shape and the same
         # tag as A9: it blocks, and it says what to tick.
         banded = int(spec.edge_long or 0) + int(spec.edge_short or 0)
@@ -320,7 +408,7 @@ def _panels(job: Job):
                              f"in {colour or 'no board'}, which does not offer it — tick "
                              f"that kind on {colour or 'the board'} in the Boards tab, or "
                              f"choose another edging",
-                             EDGING_REF))
+                             EDGING_REF, check="panel-edging"))
     return out
 
 
@@ -339,7 +427,7 @@ def _project_boards(job: Job):
         out.append(Issue(CRITICAL, job.name,
                          "no boards selected — pick at least one board from the "
                          "library before adding cabinets; a cabinet has to be cut "
-                         "from something"))
+                         "from something", check="project-boards"))
     if len(ids) > BOARD_GUIDELINE:
         out.append(Issue(WARNING, job.name,
                          f"{len(ids)} boards selected ({', '.join(ids)}) — over the "
@@ -365,7 +453,7 @@ def _board_prices(job: Job, panels):
                              f"panels are cut from {mat!r}, which this project has not "
                              f"selected — it has no price, so it is quoted at R0. Tick "
                              f"it into the project on the Boards tab, or change the "
-                             f"cabinets that name it"))
+                             f"cabinets that name it", check="board-unselected"))
         elif not effective_price(job, mat):
             out.append(Issue(WARNING, mat,
                              f"{material_board(job.materials, mat)!r} has no price on "
@@ -422,11 +510,11 @@ def _boards_and_tapes(job: Job):
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"no {what} chosen — pick one from the boards this "
                                  f"project selected "
-                                 f"({', '.join(job.board_ids) or 'none yet'})"))
+                                 f"({', '.join(job.board_ids) or 'none yet'})", check="cabinet-board-missing"))
             elif board not in (mats or {}):
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"{what} {board!r} is not one of the job's boards "
-                                 f"({', '.join(sorted(mats or {})) or 'none'})"))
+                                 f"({', '.join(sorted(mats or {})) or 'none'})", check="cabinet-board-unknown"))
             elif board not in job.board_ids:
                 out.append(Issue(WARNING, str(c.number),
                                  f"{what} {board!r} is not among the boards this "
@@ -472,7 +560,7 @@ def _boards_and_tapes(job: Job):
                                  f"{name!r}, which {has}. Tick "
                                  f"{TAPE_PREFIX[thickness]} on that board in the "
                                  f"Boards tab, or choose another board here",
-                                 EDGING_REF))
+                                 EDGING_REF, check="edging-offered"))
             elif not material_token(mats, board):
                 out.append(Issue(WARNING, str(c.number),
                                  f"{name!r} has no name to build "
@@ -588,14 +676,14 @@ def _support_edging(job: Job):
                                  f"in {material_board(mats, board)!r}, which {has}. "
                                  f"Tick {TAPE_PREFIX[kind]} on that board in the "
                                  f"Boards tab, or choose another board for the row",
-                                 EDGING_REF))
+                                 EDGING_REF, check="support-edging"))
             else:
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"support row {i} is white-edged, but no board in "
                                  f"this project offers PVC under the name "
                                  f"{WHITE_TOKEN!r}. Give the row a board and an "
                                  f"edging of its own, or tick PVC on the white "
-                                 f"board in the Boards tab", EDGING_REF))
+                                 f"board in the Boards tab", EDGING_REF, check="support-white-edge"))
     return out
 
 
@@ -639,15 +727,15 @@ def _room(job: Job, std):
     if not rm.ceiling or rm.ceiling <= 0:
         out.append(Issue(CRITICAL, rm.name,
                          "ceiling height not measured — it is a required site "
-                         "measurement, and the ceiling check means nothing without it"))
+                         "measurement, and the ceiling check means nothing without it", check="ceiling-measured"))
     for w in rm.walls:
         if w.length <= 0:
-            out.append(Issue(CRITICAL, f"wall {w.id}", "wall length not measured"))
+            out.append(Issue(CRITICAL, f"wall {w.id}", "wall length not measured", check="wall-length"))
 
     ids = [w.id for w in rm.walls]
     dupes = sorted({i for i in ids if ids.count(i) > 1})
     for i in dupes:
-        out.append(Issue(CRITICAL, f"wall {i}", "two walls share this id"))
+        out.append(Issue(CRITICAL, f"wall {i}", "two walls share this id", check="wall-id-unique"))
     if dupes:
         return out          # the chain is keyed by id; nothing below can be trusted
 
@@ -655,7 +743,7 @@ def _room(job: Job, std):
     if err > std.closure_block:
         out.append(Issue(CRITICAL, rm.name,
                          f"walls miss closing by {err} mm — the measurements "
-                         f"contradict each other, remeasure before placing anything"))
+                         f"contradict each other, remeasure before placing anything", check="room-closure"))
     elif err > std.closure_warn:
         out.append(Issue(WARNING, rm.name, f"walls miss closing by {err} mm"))
 
@@ -672,13 +760,13 @@ def _room(job: Job, std):
     for p in job.placements:
         if p.cabinet not in by_number:
             out.append(Issue(CRITICAL, str(p.cabinet),
-                             "placement for a cabinet that does not exist"))
+                             "placement for a cabinet that does not exist", check="placement-cabinet"))
             continue
         if by_number[p.cabinet].is_panel:
             continue        # panels take no part in the room checks yet (Part E)
         if p.wall not in lengths:
             out.append(Issue(CRITICAL, str(p.cabinet),
-                             f"placed on wall {p.wall!r}, which the room does not have"))
+                             f"placed on wall {p.wall!r}, which the room does not have", check="placement-wall"))
             continue
         cab = by_number[p.cabinet]
         # its real reach along the wall, never the declared width (hard rule 1):
@@ -754,7 +842,7 @@ def _plinth(job: Job, std):
         out.append(Issue(CRITICAL, "legs",
                          f"leg height {std.leg_height} is outside the "
                          f"{std.leg_min}-{std.leg_max} leg range — the legs "
-                         f"cannot stand the carcass at that height"))
+                         f"cannot stand the carcass at that height", check="leg-range"))
 
     live = {(r.wall, r.layer, r.first) for r in room_runs(job, std)}
     fitted = 0
@@ -815,7 +903,7 @@ def _corners(job: Job, std):
                 out.append(Issue(CRITICAL, where,
                                  f"cabinet {cab.number}: ell corner — construction not decided "
                                  f"yet, so this unit cuts nothing. Add bespoke panels in the "
-                                 f"job file or change the type"))
+                                 f"job file or change the type", check="ell-construction"))
         elif kind == "mitre":
             out += _mitre(cab, where, std)
         elif kind == "blind":
@@ -837,7 +925,7 @@ def _mitre(cab, where: str, std):
                              f"cabinet {cab.number}: arm shelf is {depth} mm deep on arm {arm}, "
                              f"and the deepest that clears both the closed door "
                              f"({std.mitre_shelf_clear} mm) and the hinge plate "
-                             f"({std.hinge_clearance} mm) is {top} mm"))
+                             f"({std.hinge_clearance} mm) is {top} mm", check="arm-shelf-depth"))
     return out
 
 
@@ -854,20 +942,20 @@ def _blind(cab, where: str, std):
         out.append(Issue(CRITICAL, where,
                          f"cabinet {cab.number}: blind corner with no blind panel width — "
                          f"nothing says how much of the {cab.width} mm carcass the panel "
-                         f"covers, so neither the panel nor the door can be cut"))
+                         f"covers, so neither the panel nor the door can be cut", check="blind-width-missing"))
         return out
     b, t = int(cab.blind_width), std.board_t
     if b >= cab.width - 2 * t:
         out.append(Issue(CRITICAL, where,
                          f"cabinet {cab.number}: blind panel is {b} mm in a {cab.width} mm "
                          f"carcass, which leaves no opening at all (the two sides take "
-                         f"{2 * t} mm) — the panel has to be under {cab.width - 2 * t} mm"))
+                         f"{2 * t} mm) — the panel has to be under {cab.width - 2 * t} mm", check="blind-width-too-wide"))
         return out
     if (blind_door_width(cab, std) or 0) <= 0:
         out.append(Issue(CRITICAL, where,
                          f"cabinet {cab.number}: blind corner leaves a door "
                          f"{blind_door_width(cab, std)} mm wide — check the carcass width "
-                         f"against the {b} mm blind panel"))
+                         f"against the {b} mm blind panel", check="blind-door-width"))
     return out
 
 
@@ -903,7 +991,7 @@ def _placement_clashes(job: Job, std):
     for o in room_overlaps(job):
         out.append(Issue(CRITICAL, f"{o.a}/{o.b}",
                          f"cabinets {o.a} and {o.b} overlap by {o.mm} mm on "
-                         f"wall {o.wall}"))
+                         f"wall {o.wall}", check="overlap"))
     for c in room_clashes(job, std):
         thing = "door swing" if c.kind == "door" else "drawer pull-out"
         cab = by_number.get(c.cabinet)
@@ -911,7 +999,7 @@ def _placement_clashes(job: Job, std):
             out.append(Issue(CRITICAL, str(c.cabinet),
                              f"corner unit {c.cabinet}: its door swing fouls {c.against}, "
                              f"and a mitre door hangs on the mitre face or nowhere — "
-                             f"{_door_that_clears(job, cab, std)}"))
+                             f"{_door_that_clears(job, cab, std)}", check="mitre-door-swing"))
             continue
         out.append(Issue(WARNING, str(c.cabinet),
                          f"{thing} fouls {c.against}"))
@@ -1023,7 +1111,7 @@ def _blind_clearance(job: Job, std):
                              + (f" and a {std.board_t} mm door front" if og.door_widths else "")
                              + f"), past the {b} mm blind panel and into the door — "
                              f"the blind panel has to be at least {reach} mm, or the return "
-                             f"run shallower"))
+                             f"run shallower", check="blind-clearance"))
     return out
 
 
@@ -1040,14 +1128,14 @@ def _room_heights(job: Job, std):
     for number, top, ceiling in above_ceiling(job, std):
         out.append(Issue(CRITICAL, str(number),
                          f"top of the carcass is at {top} mm, above the "
-                         f"{ceiling} mm ceiling"))
+                         f"{ceiling} mm ceiling", check="above-ceiling"))
     # Built flat and tipped up in one piece: a ceiling it clears standing but not
     # on the way up is an installation failure, so it blocks the same way.
     for number, top, need, ceiling in tip_problems(job, std):
         out.append(Issue(CRITICAL, str(number),
                          f"stands at {top} mm but cannot be tipped upright under the "
                          f"{ceiling} mm ceiling — built flat, it needs {need} mm to "
-                         f"come up"))
+                         f"come up", check="tip-up"))
     for b in blocked_openings(job, std):
         out.append(Issue(WARNING, str(b.cabinet),
                          f"stands across the {b.opening} on wall {b.wall} "
@@ -1076,11 +1164,11 @@ def _outlines(job: Job, std):
                 and cab_corner_outline(cab) is None):
             out.append(Issue(CRITICAL, where,
                              f"cabinet {cab.number}: corner parameters do not resolve to a "
-                             f"shape — check corner_style, arm_a/arm_b and face_a/face_b"))
+                             f"shape — check corner_style, arm_a/arm_b and face_a/face_b", check="corner-shape"))
         if g.source in ("outline", "corner"):
             if len(g.footprint) < 3 or not triangulate(g.footprint):
                 out.append(Issue(CRITICAL, where,
-                                 "outline is not a polygon — checks cannot run on it"))
+                                 "outline is not a polygon — checks cannot run on it", check="outline-polygon"))
                 continue
             if g.source == "corner":
                 # A corner unit's outline is generated, not entered, so there is
@@ -1145,11 +1233,18 @@ def _outlines(job: Job, std):
 def report(issues: List[Issue]) -> str:
     if not issues:
         return "No issues."
-    crit = sum(1 for i in issues if i.level == CRITICAL)
-    lines = [f"{crit} critical, {len(issues) - crit} warnings", ""]
+    crit = sum(1 for i in issues if i.blocks)
+    took = sum(1 for i in issues if i.level == CRITICAL and i.accepted)
+    warn = sum(1 for i in issues if i.level != CRITICAL)
+    head = f"{crit} critical, {warn} warnings"
+    if took:
+        head += f", {took} accepted"
+    lines = [head, ""]
     lines += [str(i) for i in issues]
     return "\n".join(lines)
 
 
 def blocking(issues: List[Issue]) -> bool:
-    return any(i.level == CRITICAL for i in issues)
+    """Any critical that has not been accepted. Only a site-dependent critical
+    can be accepted (`ACCEPTABLE`); every other one blocks as it always has."""
+    return any(i.blocks for i in issues)

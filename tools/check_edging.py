@@ -340,7 +340,12 @@ def main():
     for name, j in jobs:
         panels = generate_job(j)
         for c in j.cabinets:
-            if c.template == "none" or c.is_panel:
+            if (c.template == "none" or c.is_panel
+                    or (c.corner_on and c.corner_kind in ("mitre", "ell"))):
+                # A MITRE or an ELL turns Supports off outright and keeps the rows
+                # in the file untouched, exactly as a panel does — so there is no
+                # Supports section on screen to compare. `Test.json` cabinet 13 is
+                # the case (22 September 2026).
                 # A PANEL is neither. It keeps its support rows in the job file
                 # — hidden, never emptied — and the engine cuts none of them, so
                 # comparing what a Supports section would show against what was
