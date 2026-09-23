@@ -1025,5 +1025,13 @@
       "flip": false,
       "layer": null
     }
+  ],
+  "acceptances": [
+    {
+      "check": "tip-up",
+      "where": "13",
+      "reason": "leg will be installed after tilt",
+      "fingerprint": "height 2400 · depth 1000 · legs 100 · setback 50 · underside 100 · ceiling 2600"
+    }
   ]
 }
