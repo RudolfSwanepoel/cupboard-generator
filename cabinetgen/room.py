@@ -10,6 +10,10 @@ World axes: X to the right, Y into the room from wall A, Z up. Plan views map
 world (X, Y) straight onto SVG (x, y) with no flip, which is why Y runs the way
 it does.
 
+That frame is LEFT-handed (X right, Y into the room, Z up). The 3D view
+negates Y when it draws, in `app/view3d.js` (`toRender` / `toRoom`), so the
+room is not mirrored on screen; nothing here changes for it.
+
 Everything downstream — plan view, elevations, 3D, DXF, the SolidWorks table —
 calls `to_world`. Nothing else does its own trig. That is the whole point of
 this module: one place to be wrong, and one place to fix.
