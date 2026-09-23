@@ -137,14 +137,18 @@ def main():
     svg = R.wall_elevation_svg(j, "A")
     got = re.findall(r'class="ecab" data-cab="(\d)"[^>]*stroke-width="([\d.]+)"'
                      r'(?: stroke-dasharray="([^"]*)")?', svg)
-    check("base plain, tall heavier, wall dashed", got,
-          [("1", "1.3", ""), ("2", "2.2", ""), ("3", "1.3", "7 4")])
+    # One weight for every layer since 23 Sept 2026 (brief item 3): an
+    # elevation says which is which by where it stands, and no dash is drawn
+    # that says nothing.
+    check("base, tall and wall at the one carcass weight, none dashed", got,
+          [("1", R.WEIGHT["carcass"], ""), ("2", R.WEIGHT["carcass"], ""),
+           ("3", R.WEIGHT["carcass"], "")])
     j.placements[1].x = 100                       # cabinet 2 now overlaps cabinet 1
     clash = re.search(r'<rect class="ecab" data-cab="2"[^>]*>',
                       R.wall_elevation_svg(j, "A")).group(0)
     check("a clash is still red", R.CRIT in clash, True)
-    check("and the plan keeps its own dash for a wall unit",
-          'stroke-dasharray="5 3"' in R.plan_svg(job()), True)
+    check("and the plan dashes a wall unit, which is above its cut",
+          'stroke-dasharray="4 3"' in R.plan_svg(job()), True)
 
     print("\ntext reads on whatever colour the board is")
     for fill in ("#ffffff", "#000000", "#1a1a1a", "#d2b36a", "#7f7f7f", "#a0a0a0",
