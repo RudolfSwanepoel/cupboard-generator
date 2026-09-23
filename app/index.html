@@ -554,7 +554,18 @@ function toast(msg, bad) {
 // selected from the library, which is the point — a cabinet has to be cut from
 // something, and guessing which board that is has never ended well.
 function blankJob() {
-  return {name: "untitled", boards: [], materials: {}, cabinets: [], loose: []};
+  return {name: "untitled", boards: [], materials: {}, cabinets: [], loose: [],
+          placements: []};
+}
+
+/* The job's placements, always an array. A job saved with no room carries no
+   `placements` key (store writes none, so the file round-trips), and neither
+   does a job the server hands back after a board change — so every read goes
+   through here rather than trusting the key to be there. Found 23 September
+   2026: Add a room on a new job threw in renderPlaces and blanked the Room tab. */
+function places() {
+  if (!Array.isArray(S.job.placements)) S.job.placements = [];
+  return S.job.placements;
 }
 
 function blankCabinet(number) {
@@ -866,7 +877,7 @@ $("cabtable").addEventListener("click", async (e) => {
     // cabinets that exist. A gap or plinth choice that named it is just as dead.
     if (gone) {
       const n = gone.number;
-      S.job.placements = (S.job.placements || []).filter((p) => p.cabinet !== n);
+      S.job.placements = places().filter((p) => p.cabinet !== n);
       S.job.gaps = (S.job.gaps || []).filter((g) => g.after !== n && g.before !== n);
       S.job.plinths = (S.job.plinths || []).filter((p) => p.first !== n);
       placesSig = null; gapsSig = null; plinthSig = null;
@@ -1624,7 +1635,7 @@ $("editor").addEventListener("change", (e) => {
   }
   c.number = to;
   c.bespoke.forEach((p) => { p.cabinet = to; });
-  (S.job.placements || []).forEach((p) => { if (p.cabinet === from) p.cabinet = to; });
+  places().forEach((p) => { if (p.cabinet === from) p.cabinet = to; });
   (S.job.gaps || []).forEach((g) => {
     if (g.after === from) g.after = to;
     if (g.before === from) g.before = to;
@@ -2004,7 +2015,7 @@ function cornerFollowUp(c, k) {
   }
   const reach = c.corner_style === "blind" ? c.width : c.arm_a;
   if (!(reach > 0)) return;
-  const p = (S.job.placements || []).find((q) => q.cabinet === c.number);
+  const p = places().find((q) => q.cabinet === c.number);
   const rm = S.job.room;
   if (!p || !rm) return;
   const w = (rm.walls || []).find((x) => x.id === p.wall);
@@ -3812,7 +3823,7 @@ $("elevation").addEventListener("pointerdown", async (e) => {
     if (i >= 0 && i !== S.sel) { selectCabinet(i, {isolate: false}); renderList(); refreshPlan(); }
     return;
   }
-  const p = S.job.placements.find((x) => x.cabinet === number);
+  const p = places().find((x) => x.cabinet === number);
   if (!p) return;
 
   // Everything that has to happen on the press happens now, before the snap
@@ -4336,7 +4347,7 @@ $("plan").addEventListener("pointerdown", async (e) => {
     // layer is one of the ones being shown solid.
     return;
   }
-  const p = S.job.placements.find((x) => x.cabinet === number);
+  const p = places().find((x) => x.cabinet === number);
   if (!p) return;
 
   // Everything that has to happen on the press happens now, before the snap
@@ -4568,7 +4579,7 @@ function renderPlaces(force) {
     // the kind is in the signature because Y is a panel's field: an item turned
     // into a panel has to get its Y cell, and one turned back has to lose it
     : S.job.cabinets.map((c) => c.number + (c.kind === "panel" ? "p" : "")).join(",") + "|" +
-      S.job.placements.map((p) => p.cabinet + p.wall).join(",") + "|" +
+      places().map((p) => p.cabinet + p.wall).join(",") + "|" +
       rm.walls.map((w) => w.id).join(",");
   if (!force && sig === placesSig) { refreshLayerCells(); return; }
   placesSig = sig;
@@ -4580,8 +4591,8 @@ function renderPlaces(force) {
   }
   const wallOpts = rm.walls.map((w) => w.id);
   const rows = S.job.cabinets.map((c) => {
-    const i = S.job.placements.findIndex((p) => p.cabinet === c.number);
-    const p = i < 0 ? null : S.job.placements[i];
+    const i = places().findIndex((p) => p.cabinet === c.number);
+    const p = i < 0 ? null : places()[i];
     // Y is a PANEL's field. A carcass sits against the wall it is placed on, so
     // its Y is 0 and the cell is not offered — the table cannot put a cabinet
     // off its own wall.
@@ -4631,8 +4642,8 @@ function refreshLayerCells() {
 
 // The layer is derived by the engine and read back, never worked out here.
 function placedLayer(number) {
-  const places = (S.res && S.res.room && S.res.room.placements) || {};
-  const p = places[String(number)];
+  const layers = (S.res && S.res.room && S.res.room.placements) || {};
+  const p = layers[String(number)];
   return p ? (p.layer + (p.override ? " (set)" : "")) : "";
 }
 
@@ -4641,13 +4652,13 @@ $("places").addEventListener("input", async (e) => {
   if (num === undefined) return;
   const n = +num;
   const pk = e.target.dataset.pk;
-  const i = S.job.placements.findIndex((p) => p.cabinet === n);
+  const i = places().findIndex((p) => p.cabinet === n);
   if (pk === "wall") {
     if (!e.target.value) {
-      if (i >= 0) S.job.placements.splice(i, 1);
+      if (i >= 0) places().splice(i, 1);
       renderPlaces(true);
     } else if (i >= 0) {
-      S.job.placements[i].wall = e.target.value;
+      places()[i].wall = e.target.value;
       const cc = S.job.cabinets.find((c) => c.number === n);
       if (cc) cornerFollowUp(cc, "corner_unit");   // a corner unit goes into a corner
       renderPlaces(true);
@@ -4658,11 +4669,11 @@ $("places").addEventListener("input", async (e) => {
       // reads, so nothing is worked out here.
       const place = {cabinet: n, wall: e.target.value, x: 0, z: 0, y: 0,
                      flip: false, layer: null};
-      S.job.placements.push(place);
+      places().push(place);
       renderPlaces(true);
       const model = await post("/api/drag", {job: S.job, cabinet: n});
       const w = model.ok && model.walls[place.wall];
-      if (w && S.job.placements.indexOf(place) >= 0) {
+      if (w && places().indexOf(place) >= 0) {
         place.x = w.free_x;
         const cc = S.job.cabinets.find((c) => c.number === n);
         if (cc) cornerFollowUp(cc, "corner_unit");   // ...unless it is a corner unit
@@ -4675,7 +4686,7 @@ $("places").addEventListener("input", async (e) => {
     if (pk === "y" && S.job.cabinets.some((c) => c.number === n && c.kind !== "panel")) {
       return;
     }
-    S.job.placements[i][pk] = parseInt(e.target.value, 10) || 0;
+    places()[i][pk] = parseInt(e.target.value, 10) || 0;
   }
   schedule();
 });
@@ -4685,6 +4696,7 @@ $("room").addEventListener("click", async (e) => {
     const r = await post("/api/room-new", {name: S.job.name});
     if (!r.ok) { toast(r.error, true); return; }
     S.job.room = r.room;
+    places();
     renderRoom(true); schedule();
     return;
   }
@@ -5082,10 +5094,31 @@ $("validation").addEventListener("click", (e) => {
 
 /* ---------- tabs ---------------------------------------------------------- */
 
+/* One card's render, on its own. A render that throws says so in its own card
+   and in the console, and the cards after it still draw: renderPlaces throwing
+   used to leave the plan, Gaps and Plinth silently stale on every compute.
+   `reset` clears that card's signature so the next compute tries it again. */
+function guarded(box, render, reset) {
+  const fail = (err) => {
+    console.error(err);
+    reset();
+    $(box).innerHTML = `<div class="empty cfix">This card could not be drawn: ` +
+      `${esc(String(err && err.message || err))}</div>`;
+  };
+  try {
+    const r = render();
+    if (r && typeof r.catch === "function") r.catch(fail);
+  } catch (err) { fail(err); }
+}
+
 function renderTab() {
   if (S.tab === "boards") renderBoardsTab();
   else if (S.tab === "room") {
-    renderRoom(); renderPlaces(); renderGaps(); renderPlinth(); renderPlan();
+    guarded("room", renderRoom, () => { roomSig = null; });
+    guarded("places", renderPlaces, () => { placesSig = null; });
+    guarded("gaps", renderGaps, () => { gapsSig = null; });
+    guarded("plinth", renderPlinth, () => { plinthSig = null; });
+    guarded("plan", renderPlan, () => {});
   }
   else if (S.tab === "view3d") render3D();
   else if (S.tab === "cutlist") renderCutlist();
@@ -5246,7 +5279,7 @@ async function render3D() {
           // one compute redraws every view
           dragModel: (number) => post("/api/drag", {job: S.job, cabinet: number}),
           drop: (number, at) => {
-            const p = (S.job.placements || []).find((x) => x.cabinet === number);
+            const p = places().find((x) => x.cabinet === number);
             if (!p) return;
             p.x = at.x;
             p.z = at.z;
@@ -5381,6 +5414,7 @@ async function refreshJobs() {
 
 function adopt(job) {
   S.job = job;
+  places();                  // a file saved with no room has no placements key
   markDirty(false);          // what is on screen is what is on disk
   S.sel = null;
   S.isolate = null;

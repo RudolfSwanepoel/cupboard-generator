@@ -987,7 +987,119 @@ def stage_extras(pw):
     ctx.close()
     browser.close()
 
-STAGES = {"f1": stage_f1, "f3": stage_f3, "f4": stage_f4, "f5": stage_f5, "f6": stage_f6, "extras": stage_extras}
+def stage_room(pw):
+    """Add a room to a job with no `placements` key (brief of 23 September 2026).
+
+    A new job, and a file saved with no room, arrived with placements undefined;
+    Add a room then threw in renderPlaces and the plan, Gaps and Plinth never drew.
+    """
+    print("\nroom — Add a room on a job with no placements, then place and drag")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    page.goto(URL)
+    page.wait_for_function("() => S.def !== null", timeout=15000)
+
+    def add_room_and_look(label):
+        page.click('nav [data-tab="room"]')
+        page.click("#roomadd")
+        page.wait_for_function("() => S.job.room && S.res && document.querySelector('#plan svg')",
+                               timeout=15000)
+        time.sleep(0.4)
+        page.wait_for_function("() => document.querySelector('#plan svg')", timeout=15000)
+        check(f"{label}: placements is an array", page.evaluate("() => Array.isArray(S.job.placements)"), True)
+        check_true(f"{label}: the plan draws the room", page.locator("#plan svg").count() == 1)
+        check_true(f"{label}: Walls shows the walls table", page.locator("#room table").count() > 0)
+        places = page.locator("#places").text_content()
+        check_true(f"{label}: Placements drew", "No room." not in places, places[:60])
+        check_true(f"{label}: Gaps drew", "could not be drawn" not in page.locator("#gaps").text_content())
+        check_true(f"{label}: Plinth drew", "could not be drawn" not in page.locator("#plinth").text_content())
+        check(f"{label}: no page errors", errors, [])
+
+    # 1. New -> Room -> Add a room
+    page.click("#new")
+    page.wait_for_function("() => S.job.name === 'untitled' && !S.job.room && S.res", timeout=15000)
+    page.evaluate("() => { delete S.job.placements; }")   # as a job file saved without the key arrives
+    add_room_and_look("new job")
+
+    # 2. the two files on disk saved without a placements key
+    for name in ("Test_Panels", "untitled"):
+        load_job(page, name)
+        if page.evaluate("() => !!S.job.room"):
+            print(f"      {name} has a room on disk now; skipped")
+            continue
+        add_room_and_look(name)
+
+    # 3. a new job with a room: a board, a cabinet, placed from the table, dragged
+    page.click("#new")
+    page.wait_for_function("() => S.job.name === 'untitled' && !S.job.room && S.res", timeout=15000)
+    page.click('nav [data-tab="boards"]')
+    page.locator('#boards input[data-pick]').first.check()
+    page.wait_for_function("() => S.job.boards.length > 0", timeout=15000)
+    page.click('nav [data-tab="room"]')
+    page.click("#roomadd")
+    page.wait_for_function("() => S.job.room && document.querySelector('#plan svg')", timeout=15000)
+    page.click('nav [data-tab="cabinets"]')
+    page.click("#add")
+    page.wait_for_function("() => S.job.cabinets.length === 1", timeout=15000)
+    number = page.evaluate("() => S.job.cabinets[0].number")
+    page.click('nav [data-tab="room"]')
+    page.wait_for_selector(f'#places select[data-p="{number}"]', timeout=15000)
+    page.select_option(f'#places select[data-p="{number}"]', "A")
+    page.wait_for_function(f"() => S.res && S.res.room && S.res.room.placements['{number}']", timeout=15000)
+    placed = page.evaluate(f"() => S.job.placements.find((p) => p.cabinet === {number})")
+    check("placed on wall A from the Placements table", placed and placed["wall"], "A")
+
+    # drag it along wall A in the plan, with a real mouse
+    page.wait_for_selector(f'#plan svg [data-cab="{number}"]', timeout=15000)
+    time.sleep(0.4)
+    box = page.locator(f'#plan svg [data-cab="{number}"]').first.bounding_box()
+    x0 = placed["x"]
+    sx, sy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    page.mouse.move(sx, sy)
+    page.mouse.down()
+    for i in range(1, 13):
+        page.mouse.move(sx + i * 10, sy)
+        time.sleep(0.02)
+    page.mouse.up()
+    page.wait_for_function(f"() => S.job.placements.find((p) => p.cabinet === {number}).x !== {x0}",
+                           timeout=15000)
+    x1 = page.evaluate(f"() => S.job.placements.find((p) => p.cabinet === {number}).x")
+    check_true("dragged along wall A in the plan", x1 > x0, f"{x0} -> {x1}")
+
+    # and in 3D, on its wall arrow
+    open_3d(page)
+    wait_scene(page)
+    page.evaluate("() => { selectCabinet(0, {isolate: false}); renderList(); }")
+    time.sleep(0.15)
+    page.keyboard.press("1")
+    settle(page)
+    left, top, w, hgt = viewport_origin(page)
+    hd = next(hh for hh in page.evaluate("() => V3D.dragInfo()")["handles"] if hh["axis"] == "x")
+    o, d = hd["origin"], hd["dir"]
+    p0 = project(page, *[o[i] + d[i] * 140 for i in range(3)])
+    p1 = project(page, *[o[i] + d[i] * 340 for i in range(3)])
+    ux, uy = p1["x"] - p0["x"], p1["y"] - p0["y"]
+    per_mm = math.hypot(ux, uy) / 200
+    n = math.hypot(ux, uy) or 1
+    sx, sy = left + p0["x"], top + p0["y"]
+    page.mouse.move(sx, sy)
+    page.mouse.down()
+    for i in range(1, 13):
+        page.mouse.move(sx + ux / n * 300 * per_mm * i / 12, sy + uy / n * 300 * per_mm * i / 12)
+        time.sleep(0.02)
+    page.mouse.up()
+    page.wait_for_function("() => !V3D.dragInfo().dragging", timeout=10000)
+    page.wait_for_function("() => !S.sceneStale && sceneTimer === null", timeout=15000)
+    x2 = page.evaluate(f"() => S.job.placements.find((p) => p.cabinet === {number}).x")
+    check_true("dragged along wall A in 3D", x2 != x1, f"{x1} -> {x2}")
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+STAGES = {"f1": stage_f1, "f3": stage_f3, "f4": stage_f4, "f5": stage_f5, "f6": stage_f6,
+          "extras": stage_extras, "room": stage_room}
 
 with sync_playwright() as pw:
     for name, fn in STAGES.items():

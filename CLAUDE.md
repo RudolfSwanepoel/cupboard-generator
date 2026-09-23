@@ -63,6 +63,22 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
+**"Add a room" did nothing outside 3D — fixed (23 September 2026, brief
+`Claude outputs/room-add-bug-brief-2026-09-23.md`).** A new job, and any file
+saved with no room, reaches the browser with no `placements` key; Add a room
+then threw in `renderPlaces` and the plan, Gaps and Plinth never drew (3D only
+worked because `refreshScene` runs first). Every read now goes through one
+helper, `places()` in `index.html`, which makes it an array; `blankJob`,
+`adopt` and Add a room call it too. `store` still writes no `placements` key
+when the list is empty, so every job on disk round-trips byte for byte —
+pinned in `check_room.py`. And each Room-tab card renders through `guarded`,
+so one that throws says so in its own card and the others still draw.
+`ui_check_3d.py --stage room` drives it: New, `Test_Panels` and `untitled`,
+then a board, a cabinet placed from the table and dragged in the plan and in
+3D. Benchmark, every check and the snapshot unchanged. **Seen and not
+touched:** a closed four-wall room given a fifth wall reports the closure miss
+but the plan still looks closed — not yet looked into.
+
 **Part F — the 3D view, and one editor across every view (23 September 2026,
 brief `Claude outputs/3d-view-brief-2026-09-23.md`, on branch `3d-view`).**
 Built F1 to F6 in order, each committed with the benchmark unchanged

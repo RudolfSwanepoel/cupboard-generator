@@ -240,6 +240,12 @@ def main() -> int:
     plain = job_to_dict(Job(name="p", cabinets=[cab]))
     check("a roomless job writes no room key", "room" in plain, False)
     check("a roomless job writes no placements key", "placements" in plain, False)
+    # The browser always carries `placements: []` since 23 September 2026 (a new
+    # job had none, and Add a room threw in renderPlaces). Posted back, it must
+    # still write no key, or every roomless job file grows one on its next save.
+    posted = job_to_dict(job_from_dict(dict(json.loads(json.dumps(plain)),
+                                            placements=[])))
+    check("an empty placements list posted back writes no key", posted, plain)
 
     print("\nadding a wall at either end of the run")
     run = Room(name="l", ceiling=2700, closed=False, walls=[Wall("A", 3000)])
