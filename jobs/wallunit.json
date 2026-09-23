@@ -112,5 +112,15 @@
         "obstructions": []
       }
     ]
-  }
+  },
+  "placements": [
+    {
+      "cabinet": 1,
+      "wall": "A",
+      "x": 1363,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    }
+  ]
 }

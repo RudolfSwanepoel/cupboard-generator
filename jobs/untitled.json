@@ -3,5 +3,29 @@
   "boards": [],
   "materials": {},
   "cabinets": [],
-  "loose": []
+  "loose": [],
+  "room": {
+    "name": "untitled",
+    "ceiling": 2600,
+    "offset_depth": 600,
+    "closed": false,
+    "walls": [
+      {
+        "id": "A",
+        "length": 4000,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "B",
+        "length": 1100,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      }
+    ]
+  }
 }
