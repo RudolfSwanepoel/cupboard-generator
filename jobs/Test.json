@@ -260,7 +260,7 @@
       "drawers": [],
       "has_drawers": null,
       "exposed_sides": 0,
-      "carcass_board": "WHITEMEL",
+      "carcass_board": "GREY",
       "exterior_board": "GREY",
       "back_board": "BACK",
       "exterior_tape": "2mm",
@@ -923,8 +923,8 @@
   "placements": [
     {
       "cabinet": 1,
-      "wall": "A",
-      "x": 213,
+      "wall": "B",
+      "x": 1632,
       "z": 0,
       "flip": false,
       "layer": null
@@ -932,7 +932,7 @@
     {
       "cabinet": 2,
       "wall": "A",
-      "x": 829,
+      "x": 830,
       "z": 0,
       "flip": false,
       "layer": null
@@ -940,7 +940,7 @@
     {
       "cabinet": 3,
       "wall": "A",
-      "x": 1279,
+      "x": 1280,
       "z": 0,
       "flip": false,
       "layer": null
@@ -948,7 +948,7 @@
     {
       "cabinet": 4,
       "wall": "A",
-      "x": 1679,
+      "x": 1680,
       "z": 0,
       "flip": false,
       "layer": null
@@ -956,15 +956,15 @@
     {
       "cabinet": 5,
       "wall": "A",
-      "x": 829,
-      "z": 1400,
+      "x": 2680,
+      "z": 1398,
       "flip": false,
       "layer": null
     },
     {
       "cabinet": 6,
       "wall": "A",
-      "x": 2079,
+      "x": 2430,
       "z": 0,
       "flip": false,
       "layer": null
@@ -972,7 +972,7 @@
     {
       "cabinet": 7,
       "wall": "A",
-      "x": 2629,
+      "x": 2080,
       "z": 0,
       "flip": false,
       "layer": null
@@ -980,23 +980,23 @@
     {
       "cabinet": 8,
       "wall": "A",
-      "x": 2979,
+      "x": 814,
       "z": 100,
       "flip": false,
       "layer": null
     },
     {
       "cabinet": 9,
-      "wall": "A",
-      "x": 197,
+      "wall": "B",
+      "x": 1616,
       "z": 100,
       "flip": false,
       "layer": null
     },
     {
       "cabinet": 10,
-      "wall": "A",
-      "x": 813,
+      "wall": "B",
+      "x": 2232,
       "z": 100,
       "flip": false,
       "layer": null
@@ -1011,8 +1011,8 @@
     },
     {
       "cabinet": 12,
-      "wall": "B",
-      "x": 1600,
+      "wall": "A",
+      "x": 2980,
       "z": 100,
       "flip": false,
       "layer": null
