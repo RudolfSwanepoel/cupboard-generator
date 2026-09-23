@@ -1592,6 +1592,16 @@ def room_new(payload):
         name=str(payload.get("name") or "room")))}
 
 
+# What the page may fetch as a FILE (F1, 23 September 2026): the 3D module,
+# loaded only when the 3D tab is first opened, and the vendored libraries under
+# app/vendor/ — three.js and camera-controls, each with its LICENSE. Nothing
+# else in the repo is reachable this way; `Handler._static` refuses it.
+STATIC_FILES = {"/app/view3d.js": ("app", "view3d.js")}
+VENDOR_ROUTE = "/vendor/"
+VENDOR_DIR = os.path.join(ROOT, "app", "vendor")
+STATIC_TYPES = {".js": "text/javascript; charset=utf-8",
+                "": "text/plain; charset=utf-8"}        # a LICENSE, no extension
+
 ROUTES = {
     "/api/defaults": defaults,
     "/api/compute": compute,
@@ -1658,7 +1668,42 @@ class Handler(BaseHTTPRequestHandler):
             return self._dispatch(path, {})
         if path.startswith("/pictures/"):
             return self._picture(path[len("/pictures/"):])
+        if path in STATIC_FILES or path.startswith(VENDOR_ROUTE):
+            return self._static(path)
         self._send(404, "not found", "text/plain")
+
+    def _static(self, path):
+        """Serve the 3D module and the vendored libraries, and nothing else.
+
+        Built the way `_picture` is (F1, 23 September 2026): a whitelist of
+        named files, plus `/vendor/<file>` resolved inside `app/vendor/` and
+        refused anywhere else, with the content type decided by the extension
+        — JavaScript, or plain text for a LICENSE — and the same no-store cache
+        header as every other reply. Everything the page loads comes off this
+        server, so the app works with the network off.
+        """
+        if path in STATIC_FILES:
+            full = os.path.join(ROOT, *STATIC_FILES[path])
+        else:
+            parts = [unquote(p) for p in path[len(VENDOR_ROUTE):].split("/")]
+            if not parts or any(p in ("", ".", "..") or ":" in p or "\\" in p for p in parts):
+                return self._send(404, "not found", "text/plain")
+            full = os.path.join(VENDOR_DIR, *parts)
+            inside = os.path.normcase(os.path.abspath(full)).startswith(
+                os.path.normcase(os.path.abspath(VENDOR_DIR)) + os.sep)
+            if not inside:
+                return self._send(404, "not found", "text/plain")
+        name = os.path.basename(full)
+        ext = os.path.splitext(name)[1].lower()
+        ctype = STATIC_TYPES.get(ext) if ext else (STATIC_TYPES[""] if name == "LICENSE" else None)
+        if ctype is None:
+            return self._send(404, "not found", "text/plain")
+        try:
+            with open(full, "rb") as fh:
+                body = fh.read()
+        except OSError:
+            return self._send(404, "not found", "text/plain")
+        self._send(200, body, ctype)
 
     def _picture(self, raw):
         """Serve one board picture out of `Pictures/`, and nothing else.

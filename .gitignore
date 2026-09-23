@@ -22,3 +22,5 @@ baseline.json
 .idea/
 Thumbs.db
 .DS_Store
+# per-work snapshots taken by tools/snapshot.py --out, per machine like baseline.json
+snapshot-*.json
