@@ -4,7 +4,6 @@ Cabinets are drawn side by side to scale, with doors, drawer faces and shelf
 lines shown. It is a sanity check, not a working drawing: if a cabinet looks
 wrong here it is wrong in the cut list too.
 """
-from dataclasses import replace
 from html import escape
 from typing import List
 
@@ -17,7 +16,7 @@ from .room import (LAYERS, cabinet_footprint, carcass_z, clashes, corner_points,
                    panel_clashes, placed, placed_panels, plinth_choice_for,
                    plinth_lengths, pullout_envelope, return_profiles, run_key,
                    runs, swing_envelopes, to_world, wall_frames,
-                   blind_spans)
+                   blind_spans, front_outlines, return_faces)
 from .standard import Standard, STANDARD
 
 INK = "#191c1a"
@@ -28,43 +27,36 @@ CRIT = "#a4303f"
 
 PAPER = "#ffffff"
 
-# base / wall / tall are told apart by the OUTLINE now, because the fill says
-# which board a part is cut from (20 Sept 2026). The dash is 7 4, not the 4 3
-# the shelf lines and the openings already use, so an outline is never read as
-# one of those.
-LAYER_STROKE = {"base": ("1.3", ""),
-                "wall": ("1.3", ' stroke-dasharray="7 4"'),
-                "tall": ("2.2", "")}
+# Line weights, in screen pixels, for the plan and every elevation — one table,
+# read by both (23 September 2026, brief item 3, confirmed by Rudolf). Every
+# stroke is drawn with `vector-effect: non-scaling-stroke` (`STROKE_STYLE`), so
+# zooming in makes the geometry bigger and leaves the lines at these weights —
+# which is what makes a 16 mm panel readable between two carcasses.
+#
+# Base, wall and tall are no longer told apart by the outline in an elevation:
+# the drawing already says which is which by where each one stands, and a
+# heavier or dashed carcass line only competed with the fronts. A clash is
+# still red and heavy.
+WEIGHT = {"wall": "2", "carcass": "1", "panel": "0.75", "face": "0.75",
+          "internal": "0.5", "above": "0.75", "dim": "0.5", "clash": "2"}
+# Dashes only where they say something a solid line cannot (Rudolf: "no dashed
+# lines unless they add real value"): a wall unit ABOVE the plan's cut, an
+# opening across a wall line in plan, a neighbour seen through this wall's own
+# units in the Line view, and an undecided gap. Everything else is solid.
+ABOVE_DASH = ' stroke-dasharray="4 3"'
+STROKE_STYLE = ('<style>.drw line,.drw rect,.drw polygon,.drw polyline,.drw circle,'
+                '.drw path{vector-effect:non-scaling-stroke}'
+                '.drw pattern *{vector-effect:none}</style>')
 LEGEND_ROW = 15
 
-# How an elevation is drawn — a view setting, never saved in the job and never a
-# change to any geometry. FINISH is every part in its board's colour or picture;
-# LINE is the same drawing on white paper, fronts white, lines and text in grey.
-VIEW_MODES = ("finish", "line")
-LINE_INK = MUTED
-
-
-def _line_job(job: Job) -> Job:
-    """The job as the LINE view draws it: every board white, plain, pictureless.
-
-    Only what a board LOOKS like changes — the record is otherwise the one the
-    job carries (`material_record`, normalised), so tape names, thickness and
-    every size read exactly as in the Finish view. A copy: the job is untouched.
-    """
-    mats = {}
-    for k in (job.materials or {}):
-        rec = dict(material_record(job.materials, k))
-        rec.update(colour=PAPER, grain="plain", picture="")
-        mats[k] = rec
-    return replace(job, materials=mats)
-
-
-def _line_ink(svg: str) -> str:
-    """Every dark ink in a drawing turned to the grey the end-on outlines use,
-    and a board nobody coloured drawn as paper like the rest. Red stays red: a
-    clash is still a clash in the Line view."""
-    return (svg.replace(f'"{INK}"', f'"{LINE_INK}"')
-               .replace(f'"{NO_COLOUR}"', f'"{PAPER}"'))
+# How a wall elevation is drawn — a view setting, never saved in the job and
+# never a change to any geometry (23 September 2026, replacing the 22 September
+# white-and-grey Line view, which was a misreading). Both draw this wall's own
+# cabinets identically; they differ ONLY in the runs on the walls either side.
+# LINE shows them as grey outlines end on, labelled with their wall and numbers.
+# FINISH shows them as they would really be seen from this wall: every board
+# face turned towards you, in the board it is cut from (`room.return_faces`).
+VIEW_MODES = ("line", "finish")
 
 
 def board_look(job, board_id: str) -> dict:
@@ -191,11 +183,11 @@ def _grain_lines(x, y, w, h, vertical, ink, pitch=7.0):
         if vertical:
             out.append(f'<line x1="{x + at:.1f}" y1="{y + 1:.1f}" '
                        f'x2="{x + at:.1f}" y2="{y + h - 1:.1f}" '
-                       f'stroke="{ink}" stroke-width="0.5" stroke-opacity="0.22"/>')
+                       f'stroke="{ink}" stroke-width="{WEIGHT["internal"]}" stroke-opacity="0.22"/>')
         else:
             out.append(f'<line x1="{x + 1:.1f}" y1="{y + at:.1f}" '
                        f'x2="{x + w - 1:.1f}" y2="{y + at:.1f}" '
-                       f'stroke="{ink}" stroke-width="0.5" stroke-opacity="0.22"/>')
+                       f'stroke="{ink}" stroke-width="{WEIGHT["internal"]}" stroke-opacity="0.22"/>')
     return out
 
 
@@ -331,13 +323,11 @@ def _panel_grain_vertical(spec):
 
 
 def _layer_outline(layer: str, bad: bool = False):
-    """Stroke colour, width and dash for a carcass outline: `(ink, width, dash)`.
-
-    A clash still wins — red and heavy — but keeps its layer's dash, so a wall
-    unit in the way is still recognisably a wall unit.
-    """
-    width, dash = LAYER_STROKE.get(layer, ("1.3", ""))
-    return (CRIT, "2", dash) if bad else (INK, width, dash)
+    """Stroke colour, width and dash for a carcass outline in an elevation:
+    `(ink, width, dash)`. One weight for every layer (`WEIGHT`) and no dash —
+    an elevation shows which is which by where each one stands. A clash is red
+    and heavy."""
+    return (CRIT, WEIGHT["clash"], "") if bad else (INK, WEIGHT["carcass"], "")
 
 
 def _seen(into: list, board_id: str):
@@ -384,7 +374,9 @@ def _legend_rows(job: Job, ids, width) -> list:
         text = f"{board_id} — {material_board(mats, board_id)}"
         if not look["set"]:
             text += " (no colour set)"
-        entry = (look, text, 17 + len(text) * 4.9 + 16)
+        # capitals are wider than the 4.9 a character this used to allow, and a
+        # board name in capitals ran into the next swatch
+        entry = (look, text, 17 + sum(6.0 if ch.isupper() else 4.9 for ch in text) + 16)
         if row and used + entry[2] > width:
             rows.append(row)
             row, used = [], 0.0
@@ -414,7 +406,7 @@ def _legend_svg(rows, x, y, fills=None) -> list:
         for look, text, width in entries:
             out.append(f'<rect class="swatch" x="{at_x:.1f}" y="{at_y:.1f}" '
                        f'width="13" height="10" fill="{fills.of(look, True)}" '
-                       f'stroke="{RULE}" stroke-width="0.8"/>')
+                       f'stroke="{RULE}" stroke-width="{WEIGHT["internal"]}"/>')
             if look["grain"] and not fills.textured(look):
                 out += _grain_lines(at_x, at_y, 13, 10, True, look["ink"], pitch=3.0)
             out.append(f'<text x="{at_x + 17:.1f}" y="{at_y + 8.5:.1f}" '
@@ -460,11 +452,11 @@ def _tape_note(job: Job, x, y, width) -> list:
 
 
 def elevation_svg(job: Job, max_width: int = 1100,
-                  pictures: str = PIC.ROUTE, mode: str = "finish") -> str:
+                  pictures: str = PIC.ROUTE, mode: str = "line") -> str:
     """The Run: the cabinet list drawn side by side.
 
-    `mode` is the view: "finish" (the default, and exactly what this has always
-    drawn) or "line" — see `VIEW_MODES`.
+    `mode` is accepted and changes nothing: the two views differ only in how the
+    walls either side are drawn, and the Run has none (`VIEW_MODES`).
 
     Panels are not in it, deliberately. A panel is not part of a cupboard run —
     it has no place in a line of carcasses — and keeping it out is also what
@@ -473,12 +465,10 @@ def elevation_svg(job: Job, max_width: int = 1100,
 
     `pictures` is where a board picture is fetched from — see `Fills`.
     """
-    if mode == "line":
-        return _line_ink(_elevation_svg(_line_job(job), max_width, pictures, False))
-    return _elevation_svg(job, max_width, pictures, True)
+    return _elevation_svg(job, max_width, pictures)
 
 
-def _elevation_svg(job: Job, max_width: int, pictures: str, legend: bool) -> str:
+def _elevation_svg(job: Job, max_width: int, pictures: str) -> str:
     cabs = [c for c in job.cabinets if not c.is_panel]
     # A corner unit's width along its wall is its geometry, never the declared
     # label (hard rule 1): a mitre drawn at its declared 1200 when its arm is 1000
@@ -497,13 +487,12 @@ def _elevation_svg(job: Job, max_width: int, pictures: str, legend: bool) -> str
     pad = 46
     scale = min((max_width - pad * 2) / total_w, 520 / max_h)
     W = int(total_w * scale) + pad * 2
-    # the board key says what each colour is; the Line view has no colours
-    rows = _legend_rows(job, _boards_drawn(job, cabs), W - pad * 2) if legend else []
+    rows = _legend_rows(job, _boards_drawn(job, cabs), W - pad * 2)
     leg = _legend_height(rows)
     H = int(max_h * scale) + pad * 2 + 14 + leg   # under the floor: tapes, then boards
 
     fills = Fills(base=pictures)
-    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" class="drw" width="{W}" height="{H}" '
            f'viewBox="0 0 {W} {H}" font-family="system-ui,sans-serif">',
            "",                          # the board patterns, spliced in below
            f'<rect width="{W}" height="{H}" fill="none"/>']
@@ -532,10 +521,10 @@ def _elevation_svg(job: Job, max_width: int, pictures: str, legend: bool) -> str
         x += w + gap_mm * scale
 
     out.append(f'<line x1="{pad - 8}" y1="{floor:.1f}" x2="{W - pad + 8}" y2="{floor:.1f}" '
-               f'stroke="{INK}" stroke-width="1.6"/>')
+               f'stroke="{INK}" stroke-width="{WEIGHT["wall"]}"/>')
     out += _tape_note(job, pad, H - 8 - leg, W - pad * 2)
     out += _legend_svg(rows, pad, H - leg + 2, fills)
-    out[defs_at] = f"<defs>{fills.defs()}</defs>"
+    out[defs_at] = f"{STROKE_STYLE}<defs>{fills.defs()}</defs>"
     out.append("</svg>")
     return "\n".join(out)
 
@@ -605,12 +594,12 @@ def wall_elevation_dims(job: Job, wall_id: str) -> dict:
 
 def _tick(x, y):
     return (f'<line x1="{x - 3:.1f}" y1="{y + 3:.1f}" x2="{x + 3:.1f}" y2="{y - 3:.1f}" '
-            f'stroke="{INK}" stroke-width="0.9"/>')
+            f'stroke="{INK}" stroke-width="{WEIGHT["dim"]}"/>')
 
 
 def _dim_h(x0, x1, y, value):
     out = [f'<line x1="{x0:.1f}" y1="{y:.1f}" x2="{x1:.1f}" y2="{y:.1f}" '
-           f'stroke="{MUTED}" stroke-width="0.7"/>', _tick(x0, y), _tick(x1, y)]
+           f'stroke="{MUTED}" stroke-width="{WEIGHT["dim"]}"/>', _tick(x0, y), _tick(x1, y)]
     if x1 - x0 >= 18:
         out.append(f'<text class="dim" x="{(x0 + x1) / 2:.1f}" y="{y - 4:.1f}" '
                    f'font-size="8.5" text-anchor="middle" fill="{INK}">{value}</text>')
@@ -619,7 +608,7 @@ def _dim_h(x0, x1, y, value):
 
 def _dim_v(y_top, y_bot, x, value):
     out = [f'<line x1="{x:.1f}" y1="{y_top:.1f}" x2="{x:.1f}" y2="{y_bot:.1f}" '
-           f'stroke="{MUTED}" stroke-width="0.7"/>', _tick(x, y_top), _tick(x, y_bot)]
+           f'stroke="{MUTED}" stroke-width="{WEIGHT["dim"]}"/>', _tick(x, y_top), _tick(x, y_bot)]
     if y_bot - y_top >= 18:
         mid = (y_top + y_bot) / 2
         out.append(f'<text class="dim" x="{x - 4:.1f}" y="{mid:.1f}" font-size="8.5" '
@@ -629,7 +618,7 @@ def _dim_v(y_top, y_bot, x, value):
 
 
 def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100,
-                       pictures: str = PIC.ROUTE, mode: str = "finish") -> str:
+                       pictures: str = PIC.ROUTE, mode: str = "line") -> str:
     """One wall, face on, as a dimensioned working drawing.
 
     Cabinets at their true positions and heights, with the wall, its openings and
@@ -637,13 +626,15 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100,
     Widths are chained from the wall's start corner and heights from the floor.
     With no room there is no datum, so it falls back to the side-by-side sanity
     check, unchanged. `pictures` is where a board picture is fetched from —
-    see `Fills`. `mode` is the view, "finish" or "line" (`VIEW_MODES`).
+    see `Fills`. `mode` is the view, "line" (the default) or "finish" — see
+    `VIEW_MODES`; the two differ only in how the walls either side are drawn.
 
     Every wall is drawn by the same rule, whatever the room's shape: standing in
     the room facing this wall, left and right as you see them, what is placed on
     it is drawn in full; the runs on the walls either side of it — found off the
     room's chain of corners (`return_profiles`), never off a letter — are grey
-    outlines end on at the ends they meet it, labelled with their wall and their
+    outlines end on at the ends they meet it (Line) or what you would see of
+    them from here, in their boards (Finish), labelled with their wall and their
     numbers; and an end with no wall beside it has nothing drawn there. A corner
     unit belongs to the wall it is placed on: drawn in full there, an outline
     end on everywhere else.
@@ -651,14 +642,11 @@ def wall_elevation_svg(job: Job, wall_id: str, max_width: int = 1100,
     rm = job.room
     if rm is None:
         return elevation_svg(job, max_width, pictures, mode)
-    if mode == "line":
-        return _line_ink(_wall_elevation_svg(_line_job(job), wall_id, max_width,
-                                             pictures, False))
-    return _wall_elevation_svg(job, wall_id, max_width, pictures, True)
+    return _wall_elevation_svg(job, wall_id, max_width, pictures, mode == "finish")
 
 
 def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
-                        legend: bool) -> str:
+                        finish: bool) -> str:
     rm = job.room
     wall = next((w for w in rm.walls if w.id == wall_id), None)
     if wall is None:
@@ -688,9 +676,12 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
     pad_l, pad_r, pad_t, pad_b = 72, 30, 64, 96
     scale = min((max_width - pad_l - pad_r) / length, 540 / top)
     W = int(length * scale) + pad_l + pad_r
-    rows = (_legend_rows(job, _boards_drawn(job, [c for c, _p, _l, _g in on_wall] +
-                                            [c for c, _p, _g in on_panels]),
-                         W - pad_l - pad_r) if legend else [])
+    faces = return_faces(job, wall_id, std) if finish else []
+    drawn = _boards_drawn(job, [c for c, _p, _l, _g in on_wall] +
+                          [c for c, _p, _g in on_panels])
+    for f in faces:                  # Finish puts the neighbours' boards on the paper too
+        _seen(drawn, f["board"])
+    rows = _legend_rows(job, drawn, W - pad_l - pad_r)
     leg = _legend_height(rows)
     H = int(top * scale) + pad_t + pad_b + leg
 
@@ -711,7 +702,7 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
              'patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
              f'<line x1="0" y1="0" x2="0" y2="6" stroke="{MUTED}" stroke-width="1.4"/>'
              '</pattern>')
-    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" class="drw" width="{W}" height="{H}" '
            f'viewBox="0 0 {W} {H}" font-family="system-ui,sans-serif">',
            "",                  # the hatch and the board patterns, spliced below
            f'<rect width="{W}" height="{H}" fill="none"/>',
@@ -731,15 +722,15 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
     if rm.ceiling:
         out.append(f'<rect x="{X(0):.1f}" y="{Y(rm.ceiling):.1f}" '
                    f'width="{length * scale:.1f}" height="{rm.ceiling * scale:.1f}" '
-                   f'fill="none" stroke="{RULE}" stroke-width="1"/>')
+                   f'fill="none" stroke="{INK}" stroke-width="{WEIGHT["wall"]}"/>')
 
     for op in wall.openings:
         kind = escape(op.kind)
         ox, oy = X(op.x), Y(op.head)
         ow, oh = op.width * scale, (op.head - op.sill) * scale
         out.append(f'<rect class="opening" x="{ox:.1f}" y="{oy:.1f}" width="{ow:.1f}" '
-                   f'height="{oh:.1f}" fill="#fff" stroke="{RULE}" stroke-width="1" '
-                   f'stroke-dasharray="4 3"/>')
+                   f'height="{oh:.1f}" fill="#fff" stroke="{RULE}" '
+                   f'stroke-width="{WEIGHT["internal"]}"/>')
         out.append(f'<text x="{ox + ow / 2:.1f}" y="{oy + 12:.1f}" font-size="8.5" '
                    f'text-anchor="middle" fill="{MUTED}">{kind} {op.width}</text>')
         out.append(f'<text x="{ox + ow / 2:.1f}" y="{oy + 23:.1f}" font-size="8" '
@@ -754,7 +745,7 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
         for board, at in plinth_lengths(job, r, std):
             out.append(f'<rect class="plinth" x="{X(at):.1f}" y="{Y(std.leg_height):.1f}" '
                        f'width="{board * scale:.1f}" height="{std.leg_height * scale:.1f}" '
-                       f'fill="{FAINT}" stroke="{RULE}" stroke-width="0.9"/>')
+                       f'fill="{FAINT}" stroke="{RULE}" stroke-width="{WEIGHT["internal"]}"/>')
 
     for g in gaps(job, std):
         if g.wall != wall_id or g.treatment not in ("filler", "blind"):
@@ -765,12 +756,12 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
         if g.treatment == "filler":
             out.append(f'<rect class="filler" x="{gx:.1f}" y="{gy:.1f}" width="{gw:.1f}" '
                        f'height="{gh:.1f}" fill="url(#ehatch)" stroke="{INK}" '
-                       f'stroke-width="0.8"/>')
+                       f'stroke-width="{WEIGHT["panel"]}"/>')
             label = f"filler {g.filler_width(std)}"
         else:
             out.append(f'<rect class="blind" x="{gx:.1f}" y="{gy:.1f}" width="{gw:.1f}" '
                        f'height="{gh:.1f}" fill="{FAINT}" stroke="{RULE}" '
-                       f'stroke-width="0.8"/>')
+                       f'stroke-width="{WEIGHT["panel"]}"/>')
             label = "blind"
         if gw >= 12:
             out.append(f'<text x="{gx + gw / 2:.1f}" y="{gy + gh / 2:.1f}" font-size="8" '
@@ -778,23 +769,24 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
                        f'transform="rotate(-90 {gx + gw / 2:.1f} {gy + gh / 2:.1f})">'
                        f'{label}</text>')
 
-    # The runs on the walls either side, end on — what you see of wall A's
-    # cabinets standing face on to wall B. Drawn light and see-through, under
-    # this wall's own cabinets, so none of them hides another: the drawing is
-    # about this wall. Cabinets that land on exactly the same outline share one
-    # label rather than stacking their numbers on one spot.
+    # The runs on the walls either side. `return_profiles` is what says which
+    # cabinets they are and where, in both views: the one label per wall comes
+    # off it. LINE draws them as it always has — light see-through outlines end
+    # on, under this wall's own cabinets, with their lines again over the top.
+    # FINISH draws what you would see of them from here (`_finish_faces`).
     shapes, walls_seen = {}, {}
     for r in return_profiles(job, wall_id, std):
         shapes.setdefault((r["x0"], r["x1"], r["z0"], r["height"], r["wall"]),
                           []).append(r["cabinet"])
     for (x0, x1, z0, hgt, other), nums in shapes.items():
-        sx, sy, sw_, sh = X(x0), Y(z0 + hgt), (x1 - x0) * scale, hgt * scale
-        out.append(f'<g class="eside" data-wall="{escape(other)}" '
-                   f'data-cabs="{" ".join(map(str, nums))}">'
-                   f'<rect x="{sx:.1f}" y="{sy:.1f}" width="{sw_:.1f}" height="{sh:.1f}" '
-                   f'fill="{FAINT}" fill-opacity="0.35" stroke="{MUTED}" '
-                   f'stroke-width="0.9"/>')
-        out.append('</g>')
+        if not finish:
+            sx, sy, sw_, sh = X(x0), Y(z0 + hgt), (x1 - x0) * scale, hgt * scale
+            out.append(f'<g class="eside" data-wall="{escape(other)}" '
+                       f'data-cabs="{" ".join(map(str, nums))}">'
+                       f'<rect x="{sx:.1f}" y="{sy:.1f}" width="{sw_:.1f}" height="{sh:.1f}" '
+                       f'fill="{FAINT}" fill-opacity="0.35" stroke="{MUTED}" '
+                       f'stroke-width="{WEIGHT["above"]}"/>')
+            out.append('</g>')
         seen = walls_seen.setdefault(other, [x0, x1, z0 + hgt, set()])
         seen[0], seen[1] = min(seen[0], x0), max(seen[1], x1)
         seen[2] = max(seen[2], z0 + hgt)
@@ -802,11 +794,16 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
     # The outlines' lines and labels go on again over this wall's own cabinets,
     # below — see there.
     end_on = []
-    for (x0, x1, z0, hgt, other), nums in shapes.items():
-        end_on.append(f'<rect class="esideline" x="{X(x0):.1f}" y="{Y(z0 + hgt):.1f}" '
-                      f'width="{(x1 - x0) * scale:.1f}" height="{hgt * scale:.1f}" '
-                      f'fill="none" stroke="{MUTED}" stroke-width="0.8" '
-                      f'stroke-dasharray="5 3" pointer-events="none"/>')
+    if finish:
+        under, over = _finish_faces(job, faces, on_wall, on_panels, X, Y, scale, fills)
+        out += under
+        end_on += over
+    else:
+        for (x0, x1, z0, hgt, other), nums in shapes.items():
+            end_on.append(f'<rect class="esideline" x="{X(x0):.1f}" y="{Y(z0 + hgt):.1f}" '
+                          f'width="{(x1 - x0) * scale:.1f}" height="{hgt * scale:.1f}" '
+                          f'fill="none" stroke="{MUTED}" stroke-width="{WEIGHT["above"]}"'
+                          f'{ABOVE_DASH} pointer-events="none"/>')
     # ONE label per neighbouring wall, over the top of everything of it that is
     # seen end on: "B: 11, 13". A label per outline put one number on top of
     # another wherever two outlines shared a top edge, and the one underneath
@@ -819,9 +816,12 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
                       f'{escape(other)}: '
                       f'{", ".join(map(str, sorted(nums)))}</text>')
     if shapes:
+        note = ("Cabinets on the walls either side, as seen from this wall, each "
+                "face in the board it is cut from." if finish else
+                "Shaded outlines at the ends are the runs on the walls either side, "
+                "seen end on, labelled with their wall and numbers.")
         out.append(f'<text x="{pad_l}" y="{H - 32 - leg}" font-size="8.5" fill="{MUTED}">'
-                   f'Shaded outlines at the ends are the runs on the walls either side, '
-                   f'seen end on, labelled with their wall and numbers.</text>')
+                   f'{note}</text>')
 
     for c, p, lay, g in on_wall:
         z0 = carcass_z(c, p, std)
@@ -848,6 +848,7 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
     # One numbered part each, drawn in the board it is cut from, over the
     # cabinets. `carcass_z` is still the one answer to how high it really is —
     # a panel stands on no legs, so its z IS its underside, exactly as typed.
+    late = []
     for c, p, g in on_panels:
         spec = c.panel_spec
         z0 = carcass_z(c, p, std)
@@ -860,7 +861,8 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
         vert = _panel_grain_vertical(spec)
         out.append(f'<rect class="epan" data-cab="{c.number}" x="{px:.1f}" y="{py:.1f}" '
                    f'width="{pw:.1f}" height="{ph:.1f}" fill="{fills.of(look, vert)}" '
-                   f'stroke="{stroke}" stroke-width="{"2" if crash else "1.3"}"/>')
+                   f'stroke="{stroke}" '
+                   f'stroke-width="{WEIGHT["clash"] if crash else WEIGHT["panel"]}"/>')
         if look["grain"] and not fills.textured(look) and vert is not None:
             out += _grain_lines(px, py, pw, ph, vert, look["ink"])
         # E4: a 16 mm panel is a few pixels of target. This is invisible, catches
@@ -879,8 +881,12 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
                            f'fill="{muted_on(look["colour"])}">'
                            f'{line.length}x{line.width}</text>')
         else:
-            out.append(f'<text x="{px + pw + 3:.1f}" y="{py - 3:.1f}" font-size="8.5" '
-                       f'fill="{INK}">{c.number} · {line.length}x{line.width}</text>')
+            # beside the panel, so drawn last of all: over a neighbour's faces
+            # in the Finish view rather than lost underneath them
+            late.append(f'<text class="eplabel" data-cab="{c.number}" '
+                        f'x="{px + pw + 3:.1f}" y="{py - 3:.1f}" font-size="8.5" '
+                        f'fill="{INK}" pointer-events="none">{c.number} · '
+                        f'{line.length}x{line.width}</text>')
         out.append('</g>')
 
     # A neighbour seen end on is often NEARER the viewer than this wall's own
@@ -889,6 +895,7 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
     # can be seen, and its label with it. The fill stays underneath: the
     # drawing is still about this wall.
     out += end_on
+    out += late
 
     if any(c.door_count for c, _p, _lay, _g in on_wall):
         out.append(f'<text x="{pad_l}" y="{H - 20 - leg}" font-size="8.5" fill="{MUTED}">'
@@ -908,7 +915,7 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
                    f'font-size="8" fill="{CRIT}">{kind} @ {ob.x}, {ob.z} up</text>')
 
     out.append(f'<line x1="{X(0) - 10:.1f}" y1="{Y(0):.1f}" x2="{X(length) + 10:.1f}" '
-               f'y2="{Y(0):.1f}" stroke="{INK}" stroke-width="1.8"/>')
+               f'y2="{Y(0):.1f}" stroke="{INK}" stroke-width="{WEIGHT["wall"]}"/>')
 
     # dimensions: widths along the floor run, the wall units above, heights at the side
     fc = dims["floor_chain"]
@@ -922,9 +929,123 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
     for a, b in zip(hc, hc[1:]):
         out += _dim_v(Y(b), Y(a), X(0) - 30, b - a)
 
-    out[1] = f"<defs>{hatch}{fills.defs()}</defs>"
+    out[1] = f"{STROKE_STYLE}<defs>{hatch}{fills.defs()}</defs>"
     out.append("</svg>")
     return "\n".join(out)
+
+
+def _oblique_hatch(x0, top, w, h, ink, step=9.0):
+    """Light diagonal lines across a face that is not square on to you — the
+    drafting sign `_corner_interior` has used on a mitre door since 22 Sept."""
+    out = []
+    k = 0.0
+    while k < w + h:
+        ax0, ay0 = x0 + max(0.0, k - h), top + min(h, k)
+        ax1, ay1 = x0 + min(w, k), top + max(0.0, k - w)
+        out.append(f'<line x1="{ax0:.1f}" y1="{ay0:.1f}" x2="{ax1:.1f}" '
+                   f'y2="{ay1:.1f}" stroke="{ink}" stroke-width="{WEIGHT["internal"]}" '
+                   f'stroke-opacity="0.35"/>')
+        k += step
+    return out
+
+
+def _face_svg(job: Job, f: dict, X, Y, scale, fills) -> list:
+    """One face of a neighbouring run, as the Finish view paints it: in the
+    board it is cut from, hatched when seen at an angle, and a mitre door's
+    real width on it. No hinges, swings or drawer sizes — seen end on or at an
+    angle they would be foreshortened, and misleading."""
+    look = board_look(job, f["board"])
+    x, y = X(f["x0"]), Y(f["z1"])
+    w = max((f["x1"] - f["x0"]) * scale, 0.8)
+    h = max((f["z1"] - f["z0"]) * scale, 0.8)
+    out = [f'<rect class="eface" data-cab="{f["cabinet"]}" data-role="{f["role"]}" '
+           f'data-wall="{escape(f["wall"])}" x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" '
+           f'height="{h:.1f}" fill="{fills.of(look, f["vertical"])}" stroke="{INK}" '
+           f'stroke-width="{WEIGHT["face"]}" pointer-events="none"/>']
+    if look["grain"] and not fills.textured(look) and f["vertical"] is not None:
+        out += _grain_lines(x, y, w, h, f["vertical"], look["ink"])
+    ink = muted_on(look["colour"])
+    if f["oblique"]:
+        out += _oblique_hatch(x, y, w, h, ink)
+    if f["label"] and h > 20 and w > 18:
+        out.append(f'<text x="{x + w / 2:.1f}" y="{y + h / 2 + 3.5:.1f}" font-size="9" '
+                   f'text-anchor="middle" fill="{ink}" paint-order="stroke" '
+                   f'stroke="{look["colour"]}" stroke-width="3" pointer-events="none">'
+                   f'{escape(f["label"])}</text>')
+    return out
+
+
+def _finish_faces(job: Job, faces, on_wall, on_panels, X, Y, scale, fills):
+    """The Finish view's neighbouring runs: `(under, over)` this wall's own units.
+
+    `faces` is `room.return_faces`, furthest from the viewer first, so painting
+    them in order puts a nearer end panel over the carcass side behind it. A
+    face is drawn OVER this wall's own cabinets and panels where it stands in
+    front of every one of them it overlaps, and under them otherwise — the
+    precedence the Line view's outlines already follow.
+
+    Each item's number goes where some of it is actually seen: on the first
+    of a few points, over its biggest faces, whose topmost paint is its own. An
+    item hidden entirely is named in the wall label and nowhere else, rather
+    than written on the panel standing in front of it.
+    """
+    std = job.std
+    own = []                         # (x0, x1, z0, z1, how far out its front stands)
+    for c, p, _lay, g in on_wall:
+        z0 = carcass_z(c, p, std)
+        proud = std.board_t if (c.door_count or c.drawer_list) else 0
+        own.append((p.x, p.x + g.width, z0, z0 + g.height,
+                    int(getattr(p, "y", 0) or 0) + g.depth + proud))
+    for c, p, g in on_panels:
+        z0 = carcass_z(c, p, std)
+        own.append((p.x, p.x + g.width, z0, z0 + g.height,
+                    int(getattr(p, "y", 0) or 0) + g.depth))
+
+    def meets(f, o):
+        return (min(f["x1"], o[1]) > max(f["x0"], o[0]) and
+                min(f["z1"], o[3]) > max(f["z0"], o[2]))
+
+    under, over = [], []
+    for f in faces:
+        behind = any(meets(f, o) and o[4] > f["out"] for o in own)
+        (under if behind else over).append(f)
+
+    # what ends up on top at any point, in the order it is painted
+    painted = ([(f["x0"], f["x1"], f["z0"], f["z1"], f["cabinet"]) for f in under] +
+               [(o[0], o[1], o[2], o[3], None) for o in own] +
+               [(f["x0"], f["x1"], f["z0"], f["z1"], f["cabinet"]) for f in over])
+
+    def top_at(u, z):
+        for x0, x1, z0, z1, who in reversed(painted):
+            if x0 <= u <= x1 and z0 <= z <= z1:
+                return who
+        return None
+
+    labels = []
+    reach = 6 / max(scale, 1e-9)     # the number's own half-width, in mm
+    grid = [(i + 0.5) / 8 for i in range(8)]
+    for n in _dedup([f["cabinet"] for f in faces]):
+        best = None                  # (points seen, the one nearest the top middle, face)
+        for f in faces:
+            if (f["cabinet"] != n or (f["x1"] - f["x0"]) * scale < 14
+                    or (f["z1"] - f["z0"]) * scale < 14):
+                continue
+            seen = []
+            for fu in grid:
+                for fz in grid:
+                    u = f["x0"] + (f["x1"] - f["x0"]) * fu
+                    z = f["z0"] + (f["z1"] - f["z0"]) * fz
+                    if all(top_at(u + du, z) == n for du in (-reach, 0, reach)):
+                        seen.append((abs(fu - 0.5) + abs(fz - 0.85), u, z))
+            if seen and (best is None or len(seen) > best[0]):
+                best = (len(seen), min(seen), f)
+        if best:
+            (_d, u, z), colour = best[1], board_look(job, best[2]["board"])["colour"]
+            labels.append(f'<text class="efacelabel" x="{X(u):.1f}" y="{Y(z) + 3.5:.1f}" '
+                          f'font-size="9.5" text-anchor="middle" fill="{ink_on(colour)}" '
+                          f'pointer-events="none">{n}</text>')
+    return ([e for f in under for e in _face_svg(job, f, X, Y, scale, fills)],
+            [e for f in over for e in _face_svg(job, f, X, Y, scale, fills)] + labels)
 
 
 def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
@@ -999,16 +1120,17 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     def T(q):
         return (pad + (q[0] - min(xs)) * scale, pad + (q[1] - min(ys)) * scale)
 
-    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" class="drw" width="{W}" height="{H}" '
            f'viewBox="0 0 {W} {H}" font-family="system-ui,sans-serif">',
-           '<defs><pattern id="hatch" width="6" height="6" '
+           STROKE_STYLE + '<defs><pattern id="hatch" width="6" height="6" '
            'patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
            f'<line x1="0" y1="0" x2="0" y2="6" stroke="{MUTED}" stroke-width="1.4"/>'
            '</pattern></defs>',
            f'<rect width="{W}" height="{H}" fill="none"/>']
 
     out += _plan_walls(rm, corners, T, scale)
-    out += _plan_gaps(job, show, T)
+    gap_shapes, labels = _plan_gaps(job, show, T)
+    out += gap_shapes
     under_at = len(out)          # a wide panel's grab area goes here, under the cabinets
     # ghosted first so the selected layers sit on top of them
     if isolate is None:
@@ -1023,10 +1145,12 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
         out += _plan_cabinet(rm, cab, p, lay, T, faint=True, bad=False,
                              colour=board_look(job, cab.exterior_board)["colour"],
                              deaf=isolate is not None)
+        out += _plan_faces(job, cab, p, lay, T, std, faint=True)
     for cab, p, lay in solid:
         out += _plan_cabinet(rm, cab, p, lay, T, faint=False,
                              bad=cab.number in colliding,
                              colour=board_look(job, cab.exterior_board)["colour"])
+        out += _plan_faces(job, cab, p, lay, T, std)
     # over the cabinets, not under them: a swing that fouls something has to be
     # visible against the thing it fouls
     out += _plan_fronts(job, solid, clashing, T, std)
@@ -1053,10 +1177,11 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     # labels after every shape: an overhead sits over the base run it belongs to,
     # and a number you cannot read is worse than no number
     for cab, p, lay in solid:
-        out += _plan_label(rm, cab, p, T)
+        labels += _plan_label(rm, cab, p, T)
     for cab, p in pans:
         if (cab.number == isolate if isolate is not None else "panels" in show):
-            out += _plan_label(rm, cab, p, T, std, job.materials)
+            labels += _plan_label(rm, cab, p, T, std, job.materials)
+    out += _place_labels(labels)
     out += _plan_plinths(job, show, T)
     out += _plan_obstructions(rm, T)
     out += _plan_tracks(rm, corners, T)
@@ -1079,13 +1204,13 @@ def _plan_walls(rm, corners, T, scale):
             p1 = T(to_world(rm, w.id, s1, 0)[:2])
             out.append(f'<line x1="{p0[0]:.1f}" y1="{p0[1]:.1f}" '
                        f'x2="{p1[0]:.1f}" y2="{p1[1]:.1f}" '
-                       f'stroke="{INK}" stroke-width="3" stroke-linecap="square"/>')
+                       f'stroke="{INK}" stroke-width="{WEIGHT["wall"]}" stroke-linecap="square"/>')
         for op in w.openings:
             q0 = T(to_world(rm, w.id, op.x, 0)[:2])
             q1 = T(to_world(rm, w.id, op.x + op.width, 0)[:2])
             out.append(f'<line x1="{q0[0]:.1f}" y1="{q0[1]:.1f}" '
                        f'x2="{q1[0]:.1f}" y2="{q1[1]:.1f}" '
-                       f'stroke="{RULE}" stroke-width="1" stroke-dasharray="3 3"/>')
+                       f'stroke="{RULE}" stroke-width="{WEIGHT["internal"]}" stroke-dasharray="3 3"/>')
             mid = ((q0[0] + q1[0]) / 2, (q0[1] + q1[1]) / 2)
             out.append(f'<text x="{mid[0]:.1f}" y="{mid[1] - 6:.1f}" font-size="8.5" '
                        f'text-anchor="middle" fill="{MUTED}">{escape(op.kind)} {op.width}</text>')
@@ -1098,13 +1223,15 @@ def _plan_walls(rm, corners, T, scale):
 
 
 def _plan_gaps(job, show, T):
-    """Fillers hatched, undecided gaps dimensioned in red.
+    """Fillers hatched, undecided gaps dimensioned in red: `(shapes, labels)`.
+
+    The labels go on over everything, through `_place_labels`, with the rest.
 
     Red is for the ones still needing a ruling, not for the small ones: the app
     proposes and the user decides, so an undecided gap is the thing that wants
     attention regardless of its size.
     """
-    out = []
+    out, labels = [], []
     shown = {run_key(lay) for lay in show}
     for g in gaps(job, job.std):
         if g.layer not in shown:
@@ -1115,20 +1242,18 @@ def _plan_gaps(job, show, T):
         cy = sum(y for _, y in pts) / 4
         if g.treatment == "filler":
             out.append(f'<polygon class="gap" points="{poly}" fill="url(#hatch)" '
-                       f'stroke="{INK}" stroke-width="0.9"/>')
+                       f'stroke="{INK}" stroke-width="{WEIGHT["panel"]}"/>')
         elif g.treatment == "blind":
             out.append(f'<polygon class="gap" points="{poly}" fill="{FAINT}" '
-                       f'stroke="{RULE}" stroke-width="0.9"/>')
-            out.append(f'<text x="{cx:.1f}" y="{cy + 3:.1f}" font-size="7.5" '
-                       f'text-anchor="middle" fill="{MUTED}">blind</text>')
+                       f'stroke="{RULE}" stroke-width="{WEIGHT["panel"]}"/>')
+            labels.append(_label(cx, cy + 3, "blind", 7.5, MUTED, prio=4, leader=True))
         elif g.treatment == "open":
             continue                       # deliberately nothing there
         else:
             out.append(f'<polygon class="gap" points="{poly}" fill="none" stroke="{CRIT}" '
                        f'stroke-width="1.2" stroke-dasharray="4 3"/>')
-            out.append(f'<text x="{cx:.1f}" y="{cy + 3:.1f}" font-size="8.5" '
-                       f'text-anchor="middle" fill="{CRIT}">{g.width}</text>')
-    return out
+            labels.append(_label(cx, cy + 3, str(g.width), 8.5, CRIT, prio=4, leader=True))
+    return out, labels
 
 
 def _plan_plinths(job, show, T):
@@ -1153,7 +1278,7 @@ def _plan_plinths(job, show, T):
             p1 = T(to_world(rm, run.wall, at + length, y)[:2])
             out.append(f'<line x1="{p0[0]:.1f}" y1="{p0[1]:.1f}" '
                        f'x2="{p1[0]:.1f}" y2="{p1[1]:.1f}" '
-                       f'stroke="{RULE}" stroke-width="2.2" stroke-linecap="butt"/>')
+                       f'stroke="{RULE}" stroke-width="{WEIGHT["panel"]}" stroke-linecap="butt"/>')
     return out
 
 
@@ -1178,7 +1303,7 @@ def _plan_fronts(job, solid, clashing, T, std):
         for shape in shapes:
             pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in (T(q) for q in shape))
             parts.append(f'<polygon points="{pts}" fill="{stroke}" fill-opacity="0.13" '
-                         f'stroke="{stroke}" stroke-width="0.9"/>')
+                         f'stroke="{stroke}" stroke-width="{WEIGHT["internal"]}"/>')
         out.append(f'<g class="front" data-front="{cab.number}" '
                    f'style="opacity:0">{"".join(parts)}</g>')
     return out
@@ -1251,16 +1376,19 @@ def _plan_cabinet(rm, cab, p, layer, T, faint, bad=False, colour=None,
     """One footprint, tinted with the exterior board's colour.
 
     A tint, not a fill: the number and the size go on top of it, and a plan is
-    read for where things are before it is read for what they are made of. The
-    layer is in the outline, the way it is in the elevations — a tall unit drawn
-    heavier, and a wall unit dashed. The plan keeps its own 5 3 dash rather than
-    the elevations' 7 4: that is the kitchen-drawing convention it has always
-    used and tools/check_room.py pins it.
+    read for where things are before it is read for what they are made of. A
+    wall unit is ABOVE the plan's cut, so it is drawn lighter and dashed — the
+    kitchen-drawing convention, and the one dash in the plan that says something
+    a solid line cannot (`WEIGHT`, `ABOVE_DASH`). Everything else is the carcass
+    weight, and a clash red and heavy.
     """
     fp = [T(q) for q in cabinet_footprint(rm, p, cab)]
     pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in fp)
     _stroke, width, _dash = _layer_outline(layer, bad)
-    dash = ' stroke-dasharray="5 3"' if layer == "wall" else ""
+    dash = ""
+    if layer == "wall":
+        dash = ABOVE_DASH
+        width = width if bad else WEIGHT["above"]
     fill = "#f6e0e3" if bad else (colour or NO_COLOUR)
     fill_op = ' fill-opacity="0.22"' if layer == "wall" else ' fill-opacity="0.35"'
     if bad:
@@ -1274,6 +1402,32 @@ def _plan_cabinet(rm, cab, p, layer, T, faint, bad=False, colour=None,
     return [f'<polygon class="cab" data-cab="{cab.number}" data-layer="{layer}" '
             f'points="{pts}" fill="{fill}"{fill_op} '
             f'stroke="{_stroke}" stroke-width="{width}"{dash}{op}{ears}/>']
+
+
+def _plan_faces(job, cab, p, layer, T, std, faint=False):
+    """A cabinet's door leaves, drawer faces and blind panel, seen from above.
+
+    Each is a thin strip at its board's real thickness where it really is —
+    along a mitre's angled face, and on a blind corner the door and the flush
+    panel beside it — in its own board's colour, leaf by leaf and drawer by
+    drawer as the cut list cuts them (`room.front_outlines`). Lowest first, so
+    the one you would see from above is drawn last.
+
+    Drawing only: they take no pointer events, so a press still lands on the
+    cabinet, and the door swings on hover are untouched. A wall unit's faces
+    follow its layer — the lighter dashed line — and ghost with it.
+    """
+    op = ' opacity="0.30"' if faint else ""
+    width, dash = ((WEIGHT["above"], ABOVE_DASH) if layer == "wall"
+                   else (WEIGHT["face"], ""))
+    out = []
+    for part, outline in front_outlines(job, cab, p, std):
+        pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in (T(q) for q in outline))
+        out.append(f'<polygon class="face" data-cab="{cab.number}" '
+                   f'data-role="{part.role}" points="{pts}" '
+                   f'fill="{board_look(job, part.board)["colour"]}" stroke="{INK}" '
+                   f'stroke-width="{width}"{dash}{op} pointer-events="none"/>')
+    return out
 
 
 def _plan_panel(job, rm, cab, p, T, std, faint=False, bad=False):
@@ -1294,7 +1448,7 @@ def _plan_panel(job, rm, cab, p, T, std, faint=False, bad=False):
     return [f'<polygon class="pan" data-panel="{cab.number}" points="{pts}" '
             f'fill="{"#f6e0e3" if bad else colour}" fill-opacity="0.9" '
             f'stroke="{CRIT if bad else INK}" pointer-events="none" '
-            f'stroke-width="{"2" if bad else "1.3"}"{op}/>']
+            f'stroke-width="{WEIGHT["clash"] if bad else WEIGHT["panel"]}"{op}/>']
 
 
 def _plan_panel_hit(job, rm, cab, p, T, std, scale):
@@ -1323,7 +1477,8 @@ def _plan_panel_hit(job, rm, cab, p, T, std, scale):
 
 
 def _plan_label(rm, cab, p, T, std: Standard = STANDARD, materials: dict = None):
-    """Number and size at the middle of the outline, whatever shape it is."""
+    """Number and size at the middle of the outline, whatever shape it is — as
+    label specs for `_place_labels`, which keeps them off each other."""
     fp = [T(q) for q in cabinet_footprint(rm, p, cab, std, materials)]
     cx = sum(x for x, _ in fp) / len(fp)
     cy = sum(y for _, y in fp) / len(fp)
@@ -1333,16 +1488,84 @@ def _plan_label(rm, cab, p, T, std: Standard = STANDARD, materials: dict = None)
         # A panel is a few pixels across the thin way, so the number goes beside
         # it rather than in it — inside, `side <= 24` would drop every one.
         cx = max(x for x, _ in fp) + 4
-        return [f'<text x="{cx:.1f}" y="{cy + 3:.1f}" font-size="9" '
-                f'fill="{INK}">{cab.number}</text>']
+        return [_label(cx, cy + 3, str(cab.number), 9, INK, anchor="start",
+                       prio=2, leader=True)]
     if side <= 24:
         return []
     g = geometry(cab, std, materials)
-    out = [f'<text x="{cx:.1f}" y="{cy - 1:.1f}" font-size="10" '
-           f'text-anchor="middle" fill="{INK}">{cab.number}</text>']
+    number = _label(cx, cy - 1, str(cab.number), 10, INK, prio=1, leader=True)
+    out = [number]
     if side > 40:
-        out.append(f'<text x="{cx:.1f}" y="{cy + 10:.1f}" font-size="8" '
-                   f'text-anchor="middle" fill="{MUTED}">{g.width}x{g.depth}</text>')
+        # the size is the first thing to go when there is no room for it
+        out.append(_label(cx, cy + 10, f"{g.width}x{g.depth}", 8, MUTED, prio=3,
+                          drop=True, beside=number))
+    return out
+
+
+# How far a label may be moved off its spot, on a short leader, before it is
+# given up on: pixels, and nothing reads it but `_place_labels`.
+LEADER_STEPS = ((0, -13), (0, 13), (16, 0), (-16, 0), (14, -13), (-14, -13),
+                (14, 13), (-14, 13), (0, -24), (0, 24), (26, 0), (-26, 0))
+
+
+def _label(x, y, text, size, fill, anchor="middle", prio=1, drop=False,
+           leader=False, beside=None) -> dict:
+    """One plan label, to be placed by `_place_labels`. `drop` may be left out
+    when there is no room; `leader` may be moved off its spot on a short line;
+    `beside` is a label it only makes sense next to, left where it was."""
+    return {"x": x, "y": y, "text": text, "size": size, "fill": fill,
+            "anchor": anchor, "prio": prio, "drop": drop, "leader": leader,
+            "beside": beside, "at": None}
+
+
+def _label_box(lb, dx=0.0, dy=0.0):
+    w = len(lb["text"]) * lb["size"] * 0.58
+    x0 = lb["x"] + dx - (w / 2 if lb["anchor"] == "middle" else 0)
+    y1 = lb["y"] + dy + lb["size"] * 0.2
+    return (x0 - 1, y1 - lb["size"] * 0.95, x0 + w + 1, y1)
+
+
+def _place_labels(labels) -> list:
+    """Plan labels, placed so none sits on another (23 September 2026).
+
+    Most important first: cabinet numbers, then panel numbers, then sizes, then
+    gap widths. Each goes where it was asked for if that is clear; if not, a
+    label that may move is tried a short step off in each direction and drawn
+    there with a leader back to its spot, and a size is simply left out — the
+    number is what matters. A label that fits nowhere is drawn where it was
+    asked for: a number on top of another beats a number missing.
+    """
+    placed, out = [], []
+
+    def clear(box):
+        return all(box[2] <= b[0] or box[0] >= b[2] or box[3] <= b[1] or box[1] >= b[3]
+                   for b in placed)
+
+    for lb in sorted(labels, key=lambda lb: lb["prio"]):
+        if lb["beside"] is not None and lb["beside"]["at"] != (0, 0):
+            continue                     # its number was moved: the size goes
+        steps = [(0, 0)] + (list(LEADER_STEPS) if lb["leader"] else [])
+        at = next((d for d in steps if clear(_label_box(lb, *d))), None)
+        if at is None:
+            if lb["drop"]:
+                continue
+            at = (0, 0)
+        lb["at"] = at
+        box = _label_box(lb, *at)
+        placed.append(box)
+        dx, dy = at
+        if at != (0, 0):
+            # from the label's own spot to the nearest edge of where it went
+            ox, oy = lb["x"], lb["y"] - lb["size"] * 0.35
+            ex = min(max(ox, box[0]), box[2])
+            ey = min(max(oy, box[1]), box[3])
+            out.append(f'<line class="leader" x1="{ox:.1f}" y1="{oy:.1f}" '
+                       f'x2="{ex:.1f}" y2="{ey:.1f}" stroke="{MUTED}" '
+                       f'stroke-width="{WEIGHT["dim"]}" pointer-events="none"/>')
+        anchor = "" if lb["anchor"] == "start" else f' text-anchor="{lb["anchor"]}"'
+        out.append(f'<text x="{lb["x"] + dx:.1f}" y="{lb["y"] + dy:.1f}" '
+                   f'font-size="{lb["size"]}"{anchor} fill="{lb["fill"]}">'
+                   f'{escape(lb["text"])}</text>')
     return out
 
 
@@ -1381,7 +1604,7 @@ def _hinge_marks(c: Cabinet, x0, top, dw, dh, door_h, flip, std: Standard,
                    f'data-side="{side}">'
                    f'<polyline points="{latch_x:.1f},{top:.1f} {hinge_x:.1f},{top + dh / 2:.1f} '
                    f'{latch_x:.1f},{top + dh:.1f}" fill="none" stroke="{mark}" '
-                   f'stroke-width="0.7" stroke-dasharray="3 2"/>')
+                   f'stroke-width="{WEIGHT["internal"]}"/>')
         for mm in marks:                      # measured up from the bottom of the door
             out.append(f'<circle class="hinge-at" data-mm="{mm}" '
                        f'cx="{hinge_x + (3 if side == "L" else -3):.1f}" '
@@ -1452,7 +1675,7 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
         fx, fy, fw, fhh = x + 2, cursor + 1, w - 4, max(fh - 2, 1)
         out.append(f'<rect x="{fx:.1f}" y="{fy:.1f}" width="{fw:.1f}" '
                    f'height="{fhh:.1f}" fill="{fills.of(look, True)}" stroke="{RULE}" '
-                   f'stroke-width="0.8"/>')
+                   f'stroke-width="{WEIGHT["face"]}"/>')
         if look["grain"] and not fills.textured(look):
             out += _grain_lines(fx, fy, fw, fhh, True, look["ink"])
         if face_edge:
@@ -1486,7 +1709,7 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
             out.append(f'<rect class="edoor" data-cab="{c.number}" data-door="{i}" '
                        f'data-hinge="{side}" x="{dx:.1f}" y="{top:.1f}" '
                        f'width="{dw - 1:.1f}" height="{dh:.1f}" '
-                       f'fill="{fills.of(look, True)}" stroke="{RULE}" stroke-width="0.8"/>')
+                       f'fill="{fills.of(look, True)}" stroke="{RULE}" stroke-width="{WEIGHT["face"]}"/>')
             if look["grain"] and not fills.textured(look):
                 out += _grain_lines(dx, top, dw - 1, dh, True, look["ink"])
             if door_edge:
@@ -1511,11 +1734,11 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
         for i in range(1, n + 1):
             sy = base + span * i / (n + 1)
             out.append(f'<line x1="{x + 4:.1f}" y1="{sy:.1f}" x2="{x + w - 4:.1f}" '
-                       f'y2="{sy:.1f}" stroke="{inside}" stroke-width="1" '
-                       f'stroke-opacity="0.55" stroke-dasharray="4 3"/>')
+                       f'y2="{sy:.1f}" stroke="{inside}" stroke-width="{WEIGHT["internal"]}" '
+                       f'stroke-opacity="0.55"/>')
     if c.divider_count:
         out.append(f'<line x1="{x + w / 2:.1f}" y1="{y + 4:.1f}" x2="{x + w / 2:.1f}" '
-                   f'y2="{y + h - 4:.1f}" stroke="{inside}" stroke-width="1.2" '
+                   f'y2="{y + h - 4:.1f}" stroke="{inside}" stroke-width="{WEIGHT["internal"]}" '
                    f'stroke-opacity="0.55"/>')
     return out
 
@@ -1561,20 +1784,12 @@ def _corner_interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
         lw = max(x1 - x0, 1)
         out.append(f'<rect class="edoor" data-cab="{c.number}" data-door="{i}" '
                    f'x="{x0:.1f}" y="{top:.1f}" width="{lw:.1f}" height="{dh:.1f}" '
-                   f'fill="{fills.of(look, True)}" stroke="{RULE}" stroke-width="0.8"/>')
+                   f'fill="{fills.of(look, True)}" stroke="{RULE}" stroke-width="{WEIGHT["face"]}"/>')
         if door_edge:
             out.extend(_edge_band(x0, top, lw, dh, door_edge))
         ink = muted_on(look["colour"])
         if angled:
-            step = 9.0
-            k = 0.0
-            while k < lw + dh:
-                ax0, ay0 = x0 + max(0.0, k - dh), top + min(dh, k)
-                ax1, ay1 = x0 + min(lw, k), top + max(0.0, k - lw)
-                out.append(f'<line x1="{ax0:.1f}" y1="{ay0:.1f}" x2="{ax1:.1f}" '
-                           f'y2="{ay1:.1f}" stroke="{ink}" stroke-width="0.5" '
-                           f'stroke-opacity="0.35"/>')
-                k += step
+            out.extend(_oblique_hatch(x0, top, lw, dh, ink))
         if text and dh > 20:
             out.append(f'<text x="{x0 + lw / 2:.1f}" y="{top + dh / 2 + 3.5:.1f}" '
                        f'font-size="9" text-anchor="middle" fill="{ink}" '
@@ -1603,7 +1818,7 @@ def _corner_interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
         e0, e1 = (a - fb, a) if hand == "R" else (0, fb)
         out.append(f'<line x1="{px(e0 if hand == "R" else e1):.1f}" y1="{y:.1f}" '
                    f'x2="{px(e0 if hand == "R" else e1):.1f}" y2="{y + h:.1f}" '
-                   f'stroke="{RULE}" stroke-width="0.8"/>')
+                   f'stroke="{RULE}" stroke-width="{WEIGHT["internal"]}"/>')
     elif kind == "blind":
         B = int(c.blind_width or 0)
         spans = blind_spans(c, std)
@@ -1616,14 +1831,14 @@ def _corner_interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
             out.append(f'<rect class="eside" x="{px(s0):.1f}" y="{top:.1f}" '
                        f'width="{(s1 - s0) * scale:.1f}" height="{dh:.1f}" '
                        f'fill="{fills.of(body, True)}" stroke="{RULE}" '
-                       f'stroke-width="0.8"/>')
+                       f'stroke-width="{WEIGHT["face"]}"/>')
             # The flush panel, in ITS OWN board, across its full B. The door is
             # drawn over it afterwards, so what is left showing is exactly the
             # strip the door does not cover — which is what you see in the room.
             look = board_look(mats, c.blind_panel_board)
             out.append(f'<rect class="eblind" x="{px(b0):.1f}" y="{top:.1f}" '
                        f'width="{(b1 - b0) * scale:.1f}" height="{dh:.1f}" '
-                       f'fill="{fills.of(look, True)}" stroke="{INK}" stroke-width="0.9"/>')
+                       f'fill="{fills.of(look, True)}" stroke="{INK}" stroke-width="{WEIGHT["face"]}"/>')
             if c.door_count:
                 dw = int(round(d1 - d0))
                 leaf(px(d0), px(d1), 0, False, f"1 x {dw}")

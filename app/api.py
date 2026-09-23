@@ -1464,9 +1464,9 @@ def elevation(payload):
     """
     job = _job(payload)
     wall = payload.get("wall")
-    # Finish or Line: a view setting only, never saved in the job, and it moves
-    # no geometry — the same drawing with or without the boards' colours.
-    mode = "line" if payload.get("mode") == "line" else "finish"
+    # Line or Finish: a view setting only, never saved in the job, and it moves
+    # no geometry — the two differ only in how the walls either side are drawn.
+    mode = "finish" if payload.get("mode") == "finish" else "line"
     svg = (wall_elevation_svg(job, str(wall), mode=mode) if wall
            else elevation_svg(job, mode=mode))
     return {"ok": True, "svg": svg}

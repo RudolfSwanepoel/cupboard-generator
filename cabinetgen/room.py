@@ -914,16 +914,9 @@ def return_profiles(job, wall_id: str, std: Standard = STANDARD) -> List[dict]:
     rm = job.room
     if rm is None:
         return []
-    ids = [w.id for w in rm.walls]
-    if wall_id not in ids:
+    if wall_id not in [w.id for w in rm.walls]:
         return []
-    i = ids.index(wall_id)
-    beside = set()
-    for j in (i - 1, i + 1):
-        if 0 <= j < len(ids) or rm.closed:
-            if len(ids) > 1:
-                beside.add(ids[j % len(ids)])
-    beside.discard(wall_id)
+    beside = _beside(rm, wall_id)
     here = _wall(rm, wall_id)
     (sx, sy), (dx, dy), (nx, ny) = wall_frames(rm)[here.id]
     out = []
@@ -951,6 +944,300 @@ def return_profiles(job, wall_id: str, std: Standard = STANDARD) -> List[dict]:
                     "out": int(round(min(y for _, y in pts)))})
     # nearest this wall first, so the one nearest the viewer is drawn last, on top
     out.sort(key=lambda r: r["out"])
+    return out
+
+
+# --- what a cabinet is made of, as solids in the room ------------------------
+#
+# Added 23 September 2026 for two drawings: the plan's door and drawer faces,
+# and the Finish view of a wall, which shows the runs either side as what you
+# would really see standing in front of it. Both are read-only views, so this
+# is drawing geometry and nothing more — no cut, check or cost reads it. Every
+# size comes off `geometry` (the panel set) and the same corner helpers the cut
+# list uses; the only thing laid out here rather than read is where across its
+# carcass a leaf sits, which is spread evenly because no cut list says.
+
+
+@dataclass
+class Part:
+    """One board of a cabinet as a solid: a plan outline extruded up.
+
+    `outline` is convex, in the cabinet's own frame (x along its wall from its
+    left edge, y out from the wall face); `z0`/`z1` are up from the carcass
+    underside. `grain` is the cabinet-frame axis the grain runs along — 'x',
+    'y' or 'z' — or None on a part that says nothing about it. `label` is a
+    real size worth printing on the part where it is seen at an angle (a mitre
+    door's cut width), and `index` is the leaf or drawer it is.
+    """
+    role: str                          # side top bottom door drawer blind panel carcass
+    board: str
+    outline: List[Point]
+    z0: float
+    z1: float
+    grain: Optional[str] = "z"
+    label: str = ""
+    index: int = -1
+
+    @property
+    def front(self) -> bool:
+        """A door, a drawer face or a blind corner's flush panel."""
+        return self.role in ("door", "drawer", "blind")
+
+
+def _box(role, board, x0, x1, y0, y1, z0, z1, grain="z", label="", index=-1):
+    return Part(role, board, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+                z0, z1, grain, label, index)
+
+
+def _front_t(materials, board: str, std: Standard) -> int:
+    """A front's real thickness: its board's, or the carcass figure if the
+    board carries none."""
+    return material_thickness(materials, board) or std.board_t
+
+
+def _door_z(cab, std: Standard, above: float = 0) -> Tuple[float, float]:
+    """Where a door leaf runs up the carcass — its bottom at `above`, the top of
+    any drawer stack under it, exactly as the elevation stacks them."""
+    h = cab.door_height or (cab.height - std.door_height_gap)
+    return above, above + h
+
+
+def _spread(total: float, widths: List[int]) -> List[Tuple[float, float]]:
+    """Leaves of the given widths spread evenly across `total`, left to right."""
+    gap = max(total - sum(widths), 0) / (len(widths) + 1)
+    out, at = [], gap
+    for w in widths:
+        out.append((at, at + w))
+        at += w + gap
+    return out
+
+
+def _panel_grain_axis(spec) -> Optional[str]:
+    """Which cabinet-frame axis a panel's grain runs along, off its orientation
+    — the same table `panel_geometry` reads its extents from."""
+    along = {"upright": ("x", "z"), "flat": ("x", "y"), "end": ("y", "z")}
+    a, b = along.get(spec.orientation, ("x", "z"))
+    return a if spec.grain_along == "a" else b
+
+
+def _mitre_solid(cab, g, std: Standard, mats) -> List[Part]:
+    """A mitre's boards, off its four measurements — the construction
+    `engine.mitre_panels` cuts: two open-face sides, the two wall panels (wall A
+    wrapping), the mitred top and bottom, and the door on the inner line."""
+    t, a_a, a_b, f_a, f_b = _mitre_parts(cab, std)
+    H, carc = g.height, cab.carcass_board
+    blank = [(t, t), (a_a - t, t), (a_a - t, a_b - t), (a_a - f_b, a_b - t), (t, f_a)]
+    parts = [_box("side", carc, 0, t, 0, f_a, 0, H),                  # open face, wall A
+             _box("side", carc, t, a_a, 0, t, 0, H),                  # wall A, wraps
+             _box("side", carc, a_a - t, a_a, t, a_b - t, 0, H),      # wall B
+             _box("side", carc, a_a - f_b, a_a, a_b - t, a_b, 0, H),  # open face, wall B
+             Part("bottom", carc, blank, 0, t, "x"),
+             Part("top", carc, blank, H - t, H, "x")]
+    doors = g.door_widths if cab.door_count else []
+    if doors:
+        (x0, y0), (x1, y1) = (t, f_a), (a_a - f_b, a_b - t)   # the inner line, hand R
+        span = math.hypot(x1 - x0, y1 - y0)
+        ux, uy = (x1 - x0) / span, (y1 - y0) / span
+        nx, ny = -uy, ux                                      # out into the room
+        z0, z1 = _door_z(cab, std)
+        for i, (s0, s1) in enumerate(_spread(span, doors)):
+            board = cab.door_board(i)
+            d = _front_t(mats, board, std)
+            p0 = (x0 + ux * s0, y0 + uy * s0)
+            p1 = (x0 + ux * s1, y0 + uy * s1)
+            parts.append(Part("door", board,
+                              [p0, p1, (p1[0] + nx * d, p1[1] + ny * d),
+                               (p0[0] + nx * d, p0[1] + ny * d)],
+                              z0, z1, "z", str(doors[i]), i))
+    if cab.hand == "L":                  # the mirror of R about the unit's centre line
+        for p in parts:
+            p.outline = [(a_a - x, y) for x, y in p.outline]
+    return parts
+
+
+def solid_parts(cab, std: Standard = STANDARD, materials: dict = None) -> List[Part]:
+    """What a cabinet or a panel is made of, as solids in its own frame.
+
+    Drawing geometry only (see above). A panel is one board. A straight
+    cabinet is its two sides, its bottom, its top if the panel set has one, and
+    its fronts standing proud of the carcass at their boards' real thickness: the
+    drawer faces stacked from the bottom with `stack_gap` between them, then the
+    doors, as the elevation stacks them. A mitre is `engine.mitre_panels`'
+    construction; a blind corner a straight box with its flush panel inset
+    (`blind_spans`) and its one door. An ell, a bespoke cabinet, or anything
+    whose parts are not known is its footprint as one solid in the carcass
+    board, and no fronts — nothing is guessed onto a drawing.
+    """
+    mats = MATERIALS if materials is None else materials
+    g = geometry(cab, std, mats)
+    if cab.is_panel:
+        spec = cab.panel_spec
+        return [_box("panel", spec.board, 0, g.width, 0, g.depth, 0, g.height,
+                     _panel_grain_axis(spec))]
+    if cab.corner_kind == "mitre" and g.source == "corner" and _mitre_parts(cab, std):
+        return _mitre_solid(cab, g, std, mats)
+    xs = [x for x, _ in g.footprint]
+    W, D, H, t = max(xs) - min(xs), g.depth, g.height, std.board_t
+    rect = g.source in ("panels", "declared") or (
+        g.source == "outline" and len(g.footprint) == 4 and
+        sorted(g.footprint) == sorted(rect_outline(W, D)))
+    if cab.template == "none" or cab.corner_kind == "ell" or not rect or H <= 0:
+        return [Part("carcass", cab.carcass_board, list(g.footprint), 0, H, "z")]
+    from .engine import generate_cabinet      # engine imports this module
+    roles = {p.role for p in generate_cabinet(cab, std, mats)}
+    carc = cab.carcass_board
+    parts = [_box("side", carc, 0, t, 0, D, 0, H),
+             _box("side", carc, W - t, W, 0, D, 0, H),
+             _box("bottom", carc, t, W - t, 0, D, 0, t, "x")]
+    if "Top" in roles:
+        parts.append(_box("top", carc, t, W - t, 0, D, H - t, H, "x"))
+
+    if cab.corner_kind == "blind":
+        spans = blind_spans(cab, std)
+        if spans:
+            (_s0, _s1), (b0, b1), (d0, d1) = spans
+            board = cab.blind_panel_board
+            parts.append(_box("blind", board, b0, b1,
+                              D - _front_t(mats, board, std), D, t, H - t))
+            z0, z1 = _door_z(cab, std)
+            board = cab.door_board(0)
+            parts.append(_box("door", board, d0, d1, D, D + _front_t(mats, board, std),
+                              z0, z1, index=0))
+        return parts
+
+    gap = std.door_single_gap
+    at = 0.0
+    stack = cab.drawer_list
+    for i in range(len(stack) - 1, -1, -1):             # the bottom face is the last
+        d = stack[i]
+        board = cab.face_board_of(d)
+        parts.append(_box("drawer", board, gap / 2, W - gap / 2,
+                          D, D + _front_t(mats, board, std),
+                          at, at + d.face_height, index=i))
+        at += d.face_height + std.stack_gap
+    if g.door_widths:
+        z0, z1 = _door_z(cab, std, at if stack else 0)
+        for i, (x0, x1) in enumerate(_spread(W, g.door_widths)):
+            board = cab.door_board(i)
+            parts.append(_box("door", board, x0, x1, D, D + _front_t(mats, board, std),
+                              z0, z1, index=i))
+    return parts
+
+
+def _placed_frame(rm: Room, p):
+    """A placement's frame in world plan terms, unrounded: where cabinet-local
+    (0, 0) is, the unit direction along its wall and the one into the room."""
+    (sx, sy), (dx, dy), (nx, ny) = wall_frames(rm)[_wall(rm, p.wall).id]
+    off = int(getattr(p, "y", 0) or 0)
+    return (sx + dx * p.x + nx * off, sy + dy * p.x + ny * off), (dx, dy), (nx, ny)
+
+
+def _to_plan(frame, q) -> Point:
+    (ox, oy), (dx, dy), (nx, ny) = frame
+    return ox + dx * q[0] + nx * q[1], oy + dy * q[0] + ny * q[1]
+
+
+def front_outlines(job, cab, p, std: Standard = STANDARD) -> List[Tuple[Part, List[Point]]]:
+    """A cabinet's fronts in world plan coordinates, bottom first, for the plan.
+
+    `(part, outline)` per door leaf, drawer face and blind panel, lowest first,
+    so drawn in order the one seen from above ends up on top.
+    """
+    if job.room is None or cab.is_panel:
+        return []
+    frame = _placed_frame(job.room, p)
+    fronts = [q for q in solid_parts(cab, std, job.materials) if q.front]
+    fronts.sort(key=lambda q: q.z1)
+    return [(q, [_to_plan(frame, v) for v in q.outline]) for q in fronts]
+
+
+def _beside(rm: Room, wall_id: str) -> set:
+    """The walls either side of this one, off the chain of corners — the one
+    before and the one after, and round the end only in a closed room."""
+    ids = [w.id for w in rm.walls]
+    i = ids.index(wall_id)
+    beside = set()
+    for j in (i - 1, i + 1):
+        if 0 <= j < len(ids) or rm.closed:
+            if len(ids) > 1:
+                beside.add(ids[j % len(ids)])
+    beside.discard(wall_id)
+    return beside
+
+
+def return_faces(job, wall_id: str, std: Standard = STANDARD) -> List[dict]:
+    """The runs on the walls either side as you would SEE them from this wall.
+
+    For the Finish view (23 September 2026). Every board of every cabinet and
+    placed panel on the two neighbouring walls (`solid_parts`) is turned into
+    this wall's frame, and each face of it that looks towards someone standing
+    in front of this wall is projected straight onto the wall's plane — a true
+    orthographic view, nothing unfolded or turned. A vertical face always lands
+    as a rectangle: `x0`/`x1` along this wall, `z0`/`z1` off the floor
+    (`carcass_z`, so legs are in it). `out` is how far out from this wall the
+    face stands, which is how near the viewer it is: sorted furthest first, so
+    painted in order a nearer end panel covers the carcass side behind it.
+
+    `oblique` is a face not square on to the viewer — a mitre door — and
+    `vertical` is which way its grain runs as seen: True up, False along, None
+    into the page. Faces edge on to the viewer are left out; they have no area.
+    """
+    rm = job.room
+    if rm is None or wall_id not in [w.id for w in rm.walls]:
+        return []
+    beside = _beside(rm, wall_id)
+    here = _wall(rm, wall_id)
+    (sx, sy), (dx, dy), (nx, ny) = wall_frames(rm)[here.id]
+
+    def local(q):                        # world plan -> (along this wall, out from it)
+        return ((q[0] - sx) * dx + (q[1] - sy) * dy,
+                (q[0] - sx) * nx + (q[1] - sy) * ny)
+
+    items = ([(cab, p) for cab, p, _lay in placed(job)] + placed_panels(job))
+    out = []
+    for cab, p in items:
+        if p.wall not in beside:
+            continue
+        frame = _placed_frame(rm, p)
+        (_o, (wdx, wdy), (wnx, wny)) = frame
+        z = carcass_z(cab, p, std)
+        for part in solid_parts(cab, std, job.materials):
+            pts = [local(_to_plan(frame, v)) for v in part.outline]
+            cx = sum(u for u, _ in pts) / len(pts)
+            cy = sum(v for _, v in pts) / len(pts)
+            if part.grain in ("x", "y"):
+                ex, ey = ((wdx, wdy) if part.grain == "x" else (wnx, wny))
+                along = abs(ex * dx + ey * dy)
+            for k, (ua, va) in enumerate(pts):
+                ub, vb = pts[(k + 1) % len(pts)]
+                length = math.hypot(ub - ua, vb - va)
+                if length < 1e-6:
+                    continue
+                # the edge's normal, turned away from the part's own middle
+                fx, fy = (vb - va) / length, -(ub - ua) / length
+                if fx * ((ua + ub) / 2 - cx) + fy * ((va + vb) / 2 - cy) < 0:
+                    fx, fy = -fx, -fy
+                if fy <= 0.05:           # faces away from the viewer, or edge on
+                    continue
+                x0 = max(min(ua, ub), 0)
+                x1 = min(max(ua, ub), here.length)
+                if x1 - x0 < 0.5 or min(va, vb) < -1:
+                    continue
+                if part.grain == "z":
+                    vertical = True
+                elif part.grain in ("x", "y"):
+                    vertical = False if along > 0.5 else None
+                else:
+                    vertical = None
+                out.append({"cabinet": cab.number, "wall": p.wall,
+                            "panel": cab.is_panel, "role": part.role,
+                            "board": part.board, "index": part.index,
+                            "label": part.label,
+                            "x0": round(x0, 1), "x1": round(x1, 1),
+                            "z0": z + part.z0, "z1": z + part.z1,
+                            "out": round((va + vb) / 2, 1),
+                            "oblique": fy < 0.99, "vertical": vertical})
+    out.sort(key=lambda f: f["out"])
     return out
 
 

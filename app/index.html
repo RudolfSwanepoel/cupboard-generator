@@ -138,7 +138,9 @@
         font-variant-numeric:tabular-nums}
   .dtot .over{color:var(--crit);font-weight:700}
   .presets{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
-  .swatch{width:26px;height:26px;border-radius:3px;display:block;object-fit:cover;
+  /* the Boards tab's swatch, not a drawing legend's <rect class="swatch">,
+     which this used to resize to 26 px and push over its own text */
+  .swatch:not(rect){width:26px;height:26px;border-radius:3px;display:block;object-fit:cover;
           border:1px solid var(--rule)}
   .swatch.none{background:repeating-linear-gradient(45deg,var(--carc),var(--carc) 4px,
                var(--panel) 4px,var(--panel) 8px)}
@@ -578,23 +580,30 @@ function renderStrip() {
 S.elev = null;
 let elevSeq = 0;
 
-// Finish (board colours and pictures) or Line (white fronts, grey lines). A view
-// setting and nothing more: not saved in the job, and it moves no geometry.
-S.elevMode = "finish";
+// Line or Finish (23 Sept 2026). Both draw a wall's own cabinets the same; they
+// differ only in the runs on the walls either side — grey outlines end on
+// (Line), or what you would see of them from this wall, in their boards
+// (Finish). A view setting and nothing more: not saved in the job, and it
+// moves no geometry. The Run has no walls either side, so there the toggle is
+// greyed out and keeps its choice for the next wall.
+S.elevMode = "line";
 
 async function renderElevation() {
   const rm = S.job.room;
   if (!rm || !rm.walls.some((w) => w.id === S.elev)) S.elev = null;
-  const modes = `<span class="elevmode">` + [["finish", "Finish"], ["line", "Line"]]
+  const onRun = S.elev === null;
+  const modes = `<span class="elevmode">` + [["line", "Line"], ["finish", "Finish"]]
     .map(([k, label]) => `<button data-elevmode="${k}" class="${
-      S.elevMode === k ? "on" : ""}">${label}</button>`).join("") + `</span>`;
+      S.elevMode === k && !onRun ? "on" : ""}"${onRun
+      ? ' disabled title="The Run has no walls either side: Line and Finish draw it the same"'
+      : ""}>${label}</button>`).join("") + `</span>`;
   $("elevpick").innerHTML = (rm && rm.walls.length
     ? [["", "Run"]].concat(rm.walls.map((w) => [w.id, "Wall " + w.id]))
         .map(([k, label]) => `<button data-elev="${esc(k)}" class="${
           (S.elev || "") === k ? "on" : ""}">${esc(label)}</button>`).join("")
     : "") + modes;
   alignEditor();
-  if (S.elev === null && S.elevMode === "finish") {
+  if (onRun) {
     $("elevation").innerHTML = ((S.res && S.res.elevation) || "")
       + `<div id="elevdrag"></div>`;
     applyZoom("elevation");
@@ -3771,10 +3780,14 @@ function moveElevDrag(d, e) {
 
   EDRAG.moved = true;
   EDRAG.at = {x: x, z: z};
-  EDRAG.grp.setAttribute("transform", `translate(${
+  const moveBy = `translate(${
     ((x - EDRAG.from.x) * t.scale).toFixed(2)} ${
     ((carcassZ({z: EDRAG.from.z}, EDRAG.model) -
-      carcassZ({z: z}, EDRAG.model)) * t.scale).toFixed(2)})`);
+      carcassZ({z: z}, EDRAG.model)) * t.scale).toFixed(2)})`;
+  EDRAG.grp.setAttribute("transform", moveBy);
+  // a thin panel's number is drawn outside its group, over the neighbours
+  // (render: `late`), so it is moved alongside rather than left behind
+  elevTags(EDRAG.grp).forEach((el) => el.setAttribute("transform", moveBy));
 
   const out = $("elevdrag");
   if (out) {
@@ -3798,6 +3811,11 @@ function endElevDrag() {
   finishElevDrag(d);
 }
 
+function elevTags(grp) {
+  return document.querySelectorAll(
+    `#elevation .eplabel[data-cab="${grp.dataset.cab}"]`);
+}
+
 function finishElevDrag(d) {
   if (EDRAG === d) EDRAG = null;
   window.removeEventListener("pointermove", onElevDrag);
@@ -3805,6 +3823,7 @@ function finishElevDrag(d) {
   window.removeEventListener("pointercancel", endElevDrag);
   d.grp.classList.remove("dragging");
   d.grp.removeAttribute("transform");
+  elevTags(d.grp).forEach((el) => el.removeAttribute("transform"));
   const out = $("elevdrag");
   if (out) out.style.display = "none";
   if (!d.moved || (d.at.x === d.from.x && d.at.z === d.from.z)) { renderList(); return; }

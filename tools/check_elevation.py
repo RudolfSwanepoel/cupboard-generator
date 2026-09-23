@@ -433,30 +433,167 @@ def main() -> int:
                r'class="esidelabel" data-wall="(\w)"[^>]*>([^<]*)<', a)]),
           (False, ["B: 11, 13"]))
 
-    print("\nFinish and Line views (22 Sept 2026)")
-    check("Finish is the default: the drawing is unchanged by naming it",
-          wall_elevation_svg(tj, "A", mode="finish") == wall_elevation_svg(tj, "A"), True)
-    line = wall_elevation_svg(tj, "B", mode="line")
-    fills = set(re.findall(r'fill="(#[0-9a-f]{6})"', line))
-    check("Finish draws the board colours", "#c4a35a" in b, True)
-    check("Line draws none of them", sorted(fills & {"#f4f4f0", "#c4a35a"}), [])
-    check("and no picture", ("<image" in line, "url(#bpic" in line), (False, False))
-    check("and no dark ink: lines and text are grey", '"#191c1a"' in line, False)
+    print("\nLine and Finish views (23 Sept 2026)")
+    check("Line is the default: the drawing is unchanged by naming it",
+          wall_elevation_svg(tj, "A", mode="line") == wall_elevation_svg(tj, "A"), True)
+    line_b, fin_b = wall_elevation_svg(tj, "B"), wall_elevation_svg(tj, "B", mode="finish")
+    check("both draw the wall's own cabinets in their board colours",
+          ("#c4a35a" in line_b, "#c4a35a" in fin_b), (True, True))
     doors = r'class="edoor" data-cab="(\d+)" data-door="\d+"[^>]*x="([\d.]+)"'
-    check("but the same parts in the same places",
-          re.findall(doors, line) == re.findall(doors, b) != [], True)
-    check("the job is untouched by drawing it in Line",
-          tj.materials["BROOKHILL"].get("colour"), "#c4a35a")
+    check("and the same parts in the same places",
+          re.findall(doors, line_b) == re.findall(doors, fin_b) != [], True)
+    check("Line draws the neighbours as outlines end on, and no faces",
+          ('class="eside"' in line_b, 'class="eface"' in line_b), (True, False))
+    check("Finish draws them as faces, and no outlines",
+          ('class="eside"' in fin_b, 'class="esideline"' in fin_b,
+           'class="eface"' in fin_b), (False, False, True))
+    check("both keep the one label per neighbouring wall",
+          [re.findall(r'class="esidelabel"[^>]*>([^<]*)<', v) for v in (line_b, fin_b)],
+          [["A: 1"], ["A: 1"]])
+    check("each says what its neighbours are",
+          ("Shaded outlines" in line_b, "as seen from this wall" in fin_b), (True, True))
     plain = kitchen()
     plain.room = None
-    check("no room: Finish is still the Run, byte for byte",
-          wall_elevation_svg(plain, "A", mode="finish") == elevation_svg(plain), True)
-    check("and Line is the Run in Line",
-          wall_elevation_svg(plain, "A", mode="line") == elevation_svg(plain, mode="line"),
-          True)
-    check("the Run in Line keeps its numbers and sizes",
-          len(re.findall(r'<g class="ecabg erun"', elevation_svg(plain, mode="line")))
-          == len(re.findall(r'<g class="ecabg erun"', elevation_svg(plain))), True)
+    check("no room: Line is still the Run, byte for byte",
+          wall_elevation_svg(plain, "A", mode="line") == elevation_svg(plain), True)
+    check("and the Run is the same drawing in either view — it has no neighbours",
+          elevation_svg(plain, mode="finish") == elevation_svg(plain), True)
+
+    print("\nFinish shows what is seen from this wall, in its boards")
+    # Test.json's corner, built here rather than read from jobs/ (a check never
+    # pins a fact on live workshop data): the left-handed tall mitre 13 at the
+    # start of wall B, tall unit 11 beside it, and its GREY end panel 12.
+    from cabinetgen.room import return_faces                               # noqa: E402
+
+    def corner(with_panel=True):
+        cj = _Job(name="c", room=rectangular(4000, 3000, ceiling=2600),
+                  materials={"WHITEMEL": {"name": "WHITE", "thickness": 16,
+                                          "colour": "#f4f4f0", "grain": "plain"},
+                             "BROOKHILL": {"name": "BROOK", "thickness": 16,
+                                           "colour": "#c4a35a", "grain": "grain"},
+                             "GREY": {"name": "GREY", "thickness": 16,
+                                      "colour": "#4f4f4f", "grain": "plain"}},
+                  cabinets=[_Cab(11, 600, 2400, 600, kind="tall", doors=2,
+                                 carcass_board="WHITEMEL", exterior_board="GREY"),
+                            _Cab(13, 1000, 2400, 500, kind="tall", doors=1,
+                                 corner_unit=True, corner_style="mitre", corner_hand="L",
+                                 arm_a=1000, arm_b=1000, face_a=600, face_b=600,
+                                 carcass_board="WHITEMEL", exterior_board="BROOKHILL"),
+                            _Cab(1, 600, 2400, 600, kind="tall", doors=2,
+                                 carcass_board="WHITEMEL", exterior_board="BROOKHILL")],
+                  placements=[_Pl(13, "B", 0), _Pl(11, "B", 1000), _Pl(1, "A", 200)])
+        cj.room.closed = False
+        cj.room.walls = cj.room.walls[:2]
+        if with_panel:
+            cj.cabinets.append(_Cab(12, 600, 2400, 16, kind="panel",
+                                    panel=_PS(board="GREY", orientation="end",
+                                              a=616, b=2400)))
+            cj.placements.append(_Pl(12, "B", 1600, z=100))
+        return cj
+
+    def topmost(svg, x, y):
+        """The board colour painted last over a point of the drawing, and whose."""
+        hit = None
+        for m in re.finditer(r'<rect class="eface" data-cab="(\d+)" data-role="(\w+)"'
+                             r'[^>]*x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" '
+                             r'height="([\d.]+)" fill="(#[0-9a-f]{6})"', svg):
+            n, role, rx, ry, rw, rh, fill = m.groups()
+            if float(rx) <= x <= float(rx) + float(rw) and float(ry) <= y <= float(ry) + float(rh):
+                hit = (int(n), role, fill)
+        return hit
+
+    def at(svg, mm_x, mm_z):
+        t = re.search(r'class="etrack"[^>]*data-scale="([\d.]+)" data-x0="([\d.]+)" '
+                      r'data-y0="([\d.]+)"', svg)
+        k, x0, y0 = (float(v) for v in t.groups())
+        return topmost(svg, x0 + mm_x * k, y0 - mm_z * k)
+
+    cj = corner()
+    fa = wall_elevation_svg(cj, "A", mode="finish", pictures=None)
+    check("panel 12's face is what is seen at the end of wall A, in its GREY",
+          at(fa, 3700, 1300), (12, "panel", "#4f4f4f"))
+    check("mitre 13's door is seen at its angle, in its BROOKHILL",
+          at(fa, 3200, 1300), (13, "door", "#c4a35a"))
+    faces13 = [f for f in return_faces(cj, "A") if f["cabinet"] == 13 and f["role"] == "door"]
+    check("projected: the 543 door covers under 400 of wall A, and says it is 543",
+          (round(max(f["x1"] for f in faces13) - min(f["x0"] for f in faces13)) < 400,
+           {f["label"] for f in faces13}, all(f["oblique"] for f in faces13)),
+          (True, {"543"}, True))
+    check("with its real width on it, and no hinges or swing on a neighbour",
+          ('>543</text>' in fa,
+           len(re.findall(r'class="hinge" data-cab="1[13]"', fa))), (True, 0))
+    check("the legend names the neighbours' boards too", "GREY — GREY" in fa, True)
+    fa2 = wall_elevation_svg(corner(with_panel=False), "A", mode="finish", pictures=None)
+    check("with panel 12 gone, cabinet 11's own end is seen, in its carcass board",
+          at(fa2, 3700, 1300), (11, "side", "#f4f4f0"))
+    check("and its doors' edges stand proud of it, in their GREY",
+          at(fa2, 3392, 1300), (11, "door", "#4f4f4f"))
+    check("nearer the viewer is painted later: 12 after 11's side",
+          [f["cabinet"] for f in return_faces(cj, "A")
+           if f["cabinet"] in (11, 12) and f["role"] in ("side", "panel")][-1], 12)
+    fb = wall_elevation_svg(cj, "B", mode="finish", pictures=None)
+    check("face on to B, A's tall unit shows its end side, over B's mitre arm",
+          at(fb, 300, 1300), (1, "side", "#f4f4f0"))
+    check("and the Finish view moves nothing: the chains are the Line view's",
+          re.findall(r'class="dim"[^>]*>(\d+)<', fa) ==
+          re.findall(r'class="dim"[^>]*>(\d+)<',
+                     wall_elevation_svg(cj, "A", pictures=None)), True)
+
+    print("\nfaces in the plan, and one set of line weights")
+    from cabinetgen.render import WEIGHT                                   # noqa: E402
+    pj = corner()
+    plan = plan_svg(pj, show=("base", "wall", "tall", "panels"))
+    faces = re.findall(r'<polygon class="face" data-cab="(\d+)" data-role="(\w+)"'
+                       r'[^>]*fill="(#[0-9a-f]{6})"', plan)
+    check("every door leaf is drawn, in its own board",
+          sorted(faces), [("1", "door", "#c4a35a"), ("1", "door", "#c4a35a"),
+                          ("11", "door", "#4f4f4f"), ("11", "door", "#4f4f4f"),
+                          ("13", "door", "#c4a35a")])
+    check("and takes no pointer events, so a press still reaches the cabinet",
+          all('pointer-events="none"' in m for m in
+              re.findall(r'<polygon class="face"[^>]*>', plan)), True)
+    check("the swing on hover is untouched",
+          plan.count('<g class="front"'), 3)
+    pj.cabinets[0].door_boards = ["", "BROOKHILL"]
+    check("a leaf cut from another board is drawn in that board",
+          sorted(re.findall(r'class="face" data-cab="11" data-role="door"[^>]*fill="(#\w+)"',
+                            plan_svg(pj))), ["#4f4f4f", "#c4a35a"])
+    mitre_face = re.search(r'class="face" data-cab="13"[^>]*points="([^"]+)"', plan).group(1)
+    xs = [float(v.split(",")[0]) for v in mitre_face.split()]
+    ys = [float(v.split(",")[1]) for v in mitre_face.split()]
+    check("a mitre's door lies along its angled face, not square to a wall",
+          (max(xs) - min(xs) > 20, max(ys) - min(ys) > 20), (True, True))
+    from cabinetgen.model import Drawer as _Dr                             # noqa: E402
+    from cabinetgen.room import blind_spans, front_outlines                # noqa: E402
+    bj = corner()
+    blind = _Cab(20, 1000, 2400, 600, kind="tall", doors=1, corner_unit=True,
+                 corner_style="blind", blind_width=500, blind_board="GREY",
+                 carcass_board="WHITEMEL", exterior_board="BROOKHILL")
+    stack = _Cab(21, 600, 780, 570, kind="base", doors=0,
+                 drawers=[_Dr(300, 150), _Dr(470, 150)],
+                 carcass_board="WHITEMEL", exterior_board="BROOKHILL")
+    bj.cabinets += [blind, stack]
+    bj.placements += [_Pl(20, "A", 1000), _Pl(21, "A", 2200)]
+    fr = {(q.role, round(min(x for x, _ in o)), round(max(x for x, _ in o)))
+          for q, o in front_outlines(bj, blind, _Pl(20, "A", 1000))}
+    (_s, (b0, b1), (d0, d1)) = blind_spans(blind)
+    check("a blind corner's door and flush panel, where blind_spans puts them",
+          fr, {("blind", round(1000 + b0), round(1000 + b1)),
+               ("door", round(1000 + d0), round(1000 + d1))})
+    check("its blind panel in its own board",
+          re.findall(r'class="face" data-cab="20" data-role="blind"[^>]*fill="(#\w+)"',
+                     plan_svg(bj)), ["#4f4f4f"])
+    check("drawer faces are drawn too, lowest first, so the top one is seen",
+          [q.index for q, _o in front_outlines(bj, stack, _Pl(21, "A", 2200))], [1, 0])
+    for label, drawing in (("plan", plan), ("wall elevation", fa), ("run", elevation_svg(pj))):
+        check(f"the {label} draws every stroke non-scaling",
+              ('class="drw"' in drawing, "non-scaling-stroke" in drawing), (True, True))
+    check("walls at the wall weight, in the plan and on the elevation floor",
+          ('stroke-width="%s" stroke-linecap="square"' % WEIGHT["wall"] in plan,
+           'stroke="#191c1a" stroke-width="%s"/>' % WEIGHT["wall"] in fa), (True, True))
+    check("no dash on an elevation's cabinets, shelves or swing",
+          re.findall(r'class="(?:ecab|edoor)"[^>]*stroke-dasharray', fa) +
+          re.findall(r'<polyline[^>]*stroke-dasharray', fa), [])
 
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0

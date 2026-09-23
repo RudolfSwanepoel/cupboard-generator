@@ -56,6 +56,30 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
+**Line / Finish redone, faces in the plan, one set of line weights (23
+September 2026, brief of that date).** Benchmark unchanged (272 / 59 / 30, 92
+pot holes, 18 / 9 / 6, R28,363.50); every `check_*.py` passes; `snapshot.py
+--compare` against the tree before moves no panel, issue, summary or total —
+only drawings. Exercised in the running app in headless Chromium: both views of
+Test.json wall A, the plan with faces, zoomed, and real-mouse drags of a plan
+cabinet, a plan panel and elevation panel 8.
+
+1. **Line and Finish.** The 22 September white-and-grey Line view is gone. LINE
+   is what the Finish button used to show, unchanged, and is the default;
+   FINISH draws the runs on the walls either side as they are really seen from
+   this wall. See **Drawings → Finish and Line**. On the Run the toggle is
+   greyed out (the two would be identical there) and keeps its choice.
+2. **Door and drawer faces in the plan**, per leaf and per drawer in their own
+   boards, off `room.front_outlines`. See **Drawings → Faces in the plan**.
+3. **Line weights**, ruled by Rudolf with one change: no dashes unless they add
+   real value. See **Drawings → Line weights**.
+
+Also: the Boards tab's `.swatch` CSS was resizing every drawing legend's
+swatch to 26 px over its own text (`.swatch:not(rect)` now), capitals in a
+board name no longer run into the next legend entry, and a thin placed panel's
+number is drawn after the neighbours so Finish cannot bury it (it moves with
+the drag, `elevTags`).
+
 **Placed panels drag in the plan (22 September 2026, follow-up brief).** Along
 their wall and off it, z untouched, through the same `/api/drag` and a new depth
 snap, `room.y_snap_points`. See **Dragging a panel in the plan** under **Placing
@@ -328,16 +352,72 @@ difference nobody looked at.
 
 ## Drawings
 
-**Finish and Line** (22 September 2026). A two-way toggle in the elevation
-header, beside Run / Wall A / Wall B, for the Run and every wall. FINISH is the
-default and is exactly the drawing described below. LINE is the same drawing
-with every board white and plain and no picture — `render._line_job` hands the
-renderer a COPY of the job whose board records differ only in how they look, so
-tape names, thicknesses and every size read the same — and every dark ink turned
-to the grey of the end-on outlines (`_line_ink`); red stays red. The board key
-is left off, having no colours to explain. It is a view setting: not saved in
-the job (`S.elevMode`), no geometry moves, and with no room the wall elevation
-in Finish is still `elevation_svg` byte for byte (`check_elevation.py`).
+### Finish and Line
+
+**Ruled 23 September 2026, replacing the 22 September white-and-grey Line
+view, which was a misreading.** A two-way toggle in the elevation header, Line
+first and the default. Both draw a wall's OWN cabinets identically — colour,
+pictures, doors, drawers, hinges, dimensions. They differ only in the runs on
+the walls either side:
+
+- **LINE** — grey outlines end on, labelled "B: 11, 12, 13"; the drawing that
+  used to be called Finish, unchanged.
+- **FINISH** — what you would actually see standing in front of this wall: a
+  true orthographic view, nothing unfolded or turned. `room.return_faces` takes
+  every board of each neighbouring cabinet and placed panel (`room.solid_parts`),
+  keeps the faces turned towards the viewer, projects them onto this wall's
+  plane and sorts them furthest first; `render._finish_faces` paints them in
+  that order in the board each is cut from, so a nearer end panel covers the
+  carcass side behind it — no special case for panels versus sides. A face
+  standing in front of every own unit it overlaps is drawn over them, else
+  under. A face at an angle (a mitre door) is hatched and carries its real cut
+  width; no hinges, swings or drawer sizes on a neighbour. Each item's number
+  goes where some of it is actually seen, or nowhere (the wall label still
+  names it). The legend names the neighbours' boards too.
+
+A view setting: not saved in the job (`S.elevMode`), no geometry moves, and with
+no room the wall elevation is `elevation_svg` byte for byte. The export writes
+Line. `check_elevation.py` holds it on a copy of Test.json's corner — panel 12's
+GREY and mitre 13's BROOKHILL seen from wall A, and with 12 gone cabinet 11's
+own white end.
+
+**`room.solid_parts` is drawing geometry, and nothing else reads it.** Sizes
+come off `geometry` and the corner helpers; the one thing laid out rather than
+read is where a leaf sits across its carcass (spread evenly — no cut list
+says). Fronts stand proud at their board's real thickness; drawer faces stack
+from the bottom as the elevation stacks them. An ell, a bespoke cabinet or an
+entered non-rectangular outline is its footprint as one solid, with no fronts:
+nothing is guessed onto a drawing.
+
+### Faces in the plan
+
+Every door leaf, drawer face and blind panel is a thin strip in front of its
+carcass (`room.front_outlines`, lowest first so the top one shows), in its own
+board — along a mitre's angled face, and on a blind corner where
+`blind_spans` puts them. `pointer-events="none"`, so drag, select and the
+hover swing are untouched. A wall unit's faces take its lighter dashed line
+and ghost with it.
+
+### Line weights
+
+**One table, `render.WEIGHT`, for the plan and every elevation** (ruled 23
+September 2026): walls 2, carcass 1, panels and faces 0.75, internal lines
+0.5, items above 0.75, dimensions 0.5, a clash 2 and red. Every drawing is
+`class="drw"` with `STROKE_STYLE` — `vector-effect: non-scaling-stroke` — so
+zooming makes the geometry bigger, not the lines fatter. Coincident edges of
+neighbours land on the same pixels with opaque strokes, so they read as one.
+
+**Dashes only where they add real value** (Rudolf): a wall unit in the plan
+(above the cut, `ABOVE_DASH` 4 3), an opening across a wall line in plan, a
+neighbour's outline seen through this wall's units in Line, and an undecided
+gap in red. Elevation cabinets are no longer told apart by outline — base, wall
+and tall all at the carcass weight, undashed; shelves and the swing triangle
+are solid.
+
+**Plan labels never sit on each other** (`render._place_labels`): cabinet
+numbers first, then panel numbers, then sizes, then gap widths; a label that
+does not fit moves a short step on a leader, a size is dropped rather than
+moved.
 
 **A drawing is a read-only view of the model. Nothing reads one back.** The
 colours, the grain lines and the legend are output; no check, no cut list and
@@ -405,12 +485,11 @@ resolution and still closes on the wall. A wall with no overheads still gets no
 top chain at all: there is nothing up there to dimension and the bottom already
 says it.
 
-**Base, wall and tall are in the outline, not the fill** (20 September 2026).
-The fill was carrying the layer and now carries the board, so: base a normal
-stroke, wall dashed, tall heavier. The dash is `7 4`, deliberately not the
-`4 3` the shelf lines and openings use. The plan keeps its own `5 3` for a wall
-unit — the kitchen convention it always drew, pinned in `check_room.py`. A
-clash is still red and heavy, and keeps its layer's dash.
+**The fill carries the board, not the layer** (20 September 2026). Since 23
+September the elevation no longer marks the layer in the outline either — base,
+wall and tall all at the carcass weight, undashed (see **Line weights**). The
+plan dashes a wall unit `4 3`, above its cut, pinned in `check_room.py`. A
+clash is red and heavy.
 
 **Ink is computed, never stated.** A board colour is picked for the board, not
 for the numbers that land on it, so `render.ink_on(fill)` takes whichever of
@@ -470,7 +549,8 @@ tools/check_fillers.py     gap detection, taper, scribe, filler panels
 tools/check_plinth.py      runs, butt joints, long-run splits, plinth panels
 tools/check_drag.py        overlaps, snap targets both axes, swings, pull-outs;
                            and what a corner unit cuts, mitre and blind
-tools/check_elevation.py   per-wall elevations: chains close, plinth heights, hinges
+tools/check_elevation.py   per-wall elevations: chains close, plinth heights, hinges;
+                           Line / Finish, plan faces, line weights
 tools/check_edging.py      Has Edging, the kinds a board offers, its colour
 tools/check_single_source.py  the one list of which cabinet fields hold a board
 tools/check_swap.py        a swap moves every use of a board, and says what it does

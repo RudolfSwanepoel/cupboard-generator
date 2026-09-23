@@ -165,7 +165,8 @@ def main() -> int:
     check("ghosted layers are faint", 'opacity="0.30"' in only_base, True)
     check("an unselected, unghosted layer is not drawn",
           plan_svg(j, show=("base",), ghost=()).count('<polygon class="cab"'), 1)
-    check("wall units draw dashed", 'stroke-dasharray="5 3"' in plan_svg(j), True)
+    check("wall units draw dashed: above the plan's cut", 'stroke-dasharray="4 3"' in plan_svg(j),
+          True)
     check("no room draws a note, not a crash", "<text" in plan_svg(Job(name="x")), True)
 
     print("\nplan view: isolate")
@@ -220,7 +221,8 @@ def main() -> int:
     withop.walls[0].openings.append(Opening("door", 1000, 810))
     withop.walls[0].obstructions.append(Obstruction("waste", 2000, 400))
     s2 = plan_svg(Job(name="o", room=withop))
-    check("an opening breaks the wall into two runs", s2.count("stroke-width=\"3\""), 5)
+    check("an opening breaks the wall into two runs",
+          s2.count('stroke-width="2" stroke-linecap="square"'), 5)
     check("the opening is labelled", "door 810" in s2, True)
     check("the obstruction is drawn", "wast" in s2, True)
 
