@@ -31,6 +31,8 @@ python tools\check_elevation.py
 echo.
 python tools\check_scene.py
 echo.
+python tools\check_supports.py
+echo.
 echo ---------------------------------------------
 echo You want to see: 22 cabinets reproduce exactly
 echo             and: 0 wrong

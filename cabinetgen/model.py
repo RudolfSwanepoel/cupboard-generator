@@ -288,9 +288,58 @@ class Support:
     # one, and the two questions are now asked separately. Blank follows the
     # cabinet's carcass board, which is what a support has always been cut from.
     cut_board: str = ""
+    # WHICH support this row is (27 September 2026, shelves-and-supports spec):
+    # 'front' (flat, at the top front of a base unit, 0 or 1), 'top_rear' (flat,
+    # at the top back of a base unit, 0 or 1) or 'back' (upright in the cavity
+    # behind the backing, 0..n). '' means the row predates the types — a legacy
+    # row, cut EXACTLY as it always was and only PLACED for drawing by the
+    # legacy rule in `room.support_layout`. Nothing converts a legacy row.
+    type: str = ""
+    # Which edges of a typed row are banded, chosen edge by edge: any of
+    # SUPPORT_EDGE_NAMES. None means the type's default — the front long edge
+    # (`SUPPORT_DEFAULT_EDGES`); [] means none. The cut list records the counts
+    # (edge_l = long edges, edge_w = ends), exactly as before. A legacy row keeps
+    # its one long edge and never reads this.
+    edges: Optional[List[str]] = None
 
 
 SUPPORT_EDGES = ("none", "front", "white")
+
+# The three support types, in cut-list order, and where each is offered.
+# Front and Top Rear are flat rails at the top of a BASE unit, which has no top
+# panel to tie the sides at the top; a tall or wall unit has a top and takes
+# Back supports only. A mitre and an ell take none (RULES W13).
+SUPPORT_TYPES = ("front", "top_rear", "back")
+SUPPORT_TYPE_LABEL = {"front": "Front", "top_rear": "Top Rear", "back": "Back"}
+# The four edges of a support, in the row's own terms: the two long edges and
+# the two ends. On a flat rail 'front' faces the room and 'rear' the wall; on an
+# upright Back support 'front' is the long edge facing INTO the cabinet (down on
+# Back 1, up on the rest) and 'rear' the one against the top or bottom panel.
+SUPPORT_EDGE_NAMES = ("front", "rear", "left", "right")
+SUPPORT_LONG_EDGES = ("front", "rear")
+SUPPORT_DEFAULT_EDGES = ("front",)
+
+
+def support_edges_of(row: "Support") -> List[str]:
+    """The edges a typed row bands: its own list, or the type's default."""
+    if row.edges is None:
+        return list(SUPPORT_DEFAULT_EDGES)
+    return [e for e in row.edges if e in SUPPORT_EDGE_NAMES]
+
+
+def support_types_for(kind: str, corner_kind: str = "") -> List[str]:
+    """Which support types a carcass of this kind may carry, in cut-list order.
+
+    A base unit (no top panel): Front, Top Rear and Back. Anything with a top —
+    tall, upper, and whatever else the engine gives a top — Back only. A blind
+    corner is a straight carcass and goes by its kind; a mitre or an ell takes
+    none.
+    """
+    if corner_kind in ("mitre", "ell"):
+        return []
+    if kind == "base":
+        return list(SUPPORT_TYPES)
+    return ["back"]
 
 # What a legacy "white-edged" support row was asking for.
 #
@@ -807,7 +856,13 @@ class Cabinet:
         and the validator names any cabinet whose numbers made it negative.
         """
         if self.support_rows:
-            return [r for r in self.support_rows if r.qty > 0]
+            offered = self.support_types_offered
+            # A typed row of a type this carcass does not take — a Front left on
+            # a cabinet since made tall — stays in the file and cuts nothing,
+            # the tickbox bargain; the editor shows it greyed and the validator
+            # names it. A legacy row (no type) is cut wherever it is.
+            return [r for r in self.support_rows
+                    if r.qty > 0 and (not r.type or r.type in offered)]
         plain = self.supports - self.edged_supports - self.white_supports
         rows = [Support("none", plain), Support("front", self.edged_supports),
                 Support("white", self.white_supports)]
@@ -817,6 +872,27 @@ class Cabinet:
     def support_total(self) -> int:
         """The sum of the rows. Nothing subtracts."""
         return sum(r.qty for r in self.support_list)
+
+    @property
+    def support_types_offered(self) -> List[str]:
+        """Which support types this cabinet may carry (`support_types_for`)."""
+        return support_types_for(self.kind, self.corner_kind)
+
+    @property
+    def supports_typed(self) -> bool:
+        """True when the rows are in the new form — every stored row carries a
+        type. A cabinet with no rows reads its legacy numbers, and is not."""
+        return bool(self.support_rows) and all(r.type for r in self.support_rows)
+
+    def support_row_edge_counts(self, row: "Support") -> tuple:
+        """(edge_l, edge_w) the cut list records for one row, BEFORE asking
+        whether it has an edging at all: a typed row counts its chosen long
+        edges and ends; a legacy row is one long edge, as it always was."""
+        if not row.type:
+            return 1, 0
+        chosen = support_edges_of(row)
+        return (sum(1 for e in chosen if e in SUPPORT_LONG_EDGES),
+                sum(1 for e in chosen if e not in SUPPORT_LONG_EDGES))
 
     @property
     def legacy_supports_negative(self) -> bool:
@@ -945,6 +1021,9 @@ class Cabinet:
         """
         if row.board:
             return row.board
+        if row.type:
+            # a typed row says what it means: no colour board named is its own
+            return self.support_row_cut_board(row)
         if row.edge == "front":
             return self.exterior_board
         if row.edge == "white":
@@ -955,6 +1034,8 @@ class Cabinet:
         """Which edging kind a support row asks for. '' means none."""
         if row.kind:
             return row.kind
+        if row.type:
+            return ""                      # a typed row with no kind is not edged
         return "pvc" if row.edge in ("front", "white") else ""
 
     def support_row_tape(self, materials: dict, row: "Support") -> str:

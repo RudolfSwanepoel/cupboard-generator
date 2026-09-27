@@ -263,8 +263,12 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
         # which is what it always was), and its grain is that board's — a support
         # cut from the grained board locks like every other panel off it.
         sup_board = R(cab.support_row_cut_board(row))
+        # A legacy row bands one long edge, as it always did; a typed row bands
+        # the edges chosen for it, long edges and ends counted separately
+        # (27 September 2026). No tape, nothing banded.
+        el, ew = cab.support_row_edge_counts(row) if tape else (0, 0)
         P.append(Panel(n, "04", "Support", sup_board, Wi, SUPPORT_W, row.qty,
-                       edge_l=1 if tape else 0, edge_material=tape,
+                       edge_l=el, edge_w=ew, edge_material=tape,
                        grain=grain_of(mats, sup_board)))
 
     # ---- shelves -----------------------------------------------------------

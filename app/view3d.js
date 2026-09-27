@@ -443,10 +443,31 @@ function disposeObject(obj) {
   });
 }
 
+// A banded edge: a thin box INSIDE the part's finished size on that face, in
+// the edging board's colour (27 September 2026). The server says where — the
+// band is a solid like any other — and this only draws it. It picks and tints
+// as its part: its userData.part is the part it belongs to. Coplanar with the
+// part's face, so a polygon offset pulls it forward, never a move.
+function buildTape(band, part) {
+  const geom = extrude(band.outline, band.z0, band.z1);
+  const look = V.payload.looks[band.board] || {colour: PAPER.fallback};
+  const mat = new THREE.MeshStandardMaterial({color: hex(look.colour), roughness: 0.6, metalness: 0,
+                                              polygonOffset: true, polygonOffsetFactor: -2,
+                                              polygonOffsetUnits: -4});
+  const mesh = new THREE.Mesh(geom, [mat]);
+  mesh.userData = {part: part, number: part.cab, id: part.id, ghost: false, tape: band};
+  mesh.userData.rest = {position: mesh.position.clone(), quaternion: mesh.quaternion.clone()};
+  applyDisplay(mesh);
+  return mesh;
+}
+
 function buildItem(item) {
   const grp = new THREE.Group();
   grp.userData = {number: item.number, hash: item.hash, item: item};
-  for (const part of item.parts) grp.add(buildPart(part));
+  for (const part of item.parts) {
+    grp.add(buildPart(part));
+    for (const band of part.tapes || []) grp.add(buildTape(band, part));
+  }
   return grp;
 }
 
@@ -1300,9 +1321,11 @@ function describe(number, part) {
 function roleName(part) {
   const names = {side: "Side", top: "Top", bottom: "Bottom", door: "Door leaf", drawer: "Drawer face",
                  blind: "Blind panel", panel: "Panel", back: "Backing", carcass: "Carcass (footprint only)",
-                 plinth: "Plinth board", filler: "Filler"};
+                 plinth: "Plinth board", filler: "Filler", support: "Support", shelf: "Shelf"};
   const n = names[part.role] || part.role;
   if (part.role === "door" || part.role === "drawer") return `${n} ${part.index + 1}`;
+  if (part.role === "support" && part.label) return `${n} — ${part.label}`;
+  if (part.role === "shelf") return part.label === "fixed" ? `${n} (fixed)` : n;
   return n;
 }
 

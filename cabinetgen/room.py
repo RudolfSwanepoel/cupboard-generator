@@ -1190,6 +1190,276 @@ def back_part(cab, std: Standard = STANDARD, materials: dict = None) -> Optional
                 "z" if bh >= bw else "x")
 
 
+# --- shelves and supports, for the 3D view only (27 September 2026) -----------
+#
+# Where each support and each shelf stands inside the carcass. DRAWING geometry,
+# like `solid_parts` and `back_part`: nothing on the cut list reads a position
+# here, and nothing here decides a size — every extent is the engine's (Wi x
+# SUPPORT_W x t for a support, the shelf sizes off Standard). Kept OUT of
+# `solid_parts` for the same reason `back_part` is: `return_faces` reads that
+# list for the Finish elevation, and the plan and the wall elevations are
+# unchanged by this work.
+#
+# Frames. `support_layout` answers in the spec's CARCASS-LOCAL frame — x across
+# the width, y from the FRONT face of the sides (0) to their back (D), z up from
+# the underside of the sides — which is the frame the worked numbers are stated
+# in and `tools/check_supports.py` asserts. `interior_parts` turns that into a
+# `Part` in the cabinet's frame (y out from the WALL face), the one every other
+# solid is in: y_part = D - y_spec.
+
+SUPPORT_SIDES = ("x0", "x1", "y0", "y1", "z0", "z1")
+
+
+def support_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List[dict]:
+    """Every support of a straight carcass, one entry each, in the spec frame.
+
+    Per entry: `type` ('front' | 'top_rear' | 'back'), `n` (1-based within the
+    type — Back 1 is the one under the top), `row` (the Support it comes from),
+    `y0`/`y1`, `z0`/`z1`, `upright`, and `faces`: which physical face of the
+    rail each of the row's four edge names is on, as one of SUPPORT_SIDES in
+    this frame ('y0' is the front face of a flat rail; 'z0' the underside).
+
+    The rules (agreed 27 September 2026):
+
+    * FRONT (base units only): flat, y 0..100, z H-16..H — top flush with the
+      sides, front flush with their fronts.
+    * TOP REAR (base units only): flat at the same height. With a backing its
+      rear edge is against the backing's front face, y (D-119)..(D-19); with
+      none it is flush with the back of the sides, y (D-100)..D.
+    * BACK: upright in the 16 mm cavity, y (D-16)..D, 100 tall, the same plane
+      with or without a backing. Back 1 hangs under whatever is at the top back:
+      the top panel (tall, wall) or a Top Rear that sits at the back (base, no
+      backing) put its top at H-16, otherwise it is flush with the top of the
+      sides at H. Back 2 stands on the top face of the bottom panel. Back 3..n
+      are spaced with equal gaps between the two. One Back alone is Back 1.
+    * Back 1's edged long edge faces DOWN; every other Back's faces UP.
+
+    Typed rows are placed by their type. LEGACY rows — the three old numbers,
+    or rows written before the types — are cut exactly as they always were and
+    only PLACED here, by the legacy rule: on a base unit one front-edged rail
+    is the Front and the rest are Backs; on a carcass with a top, all Backs.
+    Nothing converts or renames a legacy row.
+
+    Empty for a panel, a bespoke cabinet, a mitre, an ell, and any carcass whose
+    parts are not known (`solid_parts` gives a footprint only).
+
+        >>> from cabinetgen.model import Cabinet
+        >>> c = Cabinet(number=1, width=600, height=720, depth=560, kind="base",
+        ...             carcass_board="MEL", exterior_board="BROOKHILL")
+        >>> [(u["type"], u["n"], u["y0"], u["y1"], u["z0"], u["z1"])
+        ...  for u in support_layout(c) if u["n"] == 1]
+        [('back', 1, 544, 560, 620, 720)]
+    """
+    from .engine import SUPPORT_W, generate_cabinet      # engine imports this module
+    from .model import SUPPORT_DEFAULT_EDGES
+    if cab.is_panel or cab.template == "none" or cab.corner_kind in ("mitre", "ell"):
+        return []
+    rows = cab.support_list
+    if not rows:
+        return []
+    mats = MATERIALS if materials is None else materials
+    parts = solid_parts(cab, std, mats)
+    if not parts or any(q.role == "carcass" for q in parts):
+        return []
+    g = geometry(cab, std, mats)
+    D, H, t, sw = g.depth, g.height, std.board_t, SUPPORT_W
+    has_top = "Top" in {q.role for q in generate_cabinet(cab, std, mats)}
+    has_back = cab.back != "none"
+
+    units: List[Tuple[str, "Support"]] = []
+    if cab.supports_typed:
+        for row in rows:
+            units += [(row.type, row)] * row.qty
+    else:
+        front_done = has_top                     # nothing flat on a carcass with a top
+        for row in rows:
+            for _ in range(row.qty):
+                if not front_done and row.edge == "front":
+                    units.append(("front", row))
+                    front_done = True
+                else:
+                    units.append(("back", row))
+
+    out = []
+    counts: dict = {}
+    top_rear_at_back = any(k == "top_rear" for k, _ in units) and not has_back
+    back1_top = H - t if (has_top or top_rear_at_back) else H
+    n_back = sum(1 for k, _ in units if k == "back")
+    # Back 3..n: equal gaps between Back 2's top (t + sw) and Back 1's underside.
+    lo, hi = t + sw, back1_top - sw
+    mid = max(n_back - 2, 0)
+    gap = (hi - lo - mid * sw) / (mid + 1) if mid else 0.0
+    for kind, row in units:
+        n = counts.get(kind, 0) + 1
+        counts[kind] = n
+        if kind == "front":
+            entry = dict(type=kind, n=n, row=row, y0=0, y1=sw, z0=H - t, z1=H, upright=False,
+                         faces={"front": "y0", "rear": "y1", "left": "x0", "right": "x1"})
+        elif kind == "top_rear":
+            y1 = std.back_face_from_front(D) if has_back else D
+            entry = dict(type=kind, n=n, row=row, y0=y1 - sw, y1=y1, z0=H - t, z1=H,
+                         upright=False,
+                         faces={"front": "y0", "rear": "y1", "left": "x0", "right": "x1"})
+        else:
+            if n == 1:
+                z1 = back1_top
+                faces = {"front": "z0", "rear": "z1", "left": "x0", "right": "x1"}
+            elif n == 2:
+                z1 = t + sw
+                faces = {"front": "z1", "rear": "z0", "left": "x0", "right": "x1"}
+            else:
+                z1 = lo + gap * (n - 2) + sw * (n - 2)
+                faces = {"front": "z1", "rear": "z0", "left": "x0", "right": "x1"}
+            z1 = int(round(z1)) if float(z1).is_integer() else z1
+            entry = dict(type=kind, n=n, row=row, y0=D - t, y1=D, z0=z1 - sw, z1=z1,
+                         upright=True, faces=faces)
+        out.append(entry)
+    return out
+
+
+def drawer_box_tops(cab, std: Standard = STANDARD) -> List[Tuple[int, int]]:
+    """(drawer number, top of its box) for each drawer, up the carcass.
+
+    Faces stack from the bottom as `solid_parts` and the elevation stack them,
+    the last drawer lowest, and a box stands on its own face's bottom edge —
+    the rule `drawers.split_pair` already holds a box to (a box as tall as its
+    face shows above the front). Nothing here is a cut size.
+    """
+    out = []
+    at = 0
+    stack = cab.drawer_list
+    for i in range(len(stack) - 1, -1, -1):
+        d = stack[i]
+        out.append((i + 1, at + int(d.box_height or 0)))
+        at += int(d.face_height or 0) + std.stack_gap
+    return sorted(out)
+
+
+def back_supports_fit(cab, std: Standard = STANDARD, materials: dict = None) -> Tuple[int, int]:
+    """(needed, available) height for the Back supports: how much the stack of
+    them takes between Back 1's top and the bottom panel, and how much there is.
+    Needed <= available means they fit (a zero gap is a fit)."""
+    from .engine import SUPPORT_W
+    lay = support_layout(cab, std, materials)
+    backs = [u for u in lay if u["type"] == "back"]
+    if not backs:
+        return 0, 0
+    top = max(u["z1"] for u in backs if u["n"] == 1)
+    return len(backs) * SUPPORT_W, int(top - std.board_t)
+
+
+def shelf_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List[dict]:
+    """Where each shelf is DRAWN: spaced evenly from the top face of the bottom
+    panel to the top of the sides, fixed shelves listed first. Display only —
+    real heights are set at fitment and nothing validates them. Per entry
+    `fixed`, `z0`, `z1`, `depth` (the engine's, off Standard) and `width`."""
+    if cab.is_panel or cab.template == "none" or cab.corner_kind in ("mitre", "ell"):
+        return []
+    n_fixed, n_adj = int(cab.fixed_shelves or 0), int(cab.shelves or 0)
+    if n_fixed + n_adj <= 0:
+        return []
+    mats = MATERIALS if materials is None else materials
+    parts = solid_parts(cab, std, mats)
+    if not parts or any(q.role == "carcass" for q in parts):
+        return []
+    g = geometry(cab, std, mats)
+    xs = [x for x, _ in g.footprint]
+    W, D, H, t = max(xs) - min(xs), g.depth, g.height, std.board_t
+    n = n_fixed + n_adj
+    gap = (H - t - n * t) / (n + 1)
+    out = []
+    for k in range(n):
+        fixed = k < n_fixed
+        z0 = t + gap * (k + 1) + t * k
+        out.append(dict(fixed=fixed, z0=round(z0, 1), z1=round(z0 + t, 1),
+                        depth=std.shelf_depth(D, fixed=fixed),
+                        width=cab.shelf_width or std.internal_width(W)))
+    return out
+
+
+@dataclass
+class Tape:
+    """One banded edge of a Part, for drawing: which face of the box it is on
+    (SUPPORT_SIDES, in the Part's own frame), the board whose edging colour it
+    is, and the kind."""
+    side: str
+    board: str
+    kind: str
+
+
+def interior_parts(cab, std: Standard = STANDARD, materials: dict = None) -> List[Tuple[Part, List[Tape]]]:
+    """The supports and shelves of a straight carcass as solids in the
+    cabinet's frame, each with the edges it is banded on — for the 3D view.
+
+    `(part, tapes)` per rail and per shelf. A support is `Part` role 'support',
+    labelled 'Front', 'Top Rear' or 'Back n', in the board its row is cut from;
+    its tapes are the row's chosen edges in the row's edging board, only when
+    the row resolves to an edging at all. A shelf is role 'shelf' in the carcass
+    board, its front edge in the carcass edging (the exterior board's colour),
+    and its label says 'fixed' where it is. Tape is a colour on a face and never
+    moves a part (hard rule 5).
+    """
+    from .model import support_edges_of
+    mats = MATERIALS if materials is None else materials
+    lay = support_layout(cab, std, mats)
+    shelves = shelf_layout(cab, std, mats)
+    if not lay and not shelves:
+        return []
+    g = geometry(cab, std, mats)
+    xs = [x for x, _ in g.footprint]
+    W, D, t = max(xs) - min(xs), g.depth, std.board_t
+    # the spec frame's y runs from the front; the Part's from the wall
+    flip = {"y0": "y1", "y1": "y0"}
+    out = []
+    for u in lay:
+        row = u["row"]
+        label = {"front": "Front", "top_rear": "Top Rear"}.get(u["type"], f"Back {u['n']}")
+        part = _box("support", cab.support_row_cut_board(row), t, W - t,
+                    D - u["y1"], D - u["y0"], u["z0"], u["z1"], "x", label)
+        tapes = []
+        if cab.support_row_tape(mats, row):
+            board, kind = cab.support_row_board(mats, row), cab.support_row_kind(row)
+            edges = support_edges_of(row) if row.type else ["front"]
+            for e in edges:
+                side = u["faces"][e]
+                tapes.append(Tape(flip.get(side, side), board, kind))
+        out.append((part, tapes))
+    for sh in shelves:
+        part = _box("shelf", cab.carcass_board, t, t + sh["width"], D - sh["depth"], D,
+                    sh["z0"], sh["z1"], "x", "fixed" if sh["fixed"] else "")
+        tapes = [Tape("y1", cab.exterior_board, "pvc")] if cab.carcass_tape(mats) else []
+        out.append((part, tapes))
+    return out
+
+
+def tape_solids(part: Part, tapes: List[Tape], band: float) -> List[Part]:
+    """The bands a Part's tapes are drawn as: a thin box `band` deep INSIDE the
+    finished size on each banded face, role 'tape', in the tape's board, its
+    kind as the label. Nothing is moved and nothing grows (hard rule 5)."""
+    xs = [x for x, _ in part.outline]
+    ys = [y for _, y in part.outline]
+    x0, x1, y0, y1, z0, z1 = min(xs), max(xs), min(ys), max(ys), part.z0, part.z1
+    out = []
+    for tp in tapes:
+        bx0, bx1, by0, by1, bz0, bz1 = x0, x1, y0, y1, z0, z1
+        if tp.side == "x0":
+            bx1 = x0 + band
+        elif tp.side == "x1":
+            bx0 = x1 - band
+        elif tp.side == "y0":
+            by1 = y0 + band
+        elif tp.side == "y1":
+            by0 = y1 - band
+        elif tp.side == "z0":
+            bz1 = z0 + band
+        elif tp.side == "z1":
+            bz0 = z1 - band
+        else:
+            continue
+        out.append(_box("tape", tp.board, bx0, bx1, by0, by1, bz0, bz1, None, tp.kind))
+    return out
+
+
 def front_outlines(job, cab, p, std: Standard = STANDARD) -> List[Tuple[Part, List[Point]]]:
     """A cabinet's fronts in world plan coordinates, bottom first, for the plan.
 

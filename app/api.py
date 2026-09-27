@@ -26,7 +26,9 @@ from cabinetgen.export_plaza import (effective_price, estimate_cost, summarise,
 from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
                               MATERIALS, NO_COLOUR, PANEL_CODE,
                               PANEL_ORIENTATIONS, PanelSpec, Placement,
-                              SUPPORT_EDGES,
+                              SUPPORT_EDGES, SUPPORT_DEFAULT_EDGES,
+                              SUPPORT_EDGE_NAMES, SUPPORT_TYPE_LABEL,
+                              SUPPORT_TYPES, support_edges_of,
                               grain_of, hinge_side, is_thin, material_board,
                               material_colour, material_has_edging,
                               material_offers, material_price,
@@ -34,7 +36,7 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
 from cabinetgen.render import (elevation_svg, pictures_drawn, plan_svg,
                                wall_elevation_svg)
 from cabinetgen import scene as SCENE
-from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth,
+from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout,
                              arm_shelf_length, arm_shelf_max_depth,
                              blind_door_width, blind_opening,
                              blind_panel_height, blind_spans, carcass_z,
@@ -184,7 +186,17 @@ def defaults(payload):
         "hinge_sides": ["L", "R"],
         "face_modes": ["share", "fixed"],
         "face_presets": ["equal", "graduated"],
-        "backs": ["four", "three", "none"],
+        # "three" — the backing running down past the bottom — was a mistake
+        # (Rudolf, 27 September 2026): the backing is always in its slot and
+        # the bottom always flush at the back. It is not offered for a new
+        # cabinet; a job that carries it still reads and cuts exactly as it did,
+        # and the editor shows the stored value beside the two that are offered.
+        "backs": ["four", "none"],
+        "backs_legacy": ["three"],
+        "support_types": list(SUPPORT_TYPES),
+        "support_type_label": dict(SUPPORT_TYPE_LABEL),
+        "support_edge_names": list(SUPPORT_EDGE_NAMES),
+        "support_default_edges": list(SUPPORT_DEFAULT_EDGES),
         "bases": ["board", "melamine"],
         # the house board records, for a job that has not named its own
         "materials": sorted(MATERIALS),
@@ -304,6 +316,9 @@ def _geometry_info(job, cab, std):
             "supports": [{"edge": r.edge, "qty": r.qty,
                           "board": r.board, "kind": r.kind,
                           "cut_board": r.cut_board,
+                          "type": r.type, "edges": r.edges,
+                          "eff_edges": support_edges_of(r) if r.type else ["front"],
+                          "edge_counts": list(cab.support_row_edge_counts(r)),
                           # what the row resolves to, so the editor shows the
                           # engine's answer rather than working one out
                           "eff_cut_board": cab.support_row_cut_board(r),
@@ -317,6 +332,13 @@ def _geometry_info(job, cab, std):
                                for e in SUPPORT_EDGES},
             "support_total": cab.support_total,
             "supports_migrated": not cab.support_rows,
+            "supports_typed": cab.supports_typed,
+            "support_types_offered": cab.support_types_offered,
+            # where each rail is drawn (the spec frame: y from the front), so
+            # the editor can say so without working it out
+            "support_layout": [{"type": u["type"], "n": u["n"], "y0": u["y0"], "y1": u["y1"],
+                                "z0": u["z0"], "z1": u["z1"]}
+                               for u in support_layout(cab, std, job.materials)],
             "hinges": [hinge_side(cab, i, n, flip) for i in range(n)],
             "hinges_set": [cab.door_hinges[i] if i < len(cab.door_hinges) else ""
                            for i in range(n)],

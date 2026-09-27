@@ -33,6 +33,7 @@ python tools/check_panels.py
 python tools/check_pictures.py
 python tools/check_accept.py
 python tools/check_scene.py
+python tools/check_supports.py
 python tools/snapshot.py --compare baseline.json
 ```
 
@@ -62,6 +63,55 @@ line, and `regen_check` says so rather than failing. Every other figure in this
 list comes out of the engine and is checked on any machine.
 
 ## Status
+
+**Shelves and supports — typed supports, drawn in 3D (27 September 2026, spec
+`Claude outputs/shelves-supports-spec-2026-09-27.md`, agreed with Rudolf).**
+Benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50);
+every `check_*.py` green — nineteen now, `check_supports.py` added; `snapshot.py
+--compare` against the tree before this work identical; and every job on disk
+(all six in `jobs/` and the October fixture) produces the same panels, the same
+issues and the same file byte for byte. Exercised in the running app with
+Playwright against `Test.json`: the legacy read-only view, Re-enter, the three
+blocks, the drawer-fouling critical blocking the export, the editor's Save, and
+the 3D tab with fronts open and in X-ray. See **Supports** below. The short form:
+
+1. **A support row has a TYPE** — `Support.type`: `front` and `top_rear` (flat,
+   across the top of a BASE unit, one or none each) and `back` (upright in the
+   16 mm cavity, any number) — and says edge by edge which of its four edges
+   are banded (`Support.edges`). `room.support_layout` is the one place a rail
+   is positioned, in the spec's carcass-local frame; `tools/check_supports.py`
+   asserts the brief's worked numbers exactly.
+2. **Legacy rows are untouched**: no type, cut EXACTLY as before (one long edge
+   banded), only PLACED for drawing by the legacy rule (base: one front-edged
+   rail is the Front and the rest Backs; a carcass with a top: all Backs). The
+   editor shows them read-only "as quoted" with a **Re-enter** button — Rudolf's
+   explicit act — and the toast names any edging the one-row Back block folds
+   away. Nothing converts a legacy row on its own.
+3. **Shelves and supports are DRAWN in 3D** (`room.interior_parts`, kept OUT of
+   `solid_parts` so the Finish elevation, the plan and every wall elevation are
+   byte-identical). Each banded edge is a band of the edging board's colour
+   INSIDE the finished size (`room.tape_solids`, `scene.TAPE_BAND_MM`); no
+   position depends on whether an edge is taped. Shelves are spaced evenly from
+   the bottom panel's top face to the top of the sides, display only, and the
+   legend says so. `scene.NOT_DRAWN` now lists drawer boxes and legs only.
+4. **Three criticals on typed rows** (`validate._support_layout`): a drawer box
+   into the 16 mm band under a Front / Top Rear (`support-drawer-foul`), Front
+   and Top Rear overlapping in depth (`support-depth-overlap`; D >= 219 with a
+   backing, 200 without), Backs that do not fit (`support-back-fit`); plus a
+   WARNING for a Front / Top Rear stored on a carcass with a top, which cuts
+   nothing (the tickbox bargain).
+5. **Back "three" is not offered for a new cabinet** (`api.defaults` backs are
+   `four` / `none`); a job carrying it — the benchmark's vanity units 27-29,
+   Test.json cabinets 2-5 — loads, shows it "as quoted, no longer offered" and
+   cuts exactly as it did.
+6. **The editor's Save button is a refresh, not a write** (`saveRefresh`):
+   computes now rather than after the debounce and redraws every place the
+   cabinet appears; the top-bar Save is still the only thing that writes.
+
+**Not built, by the brief's scope:** the UI restructure, attached panels, and
+the single-cabinet 3D view — supports and shelves show in the existing 3D tab.
+**For Rudolf to run locally:** the 22-of-30 cabinet diff in `regen_check`
+needs the Wardrobes xlsx, which the cloud machine does not have.
 
 **"Add a room" did nothing outside 3D — fixed (23 September 2026, brief
 `Claude outputs/room-add-bug-brief-2026-09-23.md`).** A new job, and any file
@@ -758,6 +808,8 @@ tools/check_pictures.py    board pictures: stored, served, drawn, grain-checked
 tools/check_accept.py      accepting a site-dependent critical, and the acceptance lapsing
 tools/check_scene.py       the 3D scene: ids, parts vs geometry, to_world, carcass_z, hinge
                            sides, cut-list lines, Run order, read-only, no reader of it
+tools/check_supports.py    typed supports: the worked positions, what each cuts, the three
+                           criticals, legacy rows unchanged, tape inside the size, the scene
 tools/ui_check_3d.py       the 3D view in the running app, with a real mouse (Playwright)
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
@@ -1977,6 +2029,72 @@ the first time round.
 **A support is a cross rail spanning the internal width** (`W - 32` x 100, code
 04) that ties the two sides together. It is called a support everywhere in the
 UI — never a rail.
+
+### Three types, placed by the engine (27 September 2026)
+
+`Support.type` is `front`, `top_rear` or `back`; `''` is a legacy row. Which
+types a carcass takes is `model.support_types_for` / `Cabinet.support_types_offered`:
+a BASE unit all three, anything with a top panel (tall, wall) Back only, a blind
+corner by its kind, a mitre or an ell none. A typed Front or Top Rear stored on
+a carcass that has since gained a top stays in the file, is not cut
+(`support_list` filters it), is greyed in the editor and named by a warning.
+
+Where each one stands is `room.support_layout`, in the spec's carcass-local
+frame (x across, y from the FRONT face of the sides, z up from their underside;
+`room.interior_parts` turns it into the cabinet frame with `y_part = D - y`):
+
+- **Front** — flat, y 0..100, z H-16..H, top flush with the sides.
+- **Top Rear** — flat at the same height; with a backing its rear edge is on
+  the backing's front face (y D-119..D-19), with none it is flush with the back
+  of the sides (y D-100..D).
+- **Back** — upright in the cavity, y D-16..D, 100 tall, the same plane with
+  or without a backing. Back 1 hangs under whatever is at the top back (a top
+  panel, or a Top Rear at the back — base with no backing — put it at H-16;
+  otherwise H). Back 2 stands on the bottom panel. Back 3..n are spaced with
+  equal gaps between the two. One alone is Back 1. Back 1's edged long edge
+  faces DOWN, every other Back's UP.
+
+Worked (W600 H720 D560, back four): Front y 0-100 z 704-720; Top Rear y 441-541;
+Back 1 z 620-720; Back 2 z 16-116; three Backs put the middle one at 318-418.
+No backing: Top Rear y 460-560, Back 1 z 604-704. Tall 2400: Back 1 z 2284-2384.
+All pinned in `check_supports.py`.
+
+**Edging is chosen edge by edge** — `Support.edges`, any of `front`, `rear`,
+`left`, `right` in the row's own terms (on a Back, `front` is the long edge
+facing INTO the cabinet). `None` means the type's default, the front long edge.
+The cut list records the counts exactly as before: `edge_l` long edges,
+`edge_w` ends (`Cabinet.support_row_edge_counts`); a legacy row is one long
+edge, as it always was. No kind chosen means nothing banded whatever is ticked.
+
+**Legacy rows are cut exactly as they always were and are never converted.**
+Only their DRAWING placement is decided, by the legacy rule in
+`support_layout`: on a base unit one front-edged rail is the Front and the rest
+are Backs; on a carcass with a top, all Backs. The editor shows them read-only
+"as quoted" with a Re-enter button; re-entering writes typed rows carrying what
+each resolved to, and the one-row Back block means rows with an edging of their
+own are folded into it — the toast names them. The three old numbers are left
+where they are; a job with none of this written round-trips byte for byte
+(`type` and `edges` are written only when set, `store.cabinet_to_dict`).
+
+**Three criticals, on typed rows only** (`validate._support_layout`): a drawer
+box reaching into the 16 mm band under a Front or Top Rear — a box stands on
+its own face's bottom edge, `room.drawer_box_tops` — blocks the export; Front
+and Top Rear overlapping in depth (D >= 219 with a backing, 200 without); Back
+supports that do not fit between Back 1 and the bottom panel
+(`room.back_supports_fit`). Legacy rows raise none of them.
+
+**Drawn in 3D only.** `room.interior_parts` gives the supports (role `support`,
+label `Front` / `Top Rear` / `Back n`) and the shelves (role `shelf`, spaced
+evenly from the bottom panel's top face to the top of the sides, fixed first,
+display only) as `Part`s plus their `Tape`s; `room.tape_solids` turns each tape
+into a band `scene.TAPE_BAND_MM` deep INSIDE the finished size on that face, in
+the edging board (`support_row_board`; a shelf's front edge in the exterior
+board's PVC, the carcass edging). Edged or not, a part is the same size in the
+same place. `solid_parts` does not carry them, so Finish, the plan and the wall
+elevations are unchanged; `scene._line_for` tells a Front and a Back of one
+size apart by their band counts. The browser (`buildTape`) only extrudes the
+band it is given, with a polygon offset so it draws over the face rather than
+being moved off it.
 
 `Cabinet.support_rows` is a list of `Support(edge, qty)`, where `edge` is
 `'front'` (carcass tape), `'white'` or `'none'`. **The total is

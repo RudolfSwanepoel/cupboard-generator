@@ -45,8 +45,11 @@ def cabinet_to_dict(c: Cabinet) -> dict:
     # `board` and `kind` are written only when a row actually names them, so a
     # job saved before the control round-trips byte for byte and is still read
     # from `edge` — the same discipline as every other field added here.
+    # `type` and `edges` (27 September 2026) the same way: a row that has
+    # neither is a legacy row and is written exactly as it was read.
     d["support_rows"] = [{k: v for k, v in asdict(x).items()
-                          if v != "" or k not in ("board", "kind", "cut_board")}
+                          if (v != "" or k not in ("board", "kind", "cut_board", "type"))
+                          and (v is not None or k != "edges")}
                          for x in c.support_rows]
     d["bespoke"] = [panel_to_dict(x) for x in c.bespoke]
     # Only written when this item actually is a panel, and `anchor` only when it

@@ -164,6 +164,7 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     out += _board_prices(job, panels)
     out += _supports(job.cabinets)
     out += _support_edging(job)
+    out += _support_layout(job)
     out += _corners(job, std)
     out += _room(job, std)
     out += _gaps(job, std)
@@ -684,6 +685,71 @@ def _support_edging(job: Job):
                                  f"{WHITE_TOKEN!r}. Give the row a board and an "
                                  f"edging of its own, or tick PVC on the white "
                                  f"board in the Boards tab", EDGING_REF, check="support-white-edge"))
+    return out
+
+
+def _support_layout(job: Job):
+    """Typed support rows that cannot stand where their type puts them
+    (agreed 27 September 2026). Legacy rows are cut and placed as they always
+    were and raise nothing here — this is about the new form only.
+
+    * CRITICAL: a drawer box reaching into the 16 mm band under a Front or a
+      Top Rear (its top above H - t) — the rail and the box want the same
+      space, and the drawer will not close;
+    * CRITICAL: a Front and a Top Rear overlapping in depth — with a backing
+      the carcass needs D >= 219, without one D >= 200;
+    * CRITICAL: Back supports that do not fit between Back 1 and the bottom
+      panel;
+    * WARNING: a Front or a Top Rear stored on a carcass that has a top panel,
+      which cuts nothing (the row stays in the file, as an unticked box does).
+    """
+    from .room import back_supports_fit, drawer_box_tops, support_layout
+    from .model import SUPPORT_TYPE_LABEL
+    std = job.std
+    out = []
+    for c in job.cabinets:
+        if c.is_panel or c.template == "none" or not c.supports_typed:
+            continue
+        offered = c.support_types_offered
+        for row in c.support_rows:
+            if row.qty > 0 and row.type not in offered:
+                out.append(Issue(WARNING, str(c.number),
+                                 f"a {SUPPORT_TYPE_LABEL.get(row.type, row.type)} support "
+                                 f"is stored, but this carcass has a top panel and takes "
+                                 f"Back supports only — it is not cut. Untick it, or make "
+                                 f"the cabinet a base unit", check="support-type-off"))
+        lay = support_layout(c, std, job.materials)
+        if not lay:
+            continue
+        flats = [u for u in lay if u["type"] in ("front", "top_rear")]
+        if flats:
+            band = std.board_t
+            under = max(u["z1"] for u in flats) - band
+            names = " / ".join(sorted({SUPPORT_TYPE_LABEL[u["type"]] for u in flats}))
+            for i, top in drawer_box_tops(c, std):
+                if top > under:
+                    out.append(Issue(CRITICAL, str(c.number),
+                                     f"drawer {i} box reaches {top} up the carcass, into the "
+                                     f"{band} mm band under the {names} support at {under}. "
+                                     f"Lower the box side or drop the support",
+                                     check="support-drawer-foul"))
+            front = [u for u in flats if u["type"] == "front"]
+            rear = [u for u in flats if u["type"] == "top_rear"]
+            if front and rear and front[0]["y1"] > rear[0]["y0"]:
+                need = front[0]["y1"] + (rear[0]["y1"] - rear[0]["y0"]) + (
+                    std.back_cavity + std.back_t if c.back != "none" else 0)
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"the Front and Top Rear supports overlap in depth — "
+                                 f"the Top Rear starts {rear[0]['y0']} from the front and "
+                                 f"the Front ends at {front[0]['y1']}. The carcass needs "
+                                 f"D >= {need} for both; drop one, or deepen it",
+                                 check="support-depth-overlap"))
+        need, have = back_supports_fit(c, std, job.materials)
+        if need > have:
+            out.append(Issue(CRITICAL, str(c.number),
+                             f"the Back supports need {need} of height between Back 1 and "
+                             f"the bottom panel and there is {have}. Fewer Backs, or a "
+                             f"taller carcass", check="support-back-fit"))
     return out
 
 

@@ -14,7 +14,8 @@ What is pinned here, from the brief:
     flipped placement, a per-leaf choice, and a mitre door;
   * every part with a `line` names a designation that exists on that
     cabinet's cut list, and the unmatched count is zero for template cabinets;
-  * no part has a role the ruling leaves out (shelf, support, drawer box);
+  * no part has a role the ruling leaves out (drawer box; shelves and
+    supports are DRAWN since 27 September 2026, and each ties to its line);
   * no room -> parts in Run order, spacing equal to the Run drawing's;
   * the scene call does not change the job;
   * none of engine, validate, export_plaza, nest, room or store imports scene;
@@ -93,7 +94,15 @@ def main():
         check(f"{name}: ids unique", len(ids1), len(set(ids1)))
         check(f"{name}: and identical across two calls", ids1, ids2)
         roles = {q["role"] for it in s1["items"] for q in it["parts"]}
-        check(f"{name}: no shelf, support or drawer-box part", roles & {"shelf", "support", "box", "drawer_box"}, set())
+        check(f"{name}: no drawer-box part", roles & {"box", "drawer_box"}, set())
+        inside = [q for it in s1["items"] for q in it["parts"] if q["role"] in ("support", "shelf")]
+        want_inside = sum(c.support_total + (c.shelves or 0) + (c.fixed_shelves or 0)
+                          for c in job.cabinets
+                          if not c.is_panel and c.template != "none"
+                          and c.corner_kind not in ("mitre", "ell")
+                          and any(it["placed"] and it["number"] == c.number for it in s1["items"]))
+        check(f"{name}: one support part per rail and one shelf part per shelf on placed straight carcasses",
+              len(inside), want_inside)
         cabs = {c.number: c for c in job.cabinets}
         bad, unmatched_template = [], []
         for it in s1["items"]:

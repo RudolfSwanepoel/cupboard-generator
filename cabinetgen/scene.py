@@ -13,9 +13,13 @@ What is in the scene, by ruling (23 September 2026): every board `solid_parts`
 draws — sides, top, bottom, fronts, a blind corner's flush panel, a mitre's
 construction, independent panels — plus the backing board (`room.back_part`)
 and the plinth boards and fillers that were CHOSEN (`room.plinth_solids`,
-`room.filler_solids`). Shelves, supports, drawer boxes, legs, hardware,
+`room.filler_solids`), and — since 27 September 2026 — the supports and the
+shelves (`room.interior_parts`), each banded edge drawn as a band of the
+edging's board colour INSIDE the finished size. Drawer boxes, legs, hardware,
 handles and worktops are left out: their positions are not modelled, and
-nothing is guessed onto a drawing. The legend says so (`NOT_DRAWN`).
+nothing is guessed onto a drawing. The legend says so (`NOT_DRAWN`). Shelves
+are drawn at even spacing and the legend says that too: real heights are set
+at fitment and nothing validates them.
 
 With no room the cabinets stand side by side on the Run's own layout
 (`render.run_layout`) on a plain floor, and the reply carries a banner.
@@ -32,9 +36,10 @@ from .model import Job, Placement, resolve_board, material_thickness
 from .render import PICTURE_TILE_MM, Fills, board_look, run_layout
 from .room import (Part, _from_plan, _placed_frame, _to_plan, back_part,
                    carcass_z, clashes, corner_points, door_hinges,
-                   filler_solids, geometry, layer_of, overlaps, placed,
-                   placed_panels, placement_for, plinth_solids,
-                   pullout_envelope, solid_parts, swing_envelopes, wall_frames)
+                   filler_solids, geometry, interior_parts, layer_of, overlaps,
+                   placed, placed_panels, placement_for, plinth_solids,
+                   pullout_envelope, solid_parts, swing_envelopes, tape_solids,
+                   wall_frames)
 from .standard import STANDARD, Standard
 from .validate import CRITICAL, validate
 
@@ -43,13 +48,20 @@ from .validate import CRITICAL, validate
 # somewhere, and the room has no figure to stop them at. Read by nothing else.
 DRAWING_MARGIN = 300
 
-NOT_DRAWN = "Not drawn: shelves, supports, drawer boxes, legs (positions not modelled)."
+NOT_DRAWN = ("Not drawn: drawer boxes, legs (positions not modelled). "
+             "Shelves are drawn evenly spaced; real heights are set at fitment.")
+
+# How deep into a part an edging band is drawn, in mm. A DRAWING constant like
+# DRAWING_MARGIN: a tape is a colour on a face, and the band has to have some
+# depth to be a solid at all. It never moves or grows a part (hard rule 5).
+TAPE_BAND_MM = 2
 
 # A part's role, as `room.Part` names it, to the cut-list role the engine gives
 # the same board — which is how each solid is tied to its designation.
 ROLE_TO_PANEL = {"side": "Side", "top": "Top", "bottom": "Bottom", "door": "Door",
                  "drawer": "Drawer Face", "blind": "Blind Panel", "panel": "Panel",
-                 "back": "Backing", "plinth": "Plinth", "filler": "Filler"}
+                 "back": "Backing", "plinth": "Plinth", "filler": "Filler",
+                 "support": "Support", "shelf": "Shelve"}
 
 
 # --- tying a solid to its cut-list line ----------------------------------------
@@ -74,18 +86,26 @@ def _extents(outline, z0, z1):
     return {int(round(three[1])), int(round(three[2]))}
 
 
-def _line_for(role: str, board: str, extents: set, panels, mats) -> Optional[str]:
-    """The designation of the cut-list line this solid is, or None."""
+def _line_for(role: str, board: str, extents: set, panels, mats,
+              edges: Optional[tuple] = None) -> Optional[str]:
+    """The designation of the cut-list line this solid is, or None.
+
+    `edges` — (edge_l, edge_w) — tells two support lines of one size and board
+    apart, which is the one case a size alone cannot: a Front and a Back rail
+    are the same Wi x 100 blank and differ only in what is banded."""
     want = ROLE_TO_PANEL.get(role)
     if want is None:
         return None
     mine = resolve_board(mats, board)
+    found = None
     for p in panels:
         if p.role != want or resolve_board(mats, p.material) != mine:
             continue
         if {p.length, p.width} == extents:
-            return p.label
-    return None
+            if edges is None or (p.edge_l, p.edge_w) == edges:
+                return p.label
+            found = found or p.label
+    return found
 
 
 # --- one cabinet or panel ----------------------------------------------------
@@ -114,6 +134,11 @@ def _parts_for(job: Job, cab, p, frame, z: int, std: Standard, mats: dict) -> Li
     back = back_part(cab, std, mats)
     if back is not None:
         parts.append(back)
+    # the supports and shelves, each with the bands its banded edges are drawn
+    # as — a colour on a face, inside the finished size (27 September 2026)
+    inside = interior_parts(cab, std, mats)
+    parts += [q for q, _tapes in inside]
+    bands = {id(q): tape_solids(q, tapes, TAPE_BAND_MM) for q, tapes in inside}
     panels = generate_cabinet(cab, std, mats) if not cab.is_panel else \
         [generate_cabinet(cab, std, mats)[0]]
     hinges = door_hinges(cab, g, p) if g.door_widths and not cab.is_panel else []
@@ -132,13 +157,24 @@ def _parts_for(job: Job, cab, p, frame, z: int, std: Standard, mats: dict) -> Li
                                   else "footprint only — ell" if cab.corner_kind == "ell"
                                   else "footprint only")
         else:
-            line = _line_for(q.role, q.board, ext, panels, mats)
+            edges = None
+            if q.role == "support":
+                # a support part is one rail of a row; the bands on it are what
+                # its cut-list line records as edge_l and edge_w
+                mine = bands.get(id(q), [])
+                el = sum(1 for b in mine if _band_is_long(q, b))
+                edges = (el, len(mine) - el)
+            line = _line_for(q.role, q.board, ext, panels, mats, edges)
             reason = "" if line else "not matched"
         d = {"id": f"{cab.number}:{q.role}:{n}", "cab": cab.number, "role": q.role,
              "index": q.index, "board": resolve_board(mats, q.board),
              "outline": _rounded(world), "z0": round(z + q.z0, 1), "z1": round(z + q.z1, 1),
              "grain": _grain_vector(q.grain, frame), "line": line, "reason": reason,
-             "layer": layer, "label": q.label, "hinge": None, "pull": None}
+             "layer": layer, "label": q.label, "hinge": None, "pull": None,
+             "tapes": [{"outline": _rounded([_to_plan(frame, v) for v in b.outline]),
+                        "z0": round(z + b.z0, 1), "z1": round(z + b.z1, 1),
+                        "board": resolve_board(mats, b.board), "kind": b.label}
+                       for b in bands.get(id(q), [])]}
         if q.role == "door" and 0 <= q.index < len(hinges):
             (hx, hy), _a0, sign, _w = hinges[q.index]
             X, Y = _to_plan(frame, (hx, hy))
@@ -149,6 +185,15 @@ def _parts_for(job: Job, cab, p, frame, z: int, std: Standard, mats: dict) -> Li
             d["pull"] = {"dir": [round(nx, 6), round(ny, 6), 0.0], "distance": g.runner}
         out.append(d)
     return out
+
+
+def _band_is_long(part: Part, band: Part) -> bool:
+    """Whether a tape band lies on one of the part's LONG edges (a face along
+    x, or a z cap on an upright rail) rather than on an end: the band spans
+    the part's whole x extent."""
+    xs = [x for x, _ in part.outline]
+    bx = [x for x, _ in band.outline]
+    return abs((max(bx) - min(bx)) - (max(xs) - min(xs))) < 0.01
 
 
 def _dims(g) -> dict:
@@ -365,6 +410,7 @@ def build(job: Job) -> dict:
         "room_parts": room_parts,
         "overlays": _overlays(job, std, by_number),
         "not_drawn": NOT_DRAWN,
+        "tape_mm": TAPE_BAND_MM,
         "tolerance": std.snap_tolerance,
         "build_ms": round((time.perf_counter() - t0) * 1000, 1),
     }
