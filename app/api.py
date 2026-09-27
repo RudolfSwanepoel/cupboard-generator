@@ -1661,8 +1661,43 @@ VENDOR_DIR = os.path.join(ROOT, "app", "vendor")
 STATIC_TYPES = {".js": "text/javascript; charset=utf-8",
                 "": "text/plain; charset=utf-8"}        # a LICENSE, no extension
 
+def _cabinet_of(payload):
+    """The cabinet a support request names: `job` and `index`, so the boards
+    the answer depends on are the job's own."""
+    job = _job(payload)
+    return job, job.cabinets[int(payload.get("index") or 0)]
+
+
+def support_new(payload):
+    """A fresh typed support row (`Cabinet.new_support`), so its defaults —
+    cut from the carcass, the board's own edging kind, no edge ticked on a
+    Back — are decided in one place and the browser only writes the row."""
+    job, cab = _cabinet_of(payload)
+    kind = str(payload.get("type") or "back")
+    if kind not in SUPPORT_TYPES:
+        return {"ok": False, "error": f"no such support type: {kind}"}
+    count = max(int(payload.get("count") or 1), 1)
+    rows = [asdict(cab.new_support(job.materials, kind)) for _ in range(count)]
+    return {"ok": True, "rows": rows}
+
+
+def support_reenter(payload):
+    """The legacy rows rewritten as typed rows (`Cabinet.reentered_supports`):
+    each keeps its own qty, cut board and edging, so the cut list and the cost
+    do not move. Nothing is written — the browser puts the rows on the cabinet
+    and the top-bar Save is still the only write."""
+    job, cab = _cabinet_of(payload)
+    rows = [asdict(r) for r in cab.reentered_supports(job.materials)]
+    return {"ok": True, "rows": rows,
+            "offered": cab.support_types_offered,
+            "types": [SUPPORT_TYPE_LABEL[r["type"]] + (f" \u00d7 {r['qty']}" if r["qty"] > 1 else "")
+                      for r in rows]}
+
+
 ROUTES = {
     "/api/defaults": defaults,
+    "/api/support-new": support_new,
+    "/api/support-reenter": support_reenter,
     "/api/compute": compute,
     "/api/drawers": drawer_stack,
     "/api/drawer-solve": drawer_solve,

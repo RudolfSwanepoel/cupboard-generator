@@ -64,6 +64,23 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
+**Every Back support carries its OWN edging (ruled 27 September 2026, later the
+same day, replacing the spec's single Back edging).** A Back is a row of its
+own — `Cabinet.new_support` and `/api/support-new` give a new one its defaults:
+cut from the carcass, in that board's own edging kind (`default_support_kind`,
+PVC before 1mm before 2mm; `''` for a board with no edging) and NO edge ticked,
+so it is unedged and orders no tape until an edge is ticked (the engine writes
+no `edge_material` on a typed row with nothing banded). The editor's Back block
+is one block per row with **+ Back support** and a remove button; a re-entered
+row of several identical supports shows as `Back 1–4`. **Re-enter keeps each
+legacy row's own qty, cut board and edging** — `Cabinet.reentered_supports`,
+behind `/api/support-reenter`, decided on the server — so the cut list and the
+cost do not move: Test.json cabinet 6 (4 unedged, 1 PVC WHITE, 1 1mm WHITE)
+re-enters as three Back rows line for line, and the job total to the cent;
+cabinet 7's front-edged rail becomes the Front and its three white ones one
+Back row, the same lines with the Front first. Both pinned in
+`check_supports.py`. Benchmark, every check and the snapshot unchanged.
+
 **Shelves and supports — typed supports, drawn in 3D (27 September 2026, spec
 `Claude outputs/shelves-supports-spec-2026-09-27.md`, agreed with Rudolf).**
 Benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50);
@@ -85,8 +102,9 @@ the 3D tab with fronts open and in X-ray. See **Supports** below. The short form
    banded), only PLACED for drawing by the legacy rule (base: one front-edged
    rail is the Front and the rest Backs; a carcass with a top: all Backs). The
    editor shows them read-only "as quoted" with a **Re-enter** button — Rudolf's
-   explicit act — and the toast names any edging the one-row Back block folds
-   away. Nothing converts a legacy row on its own.
+   explicit act — which keeps every row's own edging (the later ruling above;
+   the one-row Back block that folded edgings away is gone). Nothing converts
+   a legacy row on its own.
 3. **Shelves and supports are DRAWN in 3D** (`room.interior_parts`, kept OUT of
    `solid_parts` so the Finish elevation, the plan and every wall elevation are
    byte-identical). Each banded edge is a band of the edging board's colour
@@ -2061,20 +2079,36 @@ All pinned in `check_supports.py`.
 
 **Edging is chosen edge by edge** — `Support.edges`, any of `front`, `rear`,
 `left`, `right` in the row's own terms (on a Back, `front` is the long edge
-facing INTO the cabinet). `None` means the type's default, the front long edge.
-The cut list records the counts exactly as before: `edge_l` long edges,
-`edge_w` ends (`Cabinet.support_row_edge_counts`); a legacy row is one long
-edge, as it always was. No kind chosen means nothing banded whatever is ticked.
+facing INTO the cabinet). `None` means the type's default, the front long edge;
+`[]` means none. The cut list records the counts exactly as before: `edge_l`
+long edges, `edge_w` ends (`Cabinet.support_row_edge_counts`); a legacy row is
+one long edge, as it always was. No kind chosen means nothing banded whatever
+is ticked, and no edge ticked means no tape ordered whatever the kind — the
+engine blanks `edge_material` on such a row.
+
+**Every Back support has an edging of its own** (ruled 27 September 2026,
+replacing the spec's one Back block with one edging). A Back row is one
+support (or several identical ones, `qty`, which is what a re-entered legacy
+row is); each carries its own `cut_board`, `board`, `kind` and `edges`, and
+`support_layout` numbers them Back 1, 2, 3… across the rows in order. A new
+Back (`Cabinet.new_support`, `/api/support-new`, the editor's **+ Back
+support** and a new cabinet's four) is cut from the carcass, in that board's
+own edging kind (`default_support_kind`: the first it offers, `''` for a board
+with no edging) with **no edge ticked** — unedged until one is. A Front or Top
+Rear starts on its front long edge as before.
 
 **Legacy rows are cut exactly as they always were and are never converted.**
 Only their DRAWING placement is decided, by the legacy rule in
 `support_layout`: on a base unit one front-edged rail is the Front and the rest
 are Backs; on a carcass with a top, all Backs. The editor shows them read-only
-"as quoted" with a Re-enter button; re-entering writes typed rows carrying what
-each resolved to, and the one-row Back block means rows with an edging of their
-own are folded into it — the toast names them. The three old numbers are left
-where they are; a job with none of this written round-trips byte for byte
-(`type` and `edges` are written only when set, `store.cabinet_to_dict`).
+"as quoted" with a Re-enter button; re-entering (`Cabinet.reentered_supports`,
+behind `/api/support-reenter` — the browser writes the rows and works out
+nothing) gives every legacy row a typed row OF ITS OWN with its qty and exactly
+what it resolved to be cut from and edged in, so the cut list and the cost do
+not move; an edged row ticks its front long edge, an unedged one nothing, and
+no Top Rear is guessed. The three old numbers are left where they are; a job
+with none of this written round-trips byte for byte (`type` and `edges` are
+written only when set, `store.cabinet_to_dict`).
 
 **Three criticals, on typed rows only** (`validate._support_layout`): a drawer
 box reaching into the 16 mm band under a Front or Top Rear — a box stands on

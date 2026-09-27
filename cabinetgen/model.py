@@ -327,6 +327,15 @@ def support_edges_of(row: "Support") -> List[str]:
     return [e for e in row.edges if e in SUPPORT_EDGE_NAMES]
 
 
+def default_support_kind(materials: dict, board: str) -> str:
+    """The edging kind a NEW support row starts with: the board's own — the
+    first kind it offers, PVC before 1mm before 2mm — or '' for a board with no
+    edging (ruled 27 September 2026). A kind with no edge ticked orders no
+    edging; it only says what the edging is the moment an edge is ticked."""
+    offered = material_offers(materials, board) if board else ()
+    return offered[0] if offered else ""
+
+
 def support_types_for(kind: str, corner_kind: str = "") -> List[str]:
     """Which support types a carcass of this kind may carry, in cut-list order.
 
@@ -893,6 +902,50 @@ class Cabinet:
         chosen = support_edges_of(row)
         return (sum(1 for e in chosen if e in SUPPORT_LONG_EDGES),
                 sum(1 for e in chosen if e not in SUPPORT_LONG_EDGES))
+
+    def new_support(self, materials: dict, type: str) -> "Support":
+        """A fresh typed row of this type, with the defaults ruled 27 September
+        2026: cut from the carcass board, edged in that board's own edging
+        (`default_support_kind`; '' for a board with no edging), and — on a
+        Back — NO edge ticked, so it is unedged until one is. A Front or Top
+        Rear keeps the type's default, its front long edge."""
+        board = self.carcass_board
+        return Support(edge="none", qty=1, type=type, cut_board=board, board=board,
+                       kind=default_support_kind(materials, board),
+                       edges=[] if type == "back" else list(SUPPORT_DEFAULT_EDGES))
+
+    def reentered_supports(self, materials: dict) -> List[Support]:
+        """The legacy rows rewritten as typed rows — Rudolf's explicit act.
+
+        Each legacy row keeps its own qty and exactly what the engine resolved
+        it to be cut from and edged in, so the cut list and the cost do not
+        move (ruled 27 September 2026, replacing a Back block that folded
+        every row into one edging). Placed by the legacy drawing rule: on a
+        base unit the first front-edged rail is the Front, everything else is
+        a Back, one typed row per legacy row; on a carcass with a top, all
+        Backs. An edged row bands its front long edge, which is the one long
+        edge a legacy row always banded; an unedged row ticks nothing. No Top
+        Rear is guessed. Cut-list order is Front, then Backs in legacy order.
+        """
+        offered = self.support_types_offered
+        out: List[Support] = []
+        backs: List[Support] = []
+        front_done = "front" not in offered
+        for row in self.support_list:
+            cut = self.support_row_cut_board(row)
+            kind = self.support_row_kind(row)
+            board = self.support_row_board(materials, row) if kind else cut
+            edges = list(SUPPORT_DEFAULT_EDGES) if kind else []
+            qty = row.qty
+            if not front_done and row.edge == "front":
+                out.append(Support(edge="none", qty=1, type="front", cut_board=cut,
+                                   board=board, kind=kind, edges=list(SUPPORT_DEFAULT_EDGES)))
+                front_done = True
+                qty -= 1
+            if qty > 0:
+                backs.append(Support(edge="none", qty=qty, type="back", cut_board=cut,
+                                     board=board, kind=kind, edges=edges))
+        return out + backs
 
     @property
     def legacy_supports_negative(self) -> bool:

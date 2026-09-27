@@ -267,6 +267,12 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
         # the edges chosen for it, long edges and ends counted separately
         # (27 September 2026). No tape, nothing banded.
         el, ew = cab.support_row_edge_counts(row) if tape else (0, 0)
+        # A typed row with a kind chosen and no edge ticked is unedged, and
+        # orders no tape (27 September 2026): the kind only says what the
+        # edging would be. A legacy row always bands one edge, so it is
+        # untouched by this.
+        if not (el or ew):
+            tape = ""
         P.append(Panel(n, "04", "Support", sup_board, Wi, SUPPORT_W, row.qty,
                        edge_l=el, edge_w=ew, edge_material=tape,
                        grain=grain_of(mats, sup_board)))

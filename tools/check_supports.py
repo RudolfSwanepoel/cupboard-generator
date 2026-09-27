@@ -22,6 +22,13 @@ z up from their underside):
     the October fixture round-trip byte for byte and cut the same lines;
   * the 3D scene draws one part per rail and per shelf, tied to its cut-list
     line, and a tape band lies INSIDE the finished size on the chosen face;
+  * every Back support carries its OWN edging (ruled 27 September 2026): a
+    row per support, each cut and banded as it says; a new Back starts in
+    its cut board's own edging kind with no edge ticked, so it is unedged,
+    and a board with no edging starts on none;
+  * Re-enter keeps each legacy row's own qty, cut board and edging, so the
+    cut list and the cost do not move — Test.json cabinet 6 line for line
+    and the job total to the cent;
   * the plan, the wall elevations and `solid_parts` do not move: shelves and
     supports are drawn only in 3D.
 """
@@ -36,6 +43,7 @@ sys.path.insert(0, ROOT)
 from app import api                                                      # noqa: E402
 from cabinetgen import scene as SC                                       # noqa: E402
 from cabinetgen.engine import SUPPORT_W, generate_cabinet, generate_job  # noqa: E402
+from cabinetgen.export_plaza import estimate_cost, summarise               # noqa: E402
 from cabinetgen.model import (MATERIALS, Cabinet, Drawer, Job, Support,  # noqa: E402
                               support_types_for)
 from cabinetgen.render import plan_svg, wall_elevation_svg               # noqa: E402
@@ -303,6 +311,72 @@ def main():
     check("legacy rows are reported as not typed", g["supports_typed"], False)
     check("and every row carries its edge counts", all("edge_counts" in x for x in g["supports"]), True)
     check("the layout is given in the spec frame", all(set(u) >= {"type", "n", "y0", "y1", "z0", "z1"} for u in g["support_layout"]), True)
+
+    print("\nevery Back support carries its OWN edging (ruled 27 September 2026)")
+    rows = [Support(type="back", qty=1, kind="pvc", board="MEL", edges=["front"]),
+            Support(type="back", qty=1, kind="2mm", board="BROOKHILL", edges=["front", "rear"]),
+            Support(type="back", qty=1)]
+    sup = [p for p in generate_cabinet(box(support_rows=rows), std, MATERIALS) if p.role == "Support"]
+    check("three Back rows, three lines, each in its own edging",
+          [(p.edge_l, p.edge_w, p.edge_material) for p in sup], [(1, 0, "PVC WHITE"), (2, 0, "2mm WOOD"), (0, 0, "")])
+    L = lay(box(support_rows=rows))
+    check("placed as Back 1, 2, 3 across the rows", sorted(L), [("back", 1), ("back", 2), ("back", 3)])
+    parts = dict((p.label, (p, t)) for p, t in interior_parts(box(support_rows=rows), std, MATERIALS))
+    check("Back 1's band in its own board, Back 2's in its own", ({x.board for x in parts["Back 1"][1]}, {x.board for x in parts["Back 2"][1]}), ({"MEL"}, {"BROOKHILL"}))
+    check("Back 3 unedged draws no band", parts["Back 3"][1], [])
+
+    print("\na new Back support: the cut board's own edging, no edge ticked, unedged")
+    n = box().new_support(MATERIALS, "back")
+    check("cut from the carcass, edged in it, PVC, nothing ticked", (n.type, n.qty, n.cut_board, n.board, n.kind, n.edges), ("back", 1, "MEL", "MEL", "pvc", []))
+    sup = [p for p in generate_cabinet(box(support_rows=[n]), std, MATERIALS) if p.role == "Support"]
+    check("it cuts unedged and orders no tape", (sup[0].edge_l, sup[0].edge_w, sup[0].edge_material), (0, 0, ""))
+    n.edges = ["front"]
+    sup = [p for p in generate_cabinet(box(support_rows=[n]), std, MATERIALS) if p.role == "Support"]
+    check("tick an edge and it is PVC WHITE on one long edge", (sup[0].edge_l, sup[0].edge_material), (1, "PVC WHITE"))
+    plain = {k: dict(v) for k, v in MATERIALS.items()}
+    plain["MEL"]["has_edging"] = False
+    check("a board with no edging defaults to none", box().new_support(plain, "back").kind, "")
+    twomm = {k: dict(v) for k, v in MATERIALS.items()}
+    twomm["MEL"]["edging_kinds"] = ["2mm"]
+    check("a board offering 2mm only starts on 2mm", box().new_support(twomm, "back").kind, "2mm")
+    f = box().new_support(MATERIALS, "front")
+    check("a new Front keeps the type's default edge", (f.type, f.edges), ("front", ["front"]))
+    r = api.support_new({"job": job_to_dict(job_of(box())), "index": 0, "type": "back", "count": 4})
+    check("/api/support-new hands back four such rows", [(x["type"], x["qty"], x["kind"], x["edges"]) for x in r["rows"]], [("back", 1, "pvc", [])] * 4)
+
+    print("\nRe-enter keeps each legacy row's own edging: the cut list and the cost do not move")
+    job = load(os.path.join(ROOT, "jobs", "Test.json"))
+    def lines(j):
+        return [(p.cabinet, p.label, p.material, p.length, p.width, p.qty, p.edge_l, p.edge_w, p.edge_material)
+                for p in generate_job(j) if p.role == "Support"]
+    def cost(j):
+        P = generate_job(j)
+        return estimate_cost(j, summarise(j, P))["total_incl_vat"]
+    before_lines, before_cost = lines(job), cost(job)
+    re = copy.deepcopy(job)
+    six = next(c for c in re.cabinets if c.number == 6)
+    six.support_rows = six.reentered_supports(re.materials)
+    check("cabinet 6: three legacy rows become three Back rows, each as it was",
+          [(r.type, r.qty, r.cut_board, r.board, r.kind, r.edges) for r in six.support_rows],
+          [("back", 4, "WHITEMEL", "WHITEMEL", "", []), ("back", 1, "WHITEMEL", "WHITEMEL", "pvc", ["front"]),
+           ("back", 1, "WHITEMEL", "WHITEMEL", "1mm", ["front"])])
+    check("  and is typed", six.supports_typed, True)
+    check("  its support lines are identical", [x for x in lines(re) if x[0] == 6], [x for x in before_lines if x[0] == 6])
+    check("  the job's total is unchanged", cost(re), before_cost)
+    seven = next(c for c in re.cabinets if c.number == 7)
+    seven.support_rows = seven.reentered_supports(re.materials)
+    check("cabinet 7 (base, white x3 + front x1): the front-edged rail is the Front, the three white are one Back row",
+          [(r.type, r.qty, r.board, r.kind) for r in seven.support_rows],
+          [("front", 1, "BROOKHILL", "pvc"), ("back", 3, "WHITEMEL", "pvc")])
+    check("  the same lines, Front first", sorted(x for x in lines(re) if x[0] == 7), sorted(x for x in before_lines if x[0] == 7))
+    check("  the job's total is still unchanged", cost(re), before_cost)
+    check("  nothing but the two cabinets' rows moved", [x for x in lines(re) if x[0] not in (6, 7)], [x for x in before_lines if x[0] not in (6, 7)])
+    tall = box(kind="tall", height=2400, support_rows=[Support(edge="front", qty=1), Support(edge="none", qty=2)])
+    check("a tall re-enters as Backs only, the front-edged one keeping its edging",
+          [(r.type, r.qty, r.kind, r.board) for r in tall.reentered_supports(MATERIALS)], [("back", 1, "pvc", "BROOKHILL"), ("back", 2, "", "MEL")])
+    r = api.support_reenter({"job": job_to_dict(job), "index": [c.number for c in job.cabinets].index(6)})
+    check("/api/support-reenter says what it made", r["types"], ["Back \u00d7 4", "Back", "Back"])
+    check("  and the job on disk is untouched", json.loads(open(os.path.join(ROOT, "jobs", "Test.json"), encoding="utf-8").read()) == json.loads(json.dumps(job_to_dict(job))), True)
 
     print()
     if FAILS:

@@ -252,6 +252,8 @@
   .supblock .edges{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:5px;font-size:11px}
   .supblock .edges label{display:flex;align-items:center;gap:3px}
   .supblock .drawn{font-size:11px;color:var(--muted);margin-top:4px}
+  .supblock h4 .mini{margin-left:auto;padding:0 6px;line-height:16px;font-size:12px}
+  .supblock.isback{border-top-style:dashed}
   #editor h2 .edsave{float:right;font-size:11px;padding:2px 9px}
   table.rows.asquoted td{color:var(--muted)}
   .unavail input,.unavail select{opacity:.5;background:var(--carc)}
@@ -582,11 +584,10 @@ function blankCabinet(number) {
   return {
     number: number, width: 600, height: 2400, depth: 500,
     kind: "tall", back: "four", template: "standard",
-    // Typed from the start (27 September 2026): four Back supports, not edged
-    // until an edging is chosen, the front long edge being the one that then
-    // gets it. Cut from the carcass board.
-    support_rows: [{type: "back", qty: 4, edge: "none", cut_board: "", board: "", kind: "",
-                    edges: ["front"]}],
+    // Typed from the start (27 September 2026): four Back supports, each with
+    // its own edging, filled in by /api/support-new once the boards are chosen
+    // — cut from the carcass, in that board's own edging, no edge ticked.
+    support_rows: [],
     supports: 0, edged_supports: 0, white_supports: 0,
     shelves: 0, fixed_shelves: 0, shelf_width: null,
     divider_height: null, divider_count: 0,
@@ -933,6 +934,12 @@ $("add").addEventListener("click", async () => {
   fresh.carcass_board = pool[0];
   fresh.exterior_board = pool[pool.length - 1];
   fresh.has_doors = false;      // tick it on when this cabinet actually has doors
+  // Four Back supports, each its own row: the engine's defaults, not the
+  // browser's — the carcass board's own edging kind, nothing ticked.
+  const sr = await post("/api/support-new",
+                        {job: Object.assign({}, S.job, {cabinets: [fresh]}), index: 0,
+                         type: "back", count: 4});
+  fresh.support_rows = (sr && sr.rows) || [];
   S.job.cabinets.push(fresh);
   // P3: a new cabinet isolates itself. It has no placement yet, so there is
   // nothing to draw until a wall is picked for it in the Room tab — and the
@@ -1737,6 +1744,14 @@ $("editor").addEventListener("click", (e) => {
     return;
   }
   if (e.target.id === "supretype") { reenterSupports(); return; }
+  if (e.target.id === "supadd") { addBackSupport(); return; }
+  const sdel = e.target.closest("[data-supdel]");
+  if (sdel) {
+    S.job.cabinets[S.sel].support_rows.splice(+sdel.dataset.supdel, 1);
+    renderSupports();
+    schedule();
+    return;
+  }
   if (e.target.id === "edsave") { saveRefresh(); return; }
   const pre = e.target.closest("[data-preset]");
   if (pre) { applyPreset(pre.dataset.preset); return; }
@@ -2429,13 +2444,16 @@ function supportsTyped(c) {
   return !!(c.support_rows && c.support_rows.length && c.support_rows.every((r) => r.type));
 }
 
-// The typed rows, one per type in cut-list order, made up where missing so
-// every block has a row to write into. Only called on a typed cabinet.
+// The typed rows in cut-list order. A Front and a Top Rear block always has a
+// row to write into (made up at qty 0 where missing); a Back is a row of its
+// own, one per support, added and removed outright, so there is none to make
+// up. The sort is stable, so Backs keep their order. Only called on a typed
+// cabinet.
 function typedSupportRows(c) {
   const types = S.def.support_types || ["front", "top_rear", "back"];
   const rows = c.support_rows;
   for (const t of types) {
-    if (!rows.some((r) => r.type === t)) {
+    if (t !== "back" && !rows.some((r) => r.type === t)) {
       rows.push({type: t, qty: 0, edge: "none", cut_board: c.carcass_board || "",
                  board: c.carcass_board || "", kind: "",
                  edges: (S.def.support_default_edges || ["front"]).slice()});
@@ -2443,6 +2461,17 @@ function typedSupportRows(c) {
   }
   rows.sort((a, b) => types.indexOf(a.type) - types.indexOf(b.type));
   return rows;
+}
+
+// + Back support: a row of its own with the engine's defaults (27 September
+// 2026) — cut from the carcass, that board's own edging kind, no edge ticked.
+async function addBackSupport() {
+  const c = S.job.cabinets[S.sel];
+  const r = await post("/api/support-new", {job: S.job, index: S.sel, type: "back", count: 1});
+  if (!r || !r.rows) return;
+  c.support_rows.push(r.rows[0]);
+  renderSupports();
+  schedule();
 }
 
 function renderSupports() {
@@ -2531,11 +2560,14 @@ function renderSupports() {
     return;
   }
 
-  // TYPED: three blocks, one per type, each writing into its own row.
+  // TYPED: a Front block, a Top Rear block, and one block per Back support —
+  // every one with its own cut board, edging and per-edge ticks (27 September
+  // 2026, replacing one Back block with one edging for all of them).
   const rows = typedSupportRows(c);
   const offered = (g && g.support_types_offered) || (S.def.support_types || []);
   const edgeNames = S.def.support_edge_names || ["front", "rear", "left", "right"];
   const drawn = (g && g.support_layout) || [];
+  let backAt = 0;                       // Back n counts across the rows, by qty
   const blocks = rows.map((row) => {
     const i = c.support_rows.indexOf(row);
     const e = fromEngine[i] || {};
@@ -2547,15 +2579,29 @@ function renderSupports() {
                           : (e.eff_edges || S.def.support_default_edges || ["front"]),
                name: e.name};
     const off = offered.indexOf(row.type) < 0;
-    const on = (row.qty || 0) > 0;
-    const control = row.type === "back"
+    const isBack = row.type === "back";
+    const on = isBack || (row.qty || 0) > 0;
+    // A Back row is Back n (or n–m when the row is several identical ones, as
+    // a re-entered legacy row can be); the count follows the layout's order.
+    let title = typeLabel[row.type] || row.type;
+    let mine = drawn.filter((u) => u.type === row.type);
+    if (isBack) {
+      const q = Math.max(row.qty || 0, 0);
+      const first = backAt + 1, last = backAt + q;
+      backAt += q;
+      title = q > 1 ? `Back ${first}–${last}` : q === 1 ? `Back ${first}` : "Back (none)";
+      mine = mine.filter((u) => u.n >= first && u.n <= last);
+    }
+    const control = isBack
       ? `<input type="number" step="1" min="0" data-sup="${i}" data-sk="qty" value="${row.qty || 0}"
-           ${off ? "disabled" : ""} title="how many Back supports">`
+           ${off ? "disabled" : ""} title="how many identical supports this row is">`
       : `<input type="checkbox" data-sup="${i}" data-sk="on" ${on ? "checked" : ""}
            ${off ? "disabled" : ""}>`;
-    const mine = drawn.filter((u) => u.type === row.type);
+    const remove = isBack
+      ? `<button type="button" class="mini" data-supdel="${i}" title="remove this Back support">×</button>`
+      : "";
     const at = mine.length
-      ? (row.type === "back"
+      ? (isBack
           ? `in the cavity y ${mine[0].y0}–${mine[0].y1}; ` +
             mine.map((u) => `Back ${u.n} z ${u.z0}–${u.z1}`).join(", ")
           : `y ${mine[0].y0}–${mine[0].y1}, z ${mine[0].z0}–${mine[0].z1}`) +
@@ -2576,20 +2622,30 @@ function renderSupports() {
       ? `<p class="off">Not on this carcass — it has a top panel and takes Back supports
            only.${on ? " The stored one stays in the job file and is not cut." : ""}</p>`
       : "";
-    return `<div class="supblock${off ? " isoff" : ""}">
-      <h4><label class="tick">${control}${esc(typeLabel[row.type] || row.type)}</label>
-        <span class="note">${esc(SUPPORT_TYPE_HINT[row.type] || "")}</span></h4>
+    // the Back hint once, over the first Back block, not on every one
+    const hint = isBack && backAt - Math.max(row.qty || 0, 0) === 0
+      ? SUPPORT_TYPE_HINT.back : isBack ? "" : (SUPPORT_TYPE_HINT[row.type] || "");
+    return `<div class="supblock${off ? " isoff" : ""}${isBack ? " isback" : ""}">
+      <h4><label class="tick">${control}${esc(title)}</label>
+        <span class="note">${esc(hint)}</span>${remove}</h4>
       ${offNote}${detail}</div>`;
   }).join("");
 
   const total = rows.filter((r) => offered.indexOf(r.type) >= 0)
                     .reduce((a, r) => a + (r.qty || 0), 0);
+  const backOff = offered.indexOf("back") < 0;
+  const anyBack = rows.some((r) => r.type === "back");
   box.innerHTML = `${blocks}
+    ${anyBack ? "" : `<div class="supblock isback"><h4>Back (none)
+      <span class="note">${esc(SUPPORT_TYPE_HINT.back)}</span></h4></div>`}
+    <div class="presets"><button id="supadd" type="button" ${backOff ? "disabled" : ""}
+      title="one more Back support, with its own edging">+ Back support</button></div>
     <div class="dtot"><span>total <b>${total}</b> support${total === 1 ? "" : "s"}</span></div>
     <p class="hint">Each support says what it is <b>cut from</b> and, separately, what its
       edging is — a kind the colour board offers on the <b>Boards</b> tab — and which
-      of its edges get it. Tape is drawn inside the finished size and moves nothing.
-      Nothing here states an edging name.</p>`;
+      of its edges get it. A new Back support starts in its cut board's own edging with
+      no edge ticked, so it is unedged until one is. Tape is drawn inside the finished
+      size and moves nothing. Nothing here states an edging name.</p>`;
   refreshSupports();
 }
 
@@ -2614,7 +2670,10 @@ function refreshSupports() {
       ? ` on ${counts[0]} long edge${counts[0] === 1 ? "" : "s"}` +
         (counts[1] ? ` and ${counts[1]} end${counts[1] === 1 ? "" : "s"}` : "")
       : "";
-    td.textContent = r.name
+    const none = r.type && counts.length && !counts[0] && !counts[1];
+    td.textContent = none
+      ? `not edged — no edge ticked${r.name ? ` (${r.name} when one is)` : ""}`
+      : r.name
       ? r.name + where + (r.legacy ? "  (as quoted)" : "")
       : wanted ? `${pre[kind] || kind} not offered by ${eff}`
       : "not edged";
@@ -2625,48 +2684,23 @@ function refreshSupports() {
 // Rudolf's explicit act: the legacy rows become Front / Top Rear / Back, placed
 // exactly as the legacy drawing rule placed them — on a base unit one
 // front-edged rail is the Front and the rest are Backs; on a carcass with a top,
-// all Backs — each carrying what the engine resolved it to be cut from and
-// edged in. The old numbers are left where they are; nothing reads them once
-// typed rows exist. The cut list follows the new form from here, so the
-// Ordered as lines are worth a look.
-function reenterSupports() {
+// all Backs. Every legacy row becomes a typed row OF ITS OWN, keeping its qty
+// and exactly what the engine resolved it to be cut from and edged in, so the
+// cut list and the cost do not move (ruled 27 September 2026 — a Back block
+// with one edging for every Back folded edgings away, and that is gone). The
+// rows come from /api/support-reenter; the browser writes them and works out
+// nothing. The old numbers are left where they are; nothing reads them once
+// typed rows exist.
+async function reenterSupports() {
   const c = S.job.cabinets[S.sel];
-  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
-  const eng = (g && g.supports) || [];
-  const offered = (g && g.support_types_offered) || [];
-  const types = S.def.support_types || ["front", "top_rear", "back"];
-  const dflt = (S.def.support_default_edges || ["front"]).slice();
-  const carc = c.carcass_board || "";
-  const blank = (t) => ({type: t, qty: 0, edge: "none", cut_board: carc, board: carc, kind: "",
-                         edges: dflt.slice()});
-  const from = (t, r, qty) => ({type: t, qty: qty, edge: "none",
-                                cut_board: r.eff_cut_board || carc,
-                                board: r.eff_board || r.eff_cut_board || carc,
-                                kind: r.eff_kind || "", edges: dflt.slice()});
-  const live = eng.filter((r) => (r.qty || 0) > 0);
-  let frontRow = null;
-  if (offered.indexOf("front") >= 0) frontRow = live.find((r) => r.edge === "front") || null;
-  const total = live.reduce((a, r) => a + r.qty, 0);
-  const backQty = total - (frontRow ? 1 : 0);
-  const backFrom = live.find((r) => r !== frontRow) || (frontRow && frontRow.qty > 1 ? frontRow : null);
-  const rows = [];
-  for (const t of types) {
-    if (t === "front") rows.push(frontRow ? from("front", frontRow, 1) : blank("front"));
-    else if (t === "top_rear") rows.push(blank("top_rear"));
-    else rows.push(backFrom ? from("back", backFrom, backQty) : Object.assign(blank("back"), {qty: backQty}));
-  }
-  // The Back block is ONE row with one edging. Legacy rows that carried an
-  // edging of their own and did not become the Front or the Back's own are
-  // named here, because their edging is no longer on the order.
-  const kept = new Set([frontRow, backFrom].filter(Boolean));
-  const dropped = live.filter((r) => !kept.has(r) && r.name)
-    .map((r) => `${r.qty} \u00d7 ${r.name}`);
-  c.support_rows = rows;
-  toast(`Supports re-entered as ${offered.map((t) => (S.def.support_type_label || {})[t] || t).join(" / ")} ` +
-        `— the cut list follows the new form from here; check the Ordered as lines.` +
-        (dropped.length ? ` Rows with an edging of their own were folded into the Back block, ` +
-         `which has one edging: ${dropped.join(", ")} — set it in the block if it was wanted.` : ""),
-        dropped.length > 0);
+  const r = await post("/api/support-reenter", {job: S.job, index: S.sel});
+  if (!r || !r.rows) return;
+  c.support_rows = r.rows;
+  const labels = S.def.support_type_label || {};
+  toast(`Supports re-entered as ${r.types.join(", ") || "none"} — each keeps its own cut board ` +
+        `and edging, so the cut list is what it was; check the Ordered as lines. ` +
+        `Each Back support now has an edging of its own` +
+        ((r.offered || []).indexOf("top_rear") >= 0 ? `; a ${labels.top_rear || "Top Rear"} is not guessed — tick it if wanted.` : "."));
   renderSupports();
   schedule();
 }

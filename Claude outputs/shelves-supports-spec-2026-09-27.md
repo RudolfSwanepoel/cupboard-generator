@@ -1,7 +1,15 @@
 # Shelves and supports — agreed spec (27 Sept 2026)
 
-Status: AGREED with Rudolf 27 Sept 2026. Not built. Build before the UI restructure
-(`ui-restructure-spec-2026-09-27.md`). Attached panels spec follows separately.
+Status: AGREED with Rudolf 27 Sept 2026. BUILT the same day. Attached panels spec
+follows separately.
+
+**Ruling, 27 Sept 2026 (later the same day), replacing the single Back edging below:
+every Back support carries its OWN edging** — board, kind and per-edge ticks — exactly
+like Front and Top Rear. A new Back support defaults to the Cut-from board's own edging
+with no edges ticked (unedged); a board with no edging defaults to none. Re-enter on a
+legacy cabinet keeps each legacy row's own edging, so the cut list and cost do not
+change (Test.json cabinet 6 stays at its total). Sections 1 and 4 and "Existing jobs"
+are amended in place below.
 
 Hard rules that bind this work: 1 (geometry from the panel set, never declared sizes),
 2 (designations never change), 3 (benchmark 272/59/30, 92 pot holes, 18/9/6, R28,363.50),
@@ -15,8 +23,9 @@ depth, flush at the back; the backing always sits in its slot.
 
 ## 1. Supports
 
-Every support is Wi × 100 × 16, code 04, as now. Three types, each with its own
-**Cut from** board and its own **edging** (board + kind from the Boards tab, as today).
+Every support is Wi × 100 × 16, code 04, as now. Three types. **Every support** — the
+Front, the Top Rear and each Back — has its own **Cut from** board and its own
+**edging** (board + kind from the Boards tab, as today, and which edges).
 
 Edging: **any edge**, chosen edge by edge (both long edges, both ends). The cut list
 records the counts (edge_l / edge_w) exactly as now; the model draws each chosen edge.
@@ -44,6 +53,11 @@ list or the model (hard rule 5: finished size is the same edged or not).
 - **Back 3…n** (edges face UP, like Back 2): same plane, equally spaced (equal gaps)
   between Back 1 and Back 2.
 - With only one Back support, it is Back 1.
+- **Each Back support carries its own edging** (ruling above): a row per support, its
+  own Cut from, edging board, kind and per-edge ticks. A new one starts in its Cut-from
+  board's own edging kind with **no edge ticked** — unedged, no tape ordered — and on
+  none where the board has no edging. Back 1, 2, 3… are numbered across the rows in
+  order.
 
 ### Which cabinets get what
 | Cabinet | Front | Top Rear | Back |
@@ -69,6 +83,11 @@ list or the model (hard rule 5: finished size is the same edged or not).
 - For drawing only, legacy untyped rows are placed as: base unit — one front-edged row → Front,
   the rest → Back; tall/wall — all Back. No legacy row is converted or renamed in the
   job file unless Rudolf re-enters it in the new form.
+- **Re-enter keeps each legacy row's own edging** (ruling above): every legacy row becomes
+  a typed row of its own — the first front-edged rail on a base unit the Front, everything
+  else a Back — with its qty and exactly what it was cut from and edged in, so the cut
+  list and the cost do not change. Test.json cabinet 6 (4 unedged, 1 PVC WHITE,
+  1 1mm WHITE) re-enters as three Back rows and stays at its total. No Top Rear is guessed.
 
 ## 2. Shelves
 - Counts as now (adjustable / fixed); sizes, depth rule and cut list unchanged.
@@ -83,8 +102,10 @@ list or the model (hard rule 5: finished size is the same edged or not).
 - Plan and wall elevations: unchanged.
 
 ## 4. Editor
-- Supports section becomes three blocks: Front (tick), Top Rear (tick), Back (quantity).
-  Each has Cut from, edging board + kind, and per-edge edging ticks.
+- Supports section: a Front block (tick), a Top Rear block (tick), and **one block per
+  Back support** with "+ Back support" and a remove button (ruling above — not one Back
+  block with a quantity). Each block has Cut from, edging board + kind, and per-edge
+  edging ticks.
 - Front and Top Rear greyed (not selectable) on any carcass with a top panel.
 
 ## 5. Save button (cabinet configuration window)
