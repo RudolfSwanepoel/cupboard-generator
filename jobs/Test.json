@@ -993,7 +993,7 @@
       "panel": {
         "board": "GREY",
         "orientation": "end",
-        "a": 616,
+        "a": 600,
         "b": 2400,
         "grain_along": "b",
         "edge_kind": "1mm",
@@ -1367,7 +1367,7 @@
     {
       "cabinet": 1,
       "wall": "B",
-      "x": 1632,
+      "x": 1616,
       "z": 0,
       "flip": false,
       "layer": null
@@ -1431,7 +1431,7 @@
     {
       "cabinet": 9,
       "wall": "B",
-      "x": 1616,
+      "x": 1600,
       "z": 100,
       "flip": false,
       "layer": null
@@ -1439,7 +1439,7 @@
     {
       "cabinet": 10,
       "wall": "B",
-      "x": 2232,
+      "x": 2216,
       "z": 100,
       "flip": false,
       "layer": null
@@ -1471,7 +1471,7 @@
     {
       "cabinet": 15,
       "wall": "B",
-      "x": 2248,
+      "x": 2232,
       "z": 0,
       "flip": false,
       "layer": null
