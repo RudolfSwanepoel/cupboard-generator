@@ -6946,8 +6946,9 @@ function showPartCard(number, part, view) {
   box.hidden = false;
 }
 
-// Snapshot (F5): the view as a PNG, written by the server into output/<job>/
-// under a name that never overwrites. The toast names the file.
+// Snapshot (F5): the view as a PNG, written by the server into
+// output/<job>/snapshots/ under a name that never overwrites; an export never
+// touches that folder. The toast names the file.
 async function snapshot3D(dataUrl) {
   if (!dataUrl) return;
   const r = await post("/api/snapshot", {name: S.job.name, png: dataUrl});
@@ -7101,7 +7102,11 @@ async function runExport(walls) {
     document.querySelector('nav [data-tab="validation"]').click();
     return;
   }
-  toast("Wrote " + r.files.length + " files to\n" + r.dir +
+  // The folders written, by name: the last export's are in _previous/ now,
+  // and snapshots/ is untouched (output-folders brief, 28 September 2026).
+  const into = Object.entries(r.folders || {}).map(([d, f]) => `${d}/ (${f.length})`).join(", ");
+  toast("Wrote " + r.files.length + " files to " + (r.rel || r.dir) + "\n" + into +
+        (r.previous ? "\nThe previous export is in _previous/" : "") +
         ((r.accepted || []).length ? "\nWith " + r.accepted.length + " accepted critical(s): " +
           r.accepted.map((i) => `${i.where} (${i.accepted})`).join(", ") : ""));
   S.lastExport = r;

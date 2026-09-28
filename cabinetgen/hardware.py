@@ -105,7 +105,7 @@ SEED = Runner(id=SEED_ID, name="Gelmar 45 mm full-extension ball-bearing",
               supplier="Gelmar", sku="7011-7017", price=0.0,
               type=RUNNER_TYPES[0], height=45, side_clearance=13.5,
               rail_thickness=12.7, lengths=[300, 350, 400, 450, 500, 550, 600],
-              extension="full", capacity_kg=35, lift=5, setback=3)
+              extension="full", capacity_kg=35, lift=5, setback=2)
 
 _NUM = ("price", "height", "side_clearance", "rail_thickness", "capacity_kg",
         "lift", "setback")

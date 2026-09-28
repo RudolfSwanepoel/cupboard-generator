@@ -6,7 +6,7 @@
 Needs Playwright, like `ui_check_3d.py` and `ui_check_attached.py`, and says so
 and exits 0 when it is not installed. Headless Chromium with a real mouse; a
 screenshot of every tab, every Room sub-tab and every Cabinets-tab 3D case is
-written to `output/ui_check_restructure/` for looking at.
+written to `output/_checks/ui_check_restructure/` for looking at.
 
 What it drives, against `jobs/Test.json` unless it says otherwise — the brief's
 Session 1 verification list:
@@ -57,7 +57,7 @@ ap.add_argument("--headed", action="store_true")
 args = ap.parse_args()
 URL = f"http://127.0.0.1:{args.port}/"
 LAUNCH = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
-SHOTS = os.path.join(ROOT, "output", "ui_check_restructure")
+SHOTS = os.path.join(ROOT, "output", "_checks", "ui_check_restructure")
 
 FAILS = []
 
@@ -690,9 +690,15 @@ def stage_export(pw):
     svgs = sorted(f for f in files if f.endswith(".svg") and not f.startswith("nest_"))
     check("exactly the two ticked walls' elevations, and the plan",
           svgs, [f"{name}_elevation_A.svg", f"{name}_elevation_C.svg", f"{name}_plan.svg"])
-    on_disk = sorted(f for f in os.listdir(os.path.join(ROOT, "output", name))
-                     if f.endswith(".svg") and not f.startswith("nest_"))
-    check("and on disk: no Run drawing, no wall B", on_disk, svgs)
+    on_disk = sorted(f for f in os.listdir(os.path.join(ROOT, "output", name, "drawings"))
+                     if f.endswith(".svg"))
+    check("and on disk, in drawings/: no Run drawing, no wall B", on_disk, svgs)
+    check("the export's folders", sorted(os.listdir(os.path.join(ROOT, "output", name))),
+          ["cutlist", "drawings", "nesting"])
+    toast = page.locator("#toast").text_content()
+    check("the toast names output/<job>/ and the folders written",
+          (f"output/{name}/" in toast, "cutlist/" in toast, "nesting/" in toast,
+           "drawings/" in toast), (True, True, True, True))
     check("no console errors", errors, [])
     ctx.close()
     browser.close()

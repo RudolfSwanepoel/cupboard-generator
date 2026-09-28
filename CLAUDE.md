@@ -45,10 +45,10 @@ real mouse in headless Chromium, `python tools/ui_check_attached.py` the
 attached-panel editor, drags and dialogs, and `python tools/ui_check_restructure.py`
 the UI restructure (tab order, Room -> Plan / Elevation, the Cabinets tab's 3D,
 the attached-panel drag, placing from the unplaced list, export by wall), with
-screenshots into `output/ui_check_restructure/`, and `python tools/ui_check_drawers.py`
+screenshots into `output/_checks/ui_check_restructure/`, and `python tools/ui_check_drawers.py`
 the drawers / runners / supports brief (Supports' counts, Catalogue -> Boards |
 Runners, the runner library and swap, drawer boxes in 3D), screenshots into
-`output/ui_check_drawers/`. All four are optional —
+`output/_checks/ui_check_drawers/`. All four are optional —
 Playwright is the only third-party package anywhere near this app, and only
 those scripts need it — and each says so and exits 0 when it is not installed.
 The cloud machine's Chromium is revision 1194, which is `playwright==1.56.0`.
@@ -74,13 +74,50 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
+**The export folder, organised (28 September 2026, brief
+`Claude outputs/output-folders-brief-2026-09-28.md`, agreed with Rudolf).**
+File locations only: no cut-list, nesting, costing or drawing content moved.
+Benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50);
+`snapshot.py --compare` against the tree before identical. `output/<job>/` is
+now `cutlist/` (the CSVs, `<job>_accepted.txt`), `nesting/` (`nest_<BOARD>.svg`),
+`drawings/` (plan, wall elevations, and the board pictures they name — they
+must sit beside them), `snapshots/` (`<job>_3d_<n>.png`) and `_previous/`.
+**Export clears and rewrites** (ruled): `api._retire_export` moves the last
+export's three folders into `_previous/` (replacing it — one level of undo),
+then writes fresh, so a file it no longer writes (the old Run drawing, a wall
+since unticked) cannot linger; **`snapshots/` is never touched by an export**.
+The reply carries `folders` (per folder, the files), `rel` (`output/<job>/`)
+and `previous`, and the toast names them. `check_elevation.py`
+`ui_restructure()` pins the folders, the move into `_previous/`, a stale file
+not surviving, snapshots untouched and numbered in their own folder. The
+Playwright screenshot folders moved to `output/_checks/<script>/` so they
+cannot collide with a job's folder. Not touched, by Rudolf's choice: the
+legacy root `out/` and the root `snapshot-3d-step0*.json` files; loose files a
+pre-brief export left at the top of `output/<job>/` are also left where they
+are (only the three folders are retired).
+
+**`check_runners.py` read live data — frozen (28 September 2026).** Commit
+f4d87b0 ("New drawer cupboard added to test") changed `jobs/Test.json` (cabinet
+15 added with drawers, cabinet 4's drawers re-set so its criticals cleared, a
+`runners` key written) and `hardware.json` (Gelmar setback 3 -> 2), and five
+checks pinned those live files. **Ruled by Rudolf: setback 2 is right, and a
+runner record in the library is a changeable setting** — so the catalogue check
+now pins the built-in `hardware.SEED` — **setback 2 as well, ruled the same
+day** (only the fallback when the library has lost the record; `LEGACY` and
+the field default stay 3, so no saved job moves) — and asks the live
+`hardware.json` only that the Gelmar record is there. The Test.json checks read
+`tools/fixtures/Test_drawers.json`, Test.json verbatim from the commit before
+f4d87b0 (cabinet 4 at faces 110 / 165 / 220 over boxes 90 / 150 / 200), and so
+does `ui_check_drawers.py --stage offset` (through `load_fixture`, as
+`ui_check_3d.py` does). The fourth time for this lesson.
+
 **Drawers, runners and supports (28 September 2026, brief
 `Claude outputs/drawers-runners-supports-brief-2026-09-28.md`, agreed with
 Rudolf; sketch `drawer-setting-sketch-v2.svg`).** Built in order, Parts 1 to 6,
 each committed with the benchmark unchanged (272 / 59 / 30, 92 pot holes,
 18 / 9 / 6, R28,363.50) and every `check_*.py` green. Exercised in the running
 app with `tools/ui_check_drawers.py` (Playwright, stages per part, screenshots
-into `output/ui_check_drawers/`).
+into `output/_checks/ui_check_drawers/`).
 
 1. **Supports: wording and edge counts** (UI only, no cut-list change). Support
    rows read **Support Material / Edging Material / Edging Colour**; the stored
@@ -109,7 +146,8 @@ into `output/ui_check_drawers/`).
    price per pair captured, written only when there is one), a used-by-saved-
    jobs guard on delete, and **Use for all drawers**. Seed: **Gelmar 45 mm
    full-extension ball-bearing** (`GELMAR45`: 45 high, 13.5 a side, 12.7 rail,
-   300-600, full, 35 kg, lift 5, setback 3). A cabinet names its runner
+   300-600, full, 35 kg, lift 5, setback 3 — **2 since, ruled 28 September
+   2026**). A cabinet names its runner
    (`Cabinet.runner`, written only when set); a new cabinet takes the job's
    first, or the Gelmar seed copied in (`/api/runner-default`). **The length
    is picked over the record's list** (`Standard.pick_runner(depth, lengths)`:
@@ -141,7 +179,8 @@ into `output/ui_check_drawers/`).
    bottom box on a runner standing on the bottom panel); box front flush with
    the carcass front, the runner's length long, the opening less the
    clearance each side wide; outer rails against the sides from the carcass
-   front, `lift` under the box; inner member `setback` 3 behind the box front.
+   front, `lift` under the box; inner member `setback` (Gelmar 2, legacy 3)
+   behind the box front.
    No box position ever moves a face. Worked numbers pinned in
    `check_runners.py` `drawer_setting()`. The divider drag (`drawers.split_pair`,
    `/api/drawer-divider` with the job) now holds each face to box + 21.
@@ -199,7 +238,8 @@ against its OWN face:
 - The divider drag holds each face to its own box + its own offset
   (`split_pair(..., rise, bottom_rise)`, `/api/drawer-divider` with `above` /
   `below`).
-- Test.json (not edited): cabinet 4 at the default offsets — drawers 1-3
+- Test.json (not edited; frozen since as `tools/fixtures/Test_drawers.json`,
+  which is what the checks read): cabinet 4 at the default offsets — drawers 1-3
   `drawer-box-face` (1, 6 and 1 mm over), the top drawer still
   `support-drawer-foul`. Snapshot: only those three messages' wording moved.
   Pinned in `check_runners.py` `drawer_checks()`; `ui_check_drawers.py
@@ -405,6 +445,12 @@ dirty. Nothing else about either changed.
 | Face-stack rules (H − 3 fill, elevation faces, plan faces, door above the stack) | read `drawer_list` | read `Cabinet.outer_drawers` — inner drawers are behind the door |
 | "Box not shorter than its face" (`drawer-box-height`) | Validation | **Retired** — replaced by `drawer-box-face`, a box within its own face at its offset (ruling of 28 Sept) |
 | A drawer box's height above its face | fixed at 21 | **Off.** column in the drawer row (`Drawer.offset`, blank = 21) |
+| Plazaboard CSVs, `<job>_accepted.txt` | `output/<job>/` | `output/<job>/cutlist/` (output-folders brief, 28 Sept) |
+| Sheet layouts `nest_<BOARD>.svg` | `output/<job>/` | `output/<job>/nesting/` (export and `regen_check`) |
+| Plan, wall elevations, their board pictures | `output/<job>/` | `output/<job>/drawings/` |
+| 3D snapshots `<job>_3d_<n>.png` | `output/<job>/` | `output/<job>/snapshots/` — never touched by an export |
+| The last export, when a new one is written | overwritten in place (stale files lingered) | `output/<job>/_previous/`, one level |
+| Playwright screenshots | `output/ui_check_restructure/`, `output/ui_check_drawers/` | `output/_checks/<script>/` |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**
@@ -1148,8 +1194,9 @@ The part card shows a clicked part's cut-list line read from the compute
 reply by the `line` the scene gave, with **Show in cut list** landing on that
 row; a part with no line says why. Layers in 3D are the plan's `S.layers`;
 the 3D Isolate toggle is the plan's isolate. Snapshot saves the view as a PNG
-through `/api/snapshot` into `output/<job>/<job>_3d_<n>.png`, never
-overwriting; the export folder is otherwise untouched.
+through `/api/snapshot` into `output/<job>/snapshots/<job>_3d_<n>.png`,
+numbered in that folder, never overwriting; an export never touches
+`snapshots/`.
 
 ### Moving things in 3D (F6)
 
@@ -1402,11 +1449,12 @@ tools/check_attached.py    attached panels: derived place, attach/detach round t
 tools/ui_check_3d.py       the 3D view in the running app, with a real mouse (Playwright)
 tools/ui_check_attached.py attached panels in the running app (Playwright)
 tools/ui_check_restructure.py  the UI restructure in the running app (Playwright),
-                           with screenshots into output/ui_check_restructure/
+                           with screenshots into output/_checks/ui_check_restructure/
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
                            Test_Build.json, Test_Panels.json (the cut-only panel
                            fixture) and Corner Unit Test.json since 28 September 2026,
-                           beside Test_Build_pre_library.json and Test_legacy_supports.json.
+                           beside Test_Build_pre_library.json and Test_legacy_supports.json;
+                           Test_drawers.json (Test.json before f4d87b0) for check_runners.
 tools/fixture_jobs.py      job_file(name): jobs/ for Test.json, tools/fixtures/ for the
                            rest. Every check and snapshot.py read job files through it.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
@@ -1715,6 +1763,24 @@ one thing dropping loose `nest_*.svg` at the root, and it writes
 `api._safe_name` is still what keeps a job called `../x` from writing outside
 it. The old `out/` stays in `.gitignore` so a stale folder left on a machine
 does not turn up as untracked.
+
+**Inside the job folder, one subfolder per kind of file** (28 September 2026):
+
+| Folder | What | Written by |
+|---|---|---|
+| `cutlist/` | `<job>_<BOARD>.csv`, `<job>_accepted.txt` | `/api/export` |
+| `nesting/` | `nest_<BOARD>.svg` | `/api/export`, `tools/regen_check.py` |
+| `drawings/` | `<job>_plan.svg`, `<job>_elevation_<wall>.svg`, the board pictures they name | `/api/export` |
+| `snapshots/` | `<job>_3d_<n>.png` | `/api/snapshot` only |
+| `_previous/` | the last export's `cutlist/`, `nesting/`, `drawings/`, as they were | `/api/export` |
+
+An export **clears and rewrites**: `api._retire_export` moves the three export
+folders into `_previous/` (replacing whatever it held — one level, nothing
+older), then the export writes fresh. `snapshots/` is not export output and an
+export never touches it. `api.EXPORT_DIRS` names the three. The pictures go in
+`drawings/` because an exported SVG asks for them by bare file name. The
+Playwright scripts' screenshots are under `output/_checks/<script>/`, not
+beside the job folders.
 
 ### A support row: cut from, and edged in
 
@@ -2748,7 +2814,7 @@ about 0.3 s) and keeps the fewest sheets. On the October job it lands on
 Grain-locked panels are never rotated. `NEST_CHOICE` records which heuristic
 won per material; `NEST_REJECTS` lists panels too big for a bare board.
 
-Sheet layouts render to `output/<job>/nest_<material>.svg` — open in any browser.
+Sheet layouts render to `output/<job>/nesting/nest_<material>.svg` — open in any browser.
 
 Worth trying if more yield is wanted: cross-sheet offcut reuse (keep a stock of
 leftovers between jobs), and simulated annealing over the panel order. The

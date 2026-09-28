@@ -1,0 +1,1348 @@
+{
+  "name": "Test",
+  "boards": [
+    "BACK",
+    "BROOKHILL",
+    "WHITEMEL",
+    "GREY"
+  ],
+  "materials": {
+    "WHITEMEL": {
+      "board": "SUPER WHITE MELAMINE 16MM",
+      "name": "SUPER WHITE MELAMINE 16MM",
+      "tape": "WHITE",
+      "thickness": 16,
+      "grain": "plain",
+      "price": 575,
+      "picture": "",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#ffffff"
+    },
+    "BROOKHILL": {
+      "board": "BROOKHILL FUSION",
+      "name": "BROOKHILL FUSION",
+      "tape": "BROOKHILL",
+      "thickness": 16,
+      "grain": "grain",
+      "price": 999,
+      "picture": "Pictures/Brookhill.png",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#c6a65d"
+    },
+    "BACK": {
+      "board": "WHITE MASONITE BACKING 3MM",
+      "name": "WHITE MASONITE BACKING 3MM",
+      "tape": "WHITE",
+      "thickness": 3,
+      "grain": "plain",
+      "price": 310,
+      "picture": "",
+      "has_edging": false,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#ffffff"
+    },
+    "GREY": {
+      "board": "STORMGREY",
+      "name": "STORMGREY",
+      "tape": "Grey",
+      "thickness": 16,
+      "grain": "plain",
+      "price": 1100,
+      "picture": "Pictures/Storm Grey.jpg",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#504f4e"
+    }
+  },
+  "cabinets": [
+    {
+      "number": 1,
+      "width": 600,
+      "height": 2400,
+      "depth": 600,
+      "kind": "tall",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 4,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": []
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 5,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 2,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": null,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "BROOKHILL",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": "PVC WOOD",
+      "door_edge": "2mm WOOD",
+      "drawer_box_edge": "PVC WHITE",
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": 0,
+      "arm_b": 0,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 2,
+      "width": 450,
+      "height": 780,
+      "depth": 570,
+      "kind": "base",
+      "back": "three",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "BROOKHILL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 3,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front"
+          ]
+        }
+      ],
+      "supports": 2,
+      "edged_supports": 0,
+      "white_supports": 2,
+      "shelves": 2,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [
+        "L"
+      ],
+      "has_doors": null,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "BROOKHILL",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": "PVC WOOD",
+      "door_edge": "2mm WOOD",
+      "drawer_box_edge": "PVC WHITE",
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 3,
+      "width": 400,
+      "height": 780,
+      "depth": 570,
+      "kind": "base",
+      "back": "three",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "BROOKHILL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 3,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front"
+          ]
+        }
+      ],
+      "supports": 2,
+      "edged_supports": 0,
+      "white_supports": 2,
+      "shelves": 2,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [
+        "R"
+      ],
+      "has_doors": null,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "BROOKHILL",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": "PVC WOOD",
+      "door_edge": "2mm WOOD",
+      "drawer_box_edge": "PVC WHITE",
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 5,
+      "width": 300,
+      "height": 1100,
+      "depth": 350,
+      "kind": "upper",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 4,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": []
+        }
+      ],
+      "supports": 2,
+      "edged_supports": 0,
+      "white_supports": 2,
+      "shelves": 3,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [
+        "R"
+      ],
+      "has_doors": null,
+      "door_boards": [
+        "GREY"
+      ],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": "GREY",
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": "PVC WOOD",
+      "door_edge": "2mm WOOD",
+      "drawer_box_edge": "PVC WHITE",
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 4,
+      "width": 400,
+      "height": 780,
+      "depth": 570,
+      "kind": "base",
+      "back": "none",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "GREY",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front",
+            "rear"
+          ]
+        }
+      ],
+      "supports": 2,
+      "edged_supports": 0,
+      "white_supports": 2,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": false,
+      "door_boards": [
+        "GREY"
+      ],
+      "drawers": [
+        {
+          "face_height": 110,
+          "box_height": 90,
+          "base": "board",
+          "mode": "share",
+          "share": 1,
+          "box_board": null,
+          "face_board": null
+        },
+        {
+          "face_height": 165,
+          "box_height": 150,
+          "base": "board",
+          "mode": "share",
+          "share": 1.5,
+          "box_board": null,
+          "face_board": null
+        },
+        {
+          "face_height": 220,
+          "box_height": 200,
+          "base": "board",
+          "mode": "share",
+          "share": 2,
+          "box_board": null,
+          "face_board": null
+        },
+        {
+          "face_height": 276,
+          "box_height": 240,
+          "base": "board",
+          "mode": "share",
+          "share": 2.5,
+          "box_board": null,
+          "face_board": null
+        }
+      ],
+      "has_drawers": true,
+      "exposed_sides": 1,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": "1mm",
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": "PVC WOOD",
+      "door_edge": "2mm WOOD",
+      "drawer_box_edge": "PVC WHITE",
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 6,
+      "width": 550,
+      "height": 780,
+      "depth": 570,
+      "kind": "base",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "BROOKHILL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 3,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "rear"
+          ]
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 2,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 2,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": true,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "BROOKHILL",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 7,
+      "width": 350,
+      "height": 780,
+      "depth": 570,
+      "kind": "base",
+      "back": "none",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "BROOKHILL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 2,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front",
+            "rear"
+          ]
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": false,
+      "door_boards": [],
+      "drawers": [
+        {
+          "face_height": 192,
+          "box_height": 150,
+          "base": "board",
+          "mode": "share",
+          "share": 1,
+          "box_board": "WHITEMEL",
+          "face_board": null
+        },
+        {
+          "face_height": 208,
+          "box_height": 150,
+          "base": "board",
+          "mode": "fixed",
+          "share": 1,
+          "box_board": "WHITEMEL",
+          "face_board": null
+        },
+        {
+          "face_height": 171,
+          "box_height": 150,
+          "base": "board",
+          "mode": "fixed",
+          "share": 1,
+          "box_board": "WHITEMEL",
+          "face_board": null
+        },
+        {
+          "face_height": 200,
+          "box_height": 150,
+          "base": "board",
+          "mode": "fixed",
+          "share": 1,
+          "box_board": "WHITEMEL",
+          "face_board": null
+        }
+      ],
+      "has_drawers": true,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "BROOKHILL",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 8,
+      "width": 600,
+      "height": 2400,
+      "depth": 586,
+      "kind": "panel",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": false,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "BROOKHILL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "panel": {
+        "board": "BROOKHILL",
+        "orientation": "end",
+        "a": 586,
+        "b": 780,
+        "grain_along": "b",
+        "edge_kind": "",
+        "edge_board": "",
+        "edge_long": 2,
+        "edge_short": 2
+      },
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 9,
+      "width": 600,
+      "height": 2400,
+      "depth": 500,
+      "kind": "panel",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": false,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "BROOKHILL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "panel": {
+        "board": "BROOKHILL",
+        "orientation": "end",
+        "a": 616,
+        "b": 2400,
+        "grain_along": "b",
+        "edge_kind": "1mm",
+        "edge_board": "",
+        "edge_long": 2,
+        "edge_short": 2
+      },
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 10,
+      "width": 600,
+      "height": 2400,
+      "depth": 500,
+      "kind": "panel",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": false,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "BROOKHILL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "panel": {
+        "board": "BROOKHILL",
+        "orientation": "end",
+        "a": 616,
+        "b": 2400,
+        "grain_along": "b",
+        "edge_kind": "1mm",
+        "edge_board": "",
+        "edge_long": 2,
+        "edge_short": 2
+      },
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 12,
+      "width": 600,
+      "height": 2400,
+      "depth": 500,
+      "kind": "panel",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": false,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "BROOKHILL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "panel": {
+        "board": "GREY",
+        "orientation": "end",
+        "a": 616,
+        "b": 2400,
+        "grain_along": "b",
+        "edge_kind": "1mm",
+        "edge_board": "GREY",
+        "edge_long": 2,
+        "edge_short": 2
+      },
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 11,
+      "width": 600,
+      "height": 2400,
+      "depth": 600,
+      "kind": "tall",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 4,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": []
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 5,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 2,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": true,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    },
+    {
+      "number": 13,
+      "width": 600,
+      "height": 2400,
+      "depth": 500,
+      "kind": "tall",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 4
+        }
+      ],
+      "supports": 4,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": true,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "BROOKHILL",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "mitre",
+      "arm_a": 1000,
+      "arm_b": 1000,
+      "face_a": 600,
+      "face_b": 600,
+      "corner_hand": "L",
+      "arm_shelves": 6,
+      "arm_shelf_depth": 450,
+      "corner_unit": true
+    },
+    {
+      "number": 14,
+      "width": 0,
+      "height": 0,
+      "depth": 0,
+      "kind": "panel",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [],
+      "supports": 0,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 0,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": null,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "panel": {
+        "board": "GREY",
+        "orientation": "end",
+        "a": 366,
+        "b": 1100,
+        "grain_along": "b",
+        "edge_kind": "1mm",
+        "edge_board": "",
+        "edge_long": 1,
+        "edge_short": 1,
+        "attached_to": 5,
+        "at_x": -16,
+        "at_y": -16,
+        "at_z": 0
+      },
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
+    }
+  ],
+  "loose": [],
+  "room": {
+    "name": "Test",
+    "ceiling": 2600,
+    "offset_depth": 600,
+    "closed": false,
+    "walls": [
+      {
+        "id": "A",
+        "length": 4000,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "B",
+        "length": 3000,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      }
+    ]
+  },
+  "placements": [
+    {
+      "cabinet": 1,
+      "wall": "B",
+      "x": 1632,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 2,
+      "wall": "A",
+      "x": 830,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 3,
+      "wall": "A",
+      "x": 1280,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 4,
+      "wall": "A",
+      "x": 1680,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 5,
+      "wall": "A",
+      "x": 2680,
+      "z": 1398,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 6,
+      "wall": "A",
+      "x": 2430,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 7,
+      "wall": "A",
+      "x": 2080,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 8,
+      "wall": "A",
+      "x": 814,
+      "z": 100,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 9,
+      "wall": "B",
+      "x": 1616,
+      "z": 100,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 10,
+      "wall": "B",
+      "x": 2232,
+      "z": 100,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 11,
+      "wall": "B",
+      "x": 1000,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 12,
+      "wall": "A",
+      "x": 2980,
+      "z": 100,
+      "flip": false,
+      "layer": null
+    },
+    {
+      "cabinet": 13,
+      "wall": "B",
+      "x": 0,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    }
+  ],
+  "acceptances": [
+    {
+      "check": "tip-up",
+      "where": "13",
+      "reason": "leg will be installed after tilt",
+      "fingerprint": "height 2400 · depth 1000 · legs 100 · setback 50 · underside 100 · ceiling 2600"
+    }
+  ]
+}
