@@ -6,7 +6,8 @@ The drawers / runners / supports brief of 28 September 2026. Holds:
 
   * Part 2 — the runner catalogue. `hardware.json` holds the Gelmar record,
     and the built-in seed is as ruled (45 high, 13.5 a side, 12.7 rail,
-    300-600, full, 35 kg, lift 5, setback 3) — the library's copy is a setting
+    300-600, full, 35 kg, lift 5, setback 2 — ruled 28 September 2026, it was
+    3 in the brief) — the library's copy is a setting
     Rudolf edits, so its values are not pinned; a job saved before the
     catalogue names no runner and is cut on the built-in LEGACY record
     (350 / 450 / 500), so the October job and Test.json as it stood then —
@@ -89,13 +90,13 @@ def catalogue():
     lib = H.load()
     g = H.find(lib, H.SEED_ID)
     check("hardware.json carries the Gelmar seed", g is not None, True)
-    # The SEED is what the brief ruled; the library's copy is a changeable
-    # setting (Rudolf set its setback to 2, 28 September 2026), so the live
+    # The SEED is as ruled (setback 2 since 28 September 2026, 3 in the brief);
+    # the library's copy is a changeable setting, so the live
     # file is asked only that the record is there — never what it holds.
     s = H.SEED
     check("  the seed as ruled", (s.height, s.side_clearance, s.rail_thickness, s.lengths, s.extension,
                                   s.capacity_kg, s.lift, s.setback, s.type),
-          (45, 13.5, 12.7, [300, 350, 400, 450, 500, 550, 600], "full", 35, 5, 3,
+          (45, 13.5, 12.7, [300, 350, 400, 450, 500, 550, 600], "full", 35, 5, 2,
            "side-mount ball-bearing"))
     raw = json.load(open(H.LIBRARY, encoding="utf-8"))
     check("  in a `runners` list, room left beside it for hinges and handles", isinstance(raw.get("runners"), list), True)
@@ -288,7 +289,7 @@ def drawer_setting():
     check("  the outer rail stands on the bottom panel, 45 high: z 16-61", d3["rail"][2:], (16, 61))
     check("  against each carcass side, 12.7 thick", d3["rails"], [(16, 28.7), (600 - 16 - 12.7, 584)])
     check("  its front at the carcass front, the runner's length back", d3["rail"][:2], (0, 500))
-    check("  the inner member starts 3 behind the box front", d3["inner_y0"], 3)
+    check("  the inner member starts the seed's setback, 2, behind the box front", d3["inner_y0"], 2)
     check("  the space behind: 560 - 500 = 60 (>= 40)", 560 - d3["box"][3], 60)
     check("  full extension: travel = 500", d3["travel"], 500)
     check("drawer 2: the face 2 above drawer 3's, 235-475", L[2]["face"], (235, 475))

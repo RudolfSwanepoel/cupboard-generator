@@ -102,8 +102,9 @@ f4d87b0 ("New drawer cupboard added to test") changed `jobs/Test.json` (cabinet
 `runners` key written) and `hardware.json` (Gelmar setback 3 -> 2), and five
 checks pinned those live files. **Ruled by Rudolf: setback 2 is right, and a
 runner record in the library is a changeable setting** — so the catalogue check
-now pins the built-in `hardware.SEED` (still setback 3, as the brief ruled; it
-is only the fallback when the library has lost the record) and asks the live
+now pins the built-in `hardware.SEED` — **setback 2 as well, ruled the same
+day** (only the fallback when the library has lost the record; `LEGACY` and
+the field default stay 3, so no saved job moves) — and asks the live
 `hardware.json` only that the Gelmar record is there. The Test.json checks read
 `tools/fixtures/Test_drawers.json`, Test.json verbatim from the commit before
 f4d87b0 (cabinet 4 at faces 110 / 165 / 220 over boxes 90 / 150 / 200), and so
@@ -145,7 +146,8 @@ into `output/_checks/ui_check_drawers/`).
    price per pair captured, written only when there is one), a used-by-saved-
    jobs guard on delete, and **Use for all drawers**. Seed: **Gelmar 45 mm
    full-extension ball-bearing** (`GELMAR45`: 45 high, 13.5 a side, 12.7 rail,
-   300-600, full, 35 kg, lift 5, setback 3). A cabinet names its runner
+   300-600, full, 35 kg, lift 5, setback 3 — **2 since, ruled 28 September
+   2026**). A cabinet names its runner
    (`Cabinet.runner`, written only when set); a new cabinet takes the job's
    first, or the Gelmar seed copied in (`/api/runner-default`). **The length
    is picked over the record's list** (`Standard.pick_runner(depth, lengths)`:
@@ -177,7 +179,8 @@ into `output/_checks/ui_check_drawers/`).
    bottom box on a runner standing on the bottom panel); box front flush with
    the carcass front, the runner's length long, the opening less the
    clearance each side wide; outer rails against the sides from the carcass
-   front, `lift` under the box; inner member `setback` 3 behind the box front.
+   front, `lift` under the box; inner member `setback` (Gelmar 2, legacy 3)
+   behind the box front.
    No box position ever moves a face. Worked numbers pinned in
    `check_runners.py` `drawer_setting()`. The divider drag (`drawers.split_pair`,
    `/api/drawer-divider` with the job) now holds each face to box + 21.
