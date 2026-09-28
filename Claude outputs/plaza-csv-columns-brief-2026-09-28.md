@@ -1,109 +1,132 @@
-# Brief — Plazaboard CSV: columns under the right headings (28 September 2026)
+# Brief — Plazaboard CSV: right columns, right numbers, right edging names (28 September 2026)
 
-Agreed with Rudolf in Cowork. Run AFTER the output-folders brief is merged
-(never two sessions on the repo at once).
+Agreed with Rudolf in Cowork, point by point. Run AFTER the output-folders brief
+is merged (never two sessions on the repo at once).
 
-## The fault
+## Reference
 
-`export_plaza.rows_for` writes `[i, p.label, length, ...]` under the header
-`Component, Material, Length, ...`. So Component holds a line number, Material
-holds the panel designation (101, 107…), and the board is never written.
-CLAUDE.md says three times that "Plazaboard's CSV writes the Component column
-from `Panel.label`"; the code does not. Correct CLAUDE.md with the fix.
+`Sample Plaza cutlist and quote/` in the repo root: Plazaboard's own files for
+the October job (`RUDOLPH MEL/BRK/MAS 211025.csv`) and quotation
+VRG_SOQ497999. Checked:
 
-## The reference
-
-`Sample Plaza cutlist and quote/` (in the repo root): Plazaboard's own files for
-the October job (`RUDOLPH MEL/BRK/MAS 211025.csv`) and quotation VRG_SOQ497999.
-What they show, checked:
-
-- Header is byte-identical to `export_plaza.HEADER`.
-- **Component** = their line number, 1…n, per file.
-- **Material** = `SUPWHTTXT` on every line of all three files (their template
+- The header is byte-identical to `export_plaza.HEADER`.
+- **Component** = their line (item) number, 1…n, per file.
+- **Material** = `SUPWHTTXT` on every line of all three files (a template
   default; it does not name the board).
-- They carry no customer designation at all.
-- They do **not** merge identical lines: one line per line sent, repeats kept
+- No customer designation anywhere.
+- **Identical lines are NOT merged.** One line per line sent, repeats kept
   (MEL lines 1, 10, 15, 22 are the same 2400×500 side from four cabinets).
-- Their files are padded with empty template rows to 236 lines. Do not copy that.
+  Line counts match ours: 112/35/19 vs 111/35/19.
+- Edging is keyed as BROOKHILL (`PVC BROOKHILL`, `2MM BROOKHILL`; quote:
+  `EDGING-IMP BROOKHILL`), never WOOD.
+- Padded to 236 rows with empty template lines. Do not copy that.
 - A zero edging total is written `0`. Ours writes `0.0`.
 
-## Ruled by Rudolf
+## Part 1 — columns
 
-New column layout: one column added in FRONT, everything else exactly
-Plazaboard's template.
+**The fault.** `export_plaza.rows_for` writes `[i, p.label, length, ...]` under
+`Component, Material, Length, ...`. Component gets a line number, Material gets
+the panel designation, and the board is never written. (CLAUDE.md says three
+times that Component is written from `Panel.label`; the code does not. Correct
+CLAUDE.md.)
+
+**Ruled.** One column added in FRONT; everything after it is Plazaboard's
+template exactly.
 
 | # | Heading | Content |
 |---|---------|---------|
-| 1 | `Customer Number` | the panel designation — `Panel.label`, Rudolf's convention (cabinet + 2-digit code, a/b/c when one code covers different panels) |
-| 2 | `Component` | line number, 1…n, restarting in each file (Plazaboard's logic) |
-| 3 | `Material` | the **board id** (WHITEMEL, BROOKHILL, BACK…), the file's board |
-| 4… | `Length` … `total edging`, `total edging` | unchanged, same order, same meaning |
+| 1 | `Customer Number` | the panel designation, `Panel.label`, Rudolf's convention |
+| 2 | `Component` | Plazaboard's item number, 1…n, restarting in each file |
+| 3 | `Material` | the board **id** (WHITEMEL, BROOKHILL, BACK…) |
+| 4… | `Length` … `total edging`, `total edging` | unchanged, same order and meaning |
 
-Worked example (Test.json, WHITEMEL file):
+Keep columns 2–19's header text byte-identical to Plazaboard's (`JOB NO `
+with its trailing space, the four blank headings, both `total edging`).
+`holes` stays the line total; the edging-metres formula is untouched. Zero
+edging total written `0`; non-zero unchanged. No padding rows.
 
-```
-Customer Number,Component,Material,Length,Width,qty,Invoice Number,JOB NO ,Grain,edge l,edge w,holes,edge mat,,,,,total edging,total edging
-101,1,WHITEMEL,2400,600,2,,,0,1,,,PVC WOOD,1,,,,4.94,5
-204a,8,WHITEMEL,418,100,1,,,0,1,,,PVC BROOKHILL,1,,,,0.488,12
-204b,9,WHITEMEL,418,100,1,,,0,1,,,PVC WHITE,1,,,,0.488,13
-204c,10,WHITEMEL,418,100,3,,,0,,,,,,,,,0,13
-```
+## Part 2 — one number per panel, no merging
 
-(Line numbers and running totals illustrative. They follow from the rows as generated.)
+**Ruled:**
 
-### One designation, one panel
-
-1. **Same designation, identical in every field** → one line, qty summed.
-   Test.json: `417` ×4 in BACK becomes one line, qty 4.
-2. **Same designation, different panels** (different edging, edge counts,
-   size…) → each gets its own suffix **when the panel is born**, through
-   `engine.born_distinct` (edging and banded-edge counts become part of the
-   signature it reads). Never renamed afterwards (hard rule 2). Found today:
-   - Test.json: 204, 304, 404, 604, 704, 1504 (supports, WHITEMEL), 1517 (BACK).
+1. **No merging.** Every line stays a line, as Plazaboard keeps them.
+2. **Identical panels share a number**, one line each: `1517, 1517, 1517`
+   with items 1, 2, 3. Lines that differ ONLY in qty are the same panel.
+3. **Different panels under one code get their own letter**, and identical
+   ones share it. Test.json 404 (1× PVC Grey; 3× identical PVC WHITE, one long
+   edge; 1× PVC WHITE, two long edges) reads `404a, 404b, 404b, 404b, 404c`,
+   items still 1–5.
+4. "Different" = any difference except qty: size, board, grain, edge counts,
+   holes, edging name.
+5. Letters are given **when the panel is born**, through `engine.born_distinct`
+   (edging name and banded-edge counts join the signature it reads). Nothing is
+   renamed afterwards (hard rule 2). The Cut list tab, validation and the CSV
+   show the same numbers.
+6. Found today with the same number on different panels:
+   - Test.json WHITEMEL: 204, 304, 404, 604, 704, 1504. BACK: 1517 is qty-only,
+     so it keeps its number.
    - **October benchmark: 104, 404, 2704, 2804, 2904, 3004** (supports that
-     differ only in edging). They will read 104a/104b etc. Panel counts, pot
-     holes, boards and cost do not move. Rudolf has been told.
-3. Do both where the cut list is made, so the Cut list tab, validation and the
-   CSV all show the same lines. Do not do it in the export alone.
-4. The D13 warning ("a designation on two different panels") should then
-   never fire on a generated job. Pin that.
+     differ only in edging). They get letters. Panel counts, pot holes, boards
+     and cost do not move. Rudolf agreed.
+7. The D13 warning (a designation on two different panels) must then never
+   fire on a generated job. Pin it.
 
-### Keep
+## Part 3 — edging names: the Boards tab, and nothing else
 
-- Header text for columns 2–19 byte-identical to Plazaboard's (including
-  `JOB NO ` with its trailing space, the four blank headings, the two
-  `total edging`).
-- `holes` stays the line total; edging keeps the 70 mm trim formula.
-- Edging names exactly as the Boards tab generates them (hard rule 6). Their
-  file shows `2MM BROOKHILL` uppercase, but that is their re-keying. Do not
-  change case.
-- Zero edging total written `0`, not `0.0` (matches their file). Non-zero
-  unchanged (`4.94`, `10.55`, `7.136`).
-- No padding rows.
+**Ruled:** the **Edging Name** on the board's Boards-tab record is the name
+used, on the order AND on screen. They can never differ. Today they do, for
+two reasons. Fix both:
+
+1. **The Edging Colour dropdowns show the board id** (WHITEMEL, GREY), not the
+   Edging Name (WHITE, Grey). Every edging-colour dropdown — supports, doors,
+   drawers, blind panel, Panel design — shows the board's Edging Name. Where
+   two boards in the project share one (WHITEMEL and BACK are both WHITE),
+   add the id in brackets, `WHITE (WHITEMEL)`, so they can be told apart. The
+   stored value is still the board id; only the label changes. The resolved
+   name beside each control ("Ordered as…") is the same text the CSV writes.
+2. **Old typed edging names are retired everywhere**, the October job
+   included (Rudolf ruled). `carcass_edge`, `door_edge`, `drawer_box_edge` and
+   any other flat edging string on a cabinet are no longer read; the edging
+   follows the board picked, through `tape_for`. Test.json cabinets carry
+   `"carcass_edge": "PVC WOOD"` / `"door_edge": "2mm WOOD"` on five cabinets.
+   These now resolve through their exterior board (BROOKHILL) to `PVC
+   BROOKHILL` / `2mm BROOKHILL`. Leave the keys in the files (store round
+   trip); just stop reading them. Remove the editor's "override — clear it"
+   offer.
+3. **Bespoke and loose panels** (October fixture) store `edge_material` as a
+   typed literal such as `2mm WOOD`. Resolve it the same way: a literal whose
+   name matches no project board's Edging Name is read as the same kind in
+   the board it was cut beside. On the October job WOOD is the exterior board,
+   BROOKHILL. Say in the report exactly which panels this touched.
+4. The output: edge mat = kind (`PVC` / `1mm` / `2mm`) + the board's Edging
+   Name, exactly as typed on the Boards tab (case included: GREY's is `Grey`,
+   so `PVC Grey`). No hardcoded edging anywhere (hard rule 6).
+5. `model.WHITE_EDGE` and any other stored edging token: read the Boards
+   record instead, or say why one must stay.
+6. Update CLAUDE.md where it says the October order "was edged with" PVC WOOD
+   / 2mm WOOD. That is what the sheet sent said; Plazaboard keyed it as
+   Brookhill, and the job now reads BROOKHILL.
 
 ## Checks
 
-- Benchmark unchanged: 272 / 59 / 30 panels (qty sums), 92 pot holes,
-  18 / 9 / 6 boards, R28,363.50. Every `check_*.py` green.
+- Benchmark: 272 / 59 / 30 panels, 92 pot holes, 18 / 9 / 6 boards,
+  R28,363.50. Edging cost is by kind, so it must not move. If it does, stop
+  and report.
+- Every `check_*.py` green. Checks that pinned WOOD names or override
+  behaviour are updated to the new rule, each named in the report.
 - New `tools/check_export.py`:
-  - the header is `Customer Number` + Plazaboard's header byte for byte (read
-    from the sample CSV itself);
-  - column 1 is every line's designation, column 2 is 1…n, column 3 is the
-    file's board id;
-  - no designation appears on two lines in any file, for the benchmark,
-    Test.json and every fixture;
-  - Test.json's 417 is one line of qty 4, and 204 is 204a/b/c;
-  - the October export matches Plazaboard's files line for line on
-    Length/Width/qty/Grain/edge l/edge w/holes/edge flags/edging metres,
-    **as a multiset**, apart from the edging names (WOOD vs BROOKHILL) and
-    the eight cabinets listed in `regen_check.KNOWN`. List any other
-    difference; don't hide it.
-- `snapshot.py --compare`: only labels and CSV content move. Say which.
-
-## Side note for CLAUDE.md, not a change
-
-Plazaboard's October files are edged **BROOKHILL** (`PVC BROOKHILL`,
-`2MM BROOKHILL`; quote: `EDGING-IMP BROOKHILL`), not WOOD. CLAUDE.md says the
-order "was edged with" PVC WOOD / 2mm WOOD. That is what the sheet sent to
-them said; Plazaboard keyed it as their Brookhill edging. Correct the wording.
-Leave the frozen job's tokens alone.
+  - header = `Customer Number` + Plazaboard's header byte for byte, read from
+    the sample CSV itself;
+  - column 1 = designation, column 2 = 1…n per file, column 3 = the file's
+    board id;
+  - no number sits on two DIFFERENT panels (qty aside) in any file, for the
+    benchmark, Test.json and every fixture;
+  - Test.json: 404 → 404a, 404b ×3, 404c; 1517 ×3 unchanged; no WOOD anywhere;
+  - every edge mat in every export is kind + an Edging Name that exists on
+    the Boards record for that project;
+  - **October vs Plazaboard's files**: as a multiset per board, Length / Width
+    / qty / Grain / edge l / edge w / holes / edge flags / edging metres /
+    edge mat (case-insensitive) match, apart from the eight cabinets in
+    `regen_check.KNOWN`. List every other difference; don't hide any.
+- `snapshot.py --compare`: only labels, edging names and CSV content move.
+  Say which.
