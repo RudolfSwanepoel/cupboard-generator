@@ -84,7 +84,31 @@
       "support_rows": [
         {
           "edge": "none",
-          "qty": 4
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 4,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": []
         }
       ],
       "supports": 4,
@@ -159,7 +183,7 @@
         },
         {
           "edge": "none",
-          "qty": 2,
+          "qty": 3,
           "board": "WHITEMEL",
           "cut_board": "WHITEMEL",
           "type": "back",
@@ -217,7 +241,40 @@
       "kind": "base",
       "back": "three",
       "template": "standard",
-      "support_rows": [],
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "BROOKHILL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 3,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front"
+          ]
+        }
+      ],
       "supports": 2,
       "edged_supports": 0,
       "white_supports": 2,
@@ -265,12 +322,36 @@
       "height": 1100,
       "depth": 350,
       "kind": "upper",
-      "back": "three",
+      "back": "four",
       "template": "standard",
       "support_rows": [
         {
           "edge": "none",
-          "qty": 4
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 4,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": []
         }
       ],
       "supports": 2,
@@ -293,7 +374,7 @@
       "drawers": [],
       "has_drawers": null,
       "exposed_sides": 0,
-      "carcass_board": "GREY",
+      "carcass_board": "WHITEMEL",
       "exterior_board": "GREY",
       "back_board": "BACK",
       "exterior_tape": "2mm",
@@ -322,9 +403,66 @@
       "height": 780,
       "depth": 570,
       "kind": "base",
-      "back": "three",
+      "back": "none",
       "template": "standard",
-      "support_rows": [],
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "GREY",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front",
+            "rear"
+          ]
+        }
+      ],
       "supports": 2,
       "edged_supports": 0,
       "white_supports": 2,
@@ -414,19 +552,35 @@
       "support_rows": [
         {
           "edge": "none",
-          "qty": 4
+          "qty": 1,
+          "board": "BROOKHILL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
         },
         {
           "edge": "none",
           "qty": 1,
           "board": "WHITEMEL",
-          "kind": "pvc"
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
         },
         {
           "edge": "none",
-          "qty": 1,
+          "qty": 3,
           "board": "WHITEMEL",
-          "kind": "1mm"
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "rear"
+          ]
         }
       ],
       "supports": 4,
@@ -491,7 +645,7 @@
         {
           "edge": "none",
           "qty": 1,
-          "board": "BROOKHILL",
+          "board": "WHITEMEL",
           "kind": "pvc",
           "cut_board": "WHITEMEL",
           "type": "top_rear",
@@ -504,10 +658,22 @@
           "qty": 2,
           "board": "WHITEMEL",
           "kind": "pvc",
-          "cut_board": "BROOKHILL",
+          "cut_board": "WHITEMEL",
           "type": "back",
           "edges": [
             "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front",
+            "rear"
           ]
         }
       ],
@@ -854,7 +1020,31 @@
       "support_rows": [
         {
           "edge": "none",
-          "qty": 4
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 0,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 4,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": []
         }
       ],
       "supports": 4,
@@ -951,6 +1141,69 @@
       "arm_shelves": 6,
       "arm_shelf_depth": 450,
       "corner_unit": true
+    },
+    {
+      "number": 14,
+      "width": 0,
+      "height": 0,
+      "depth": 0,
+      "kind": "panel",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [],
+      "supports": 0,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 0,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": null,
+      "door_boards": [],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "GREY",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "panel": {
+        "board": "GREY",
+        "orientation": "end",
+        "a": 366,
+        "b": 1100,
+        "grain_along": "b",
+        "edge_kind": "1mm",
+        "edge_board": "",
+        "edge_long": 1,
+        "edge_short": 1,
+        "attached_to": 5,
+        "at_x": -16,
+        "at_y": -16,
+        "at_z": 0
+      },
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null
     }
   ],
   "loose": [],
