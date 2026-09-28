@@ -39,7 +39,7 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
                               material_record, material_thickness, tape_for)
 from cabinetgen.render import pictures_drawn, plan_svg, wall_elevation_svg
 from cabinetgen import scene as SCENE
-from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout,
+from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, drawer_rise,
                              attach_offsets, attach_snap_points, attached_panels, attached_placement,
                              cabinet_by_number, host_of, new_attached_panel,
                              arm_shelf_length, arm_shelf_max_depth,
@@ -1501,10 +1501,16 @@ def drawer_divider(payload):
     projects onto a wall track, and posts the millimetre it reached. The two
     heights come back from drawers.split_pair; the rest of the stack is untouched.
     """
+    # With the job and cabinet posted, each face is held clear of its own box
+    # as the drawer setting hangs it (`room.drawer_rise`); without, as before.
+    rise = 0
+    if payload.get("job") is not None and payload.get("index") is not None:
+        _job_, cab = _cabinet_of(payload)
+        rise = drawer_rise(cab, STANDARD)
     top, bottom = split_pair(int(payload["top"]), int(payload["bottom"]),
                              int(payload["at"]),
                              int(payload.get("top_box") or 0),
-                             int(payload.get("bottom_box") or 0))
+                             int(payload.get("bottom_box") or 0), rise=rise)
     return {"ok": True, "top": top, "bottom": bottom}
 
 

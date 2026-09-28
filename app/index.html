@@ -4799,7 +4799,8 @@ async function endFaceDrag() {
   if (!a || !b) return;
   const r = await post("/api/drawer-divider", {
     top: a.face_height, bottom: b.face_height, at: d.at,
-    top_box: a.box_height, bottom_box: b.box_height});
+    top_box: a.box_height, bottom_box: b.box_height,
+    job: S.job, index: S.job.cabinets.indexOf(d.cab)});
   if (!r.ok) { toast(r.error, true); return; }
   a.mode = "fixed"; a.face_height = r.top;
   b.mode = "fixed"; b.face_height = r.bottom;

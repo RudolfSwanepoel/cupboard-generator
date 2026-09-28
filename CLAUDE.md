@@ -131,6 +131,24 @@ into `output/ui_check_drawers/`).
    shortest. Runner pairs are priced off the job's copy in `hardware` on the
    compute reply and on Catalogue -> Runners — **not** in the Plazaboard
    estimate. `tools/check_runners.py` pins it.
+3. **The drawer setting** (sketch v2, confirmed by Rudolf). `room.drawer_layout`
+   is THE one place a box is placed; `drawer_box_tops` (the support-foul
+   critical), the drawer checks and the 3D all read it. In the supports
+   spec's carcass frame: faces spaced exactly as always (bottom face flush with
+   the carcass underside, `stack_gap` 2 between, the door 3 short at the top);
+   then each box hangs off its OWN face, its bottom `room.drawer_rise` — the
+   bottom panel 16 + the runner's `lift` 5 = **21** — above the face bottom (the
+   bottom box on a runner standing on the bottom panel); box front flush with
+   the carcass front, the runner's length long, the opening less the
+   clearance each side wide; outer rails against the sides from the carcass
+   front, `lift` under the box; inner member `setback` 3 behind the box front.
+   No box position ever moves a face. Worked numbers pinned in
+   `check_runners.py` `drawer_setting()`. The divider drag (`drawers.split_pair`,
+   `/api/drawer-divider` with the job) now holds each face to box + 21.
+   **Snapshot moved, as the brief says it must:** Test.json cabinet 4's top
+   box (90 in a 110 face at 667) now reads 688-778, into the band under its
+   Top Front / Top Rear at 764 — a new `support-drawer-foul` CRITICAL. Before,
+   the box stood on its face bottom (757) and cleared it. Nothing else moved.
 
 **UI restructure, Session 2 — Fresh look, first round (28 September 2026,
 the same brief, "styling only").** One `<style>` block in `app/index.html`

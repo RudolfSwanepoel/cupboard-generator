@@ -1587,22 +1587,86 @@ def support_layout(cab, std: Standard = STANDARD, materials: dict = None) -> Lis
     return out
 
 
-def drawer_box_tops(cab, std: Standard = STANDARD) -> List[Tuple[int, int]]:
-    """(drawer number, top of its box) for each drawer, up the carcass.
+def drawer_rise(cab, std: Standard = STANDARD) -> int:
+    """How far every box's bottom stands above its own face's bottom: the
+    bottom panel (t) plus the runner's lift — 16 + 5 = 21. The bottom box sits
+    on a runner standing on the bottom panel, and every box above hangs off its
+    own face by the same figure (drawer setting, 28 September 2026)."""
+    return std.board_t + int(round(cab.runner_or_legacy.lift))
 
-    Faces stack from the bottom as `solid_parts` and the elevation stack them,
-    the last drawer lowest, and a box stands on its own face's bottom edge —
-    the rule `drawers.split_pair` already holds a box to (a box as tall as its
-    face shows above the front). Nothing here is a cut size.
+
+def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List[dict]:
+    """Where every drawer's face, box and runners stand — THE one place a box is
+    placed (28 September 2026, sketch `drawer-setting-sketch-v2.svg`, confirmed
+    by Rudolf). The support check, the drawer checks and the 3D all read this,
+    so none of them can disagree.
+
+    In the supports spec's carcass-local frame: x across from the left side, y
+    from the FRONT face of the sides towards the back, z up from the underside
+    of the sides. Order of work, as ruled:
+
+      1. the FACES are spaced exactly as they always were — the bottom face
+         flush with the carcass underside, `stack_gap` between faces, the last
+         drawer in the list lowest; a door (if any) above them;
+      2. each box hangs off its own face: its bottom is the face bottom plus
+         the bottom drawer's offset — the bottom panel (t) plus the runner's
+         `lift` — so the bottom box sits on a runner standing on the bottom
+         panel, lifted 5: 16 + 5 = 21 above the carcass underside;
+      3. the checks read the result. No box position ever moves a face.
+
+    The box front is flush with the carcass front (y 0) and the face overlays
+    it; the box is the runner's length long (the drawer side as cut, off
+    `geometry`); its outside width is the opening less the runner's side
+    clearance each way. Each runner's outer rail is against its carcass side,
+    its front at the carcass front edge, its bottom `lift` below the box's; the
+    inner member starts `setback` behind the box front. Per drawer, in stack
+    order (drawer 1 is the top of the list):
+
+        n, face (z0, z1), box (x0, x1, y0, y1, z0, z1), rails [(x0, x1)],
+        rail (y0, y1, z0, z1), inner_y0, travel, inner
+
+    Worked (W 600, 3 drawers of face 240 / 240 / 233, boxes 150, legacy or
+    Gelmar, 560 deep): drawer 3 (the lowest) face 0-233, box z 21-171, box x
+    29.5-570.5, y 0-500, rails z 16-61; drawer 2 face 235-475, box z 256-406.
+    Pinned in check_runners.py. Nothing here is a cut size.
     """
+    stack = cab.drawer_list
+    if cab.is_panel or not stack:
+        return []
+    mats = MATERIALS if materials is None else materials
+    g = geometry(cab, std, mats)
+    xs = [x for x, _ in g.footprint]
+    W = max(xs) - min(xs)
+    t = std.board_t
+    rr = cab.runner_or_legacy
+    length = g.runner or 0
+    clear = rr.side_clearance
+    offset = drawer_rise(cab, std)
+    rail_t = rr.rail_thickness
     out = []
     at = 0
-    stack = cab.drawer_list
-    for i in range(len(stack) - 1, -1, -1):
+    for i in range(len(stack) - 1, -1, -1):          # the bottom face is the last
         d = stack[i]
-        out.append((i + 1, at + int(d.box_height or 0)))
-        at += int(d.face_height or 0) + std.stack_gap
-    return sorted(out)
+        fh, bh = int(d.face_height or 0), int(d.box_height or 0)
+        bz0 = at + offset
+        out.append({
+            "n": i + 1, "index": i, "inner": False,
+            "face": (at, at + fh),
+            "box": (t + clear, W - t - clear, 0, length, bz0, bz0 + bh),
+            "rails": [(t, t + rail_t), (W - t - rail_t, W - t)],
+            "rail": (0, length, bz0 - rr.lift, bz0 - rr.lift + rr.height),
+            "inner_y0": rr.setback,
+            "travel": rr.travel(length) if length else 0,
+            "base": d.base,
+        })
+        at += fh + std.stack_gap
+    return sorted(out, key=lambda u: u["n"])
+
+
+def drawer_box_tops(cab, std: Standard = STANDARD, materials: dict = None) -> List[Tuple[int, int]]:
+    """(drawer number, top of its box) for each drawer, up the carcass — read
+    off `drawer_layout`, the one place a box is placed."""
+    return [(u["n"], u["box"][5]) for u in drawer_layout(cab, std, materials)]
 
 
 def back_supports_fit(cab, std: Standard = STANDARD, materials: dict = None) -> Tuple[int, int]:

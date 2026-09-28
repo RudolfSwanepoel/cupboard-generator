@@ -160,7 +160,8 @@ def graduated_shares(n: int, std=STANDARD) -> List[float]:
 
 
 def split_pair(top_h: int, bottom_h: int, at: int, top_box: int = 0,
-               bottom_box: int = 0, gap: int = None, std=STANDARD) -> tuple:
+               bottom_box: int = 0, gap: int = None, std=STANDARD,
+               rise: int = 0) -> tuple:
     """Move the join between two faces, leaving the rest of the stack alone.
 
     The pair's own span — the two faces and the gap between them — does not
@@ -172,12 +173,20 @@ def split_pair(top_h: int, bottom_h: int, at: int, top_box: int = 0,
     as its face shows above the drawer front, and the validator calls it a
     critical. With no box heights given the join may go anywhere in the span.
 
+    `rise` is how far a box's bottom stands above its own face's bottom
+    (`room.drawer_rise`: the bottom panel plus the runner's lift, 21 — the
+    drawer setting of 28 September 2026). Given, each face is held to at least
+    its box plus that, so the box top never passes its own face top — the
+    ruled `drawer-box-face` critical.
+
         split_pair(200, 300, 250)   ->   (250, 250)
         split_pair(200, 300, 10, 90, 116)   ->   (91, 409)
+        split_pair(200, 300, 10, 90, 116, None, STANDARD, 21)   ->   (111, 389)
     """
     g = _gap(gap, std)
     span = int(top_h) + g + int(bottom_h)
-    lo, hi = top_box + 1, span - g - (bottom_box + 1)
+    need = max(int(rise or 0), 1)
+    lo, hi = top_box + need, span - g - (bottom_box + need)
     if lo > hi:                      # the pair cannot house both boxes; split it evenly
         lo, hi = 0, span - g
     top = max(lo, min(int(at), hi))

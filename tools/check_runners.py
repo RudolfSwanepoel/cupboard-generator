@@ -266,13 +266,60 @@ def checks_and_api():
     check("a legacy cabinet writes no runner key", "runner" in job_to_dict(job_of(box(runner="")))["cabinets"][0], False)
 
 
+def drawer_setting():
+    """Part 3: the sketch's worked numbers, off `room.drawer_layout`."""
+    from cabinetgen.room import drawer_box_tops, drawer_layout, support_layout
+    print("\nthe drawer setting (sketch v2): faces as always, each box hung off its face")
+    c = box(runner=H.SEED_ID)
+    j = job_of(c)
+    L = {u["n"]: u for u in drawer_layout(c, STANDARD, j.materials)}
+    check("three drawers, numbered top to bottom", sorted(L), [1, 2, 3])
+    d3 = L[3]
+    check("drawer 3 (the lowest): face flush with the carcass underside, 0-233", d3["face"], (0, 233))
+    check("  its box bottom = bottom panel 16 + lift 5 = 21, top 21 + 150", d3["box"][4:], (21, 171))
+    check("  the box front flush with the carcass front, as long as the runner (500 in 560)", d3["box"][2:4], (0, 500))
+    check("  the box's outside width: 13.5 in from each side (541 wide)", (d3["box"][0], d3["box"][1], d3["box"][1] - d3["box"][0]),
+          (29.5, 570.5, 541))
+    check("  the outer rail stands on the bottom panel, 45 high: z 16-61", d3["rail"][2:], (16, 61))
+    check("  against each carcass side, 12.7 thick", d3["rails"], [(16, 28.7), (600 - 16 - 12.7, 584)])
+    check("  its front at the carcass front, the runner's length back", d3["rail"][:2], (0, 500))
+    check("  the inner member starts 3 behind the box front", d3["inner_y0"], 3)
+    check("  the space behind: 560 - 500 = 60 (>= 40)", 560 - d3["box"][3], 60)
+    check("  full extension: travel = 500", d3["travel"], 500)
+    check("drawer 2: the face 2 above drawer 3's, 235-475", L[2]["face"], (235, 475))
+    check("  its box hung off its own face: 235 + 21 = 256, to 406", L[2]["box"][4:], (256, 406))
+    check("  its runner hangs 5 under its box: 251-296", L[2]["rail"][2:], (251, 296))
+    check("drawer 1 (top): face 477-717, box 498-648", (L[1]["face"], L[1]["box"][4:]), ((477, 717), (498, 648)))
+    check("the faces fill H - 3 exactly as before: top face at 717 = 720 - 3", L[1]["face"][1], 720 - STANDARD.door_height_gap)
+    check("drawer_box_tops reads the same layout", drawer_box_tops(c, STANDARD, j.materials), [(1, 648), (2, 406), (3, 171)])
+    shallow = box(runner=H.SEED_ID, depth=460)
+    L = {u["n"]: u for u in drawer_layout(shallow, STANDARD, j.materials)}
+    check("a 460 deep carcass on Gelmar: a 400 box, 60 behind", (L[3]["box"][3], 460 - L[3]["box"][3]), (400, 60))
+    leg = box(runner="", depth=460)
+    L = {u["n"]: u for u in drawer_layout(leg, STANDARD, j.materials)}
+    check("  the same carcass on legacy: 350", L[3]["box"][3], 350)
+
+    print("\nthe support-foul critical reads the same layout")
+    rows = [Support(type="front", qty=1), Support(type="top_rear", qty=1), Support(type="back", qty=2)]
+    # 720 high: the band under the Top Front runs 688-704 (the rail 704-720)
+    c = box(runner=H.SEED_ID, support_rows=rows,
+            drawers=[Drawer(face_height=200, box_height=180), Drawer(face_height=515, box_height=150)])
+    j = job_of(c)
+    top = dict(drawer_box_tops(c, STANDARD, j.materials))[1]
+    check("drawer 1: face 517-717, box 517 + 21 = 538 up to 718", top, 718)
+    got = issues(j, "support-drawer-foul")
+    check("  into the band under the Top Front (above 688): critical", (len(got), got and "718" in got[0].message), (1, True))
+    c = box(runner=H.SEED_ID, support_rows=rows,
+            drawers=[Drawer(face_height=200, box_height=150), Drawer(face_height=515, box_height=150)])
+    check("  a 150 box tops out at 688, exactly the band's underside: clear",
+          (dict(drawer_box_tops(c, STANDARD, j.materials))[1], issues(job_of(c), "support-drawer-foul")), (688, []))
+
+
 def main():
     catalogue()
     legacy_holds()
     checks_and_api()
-    extra = globals().get("more")
-    if extra:
-        extra()
+    drawer_setting()
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + "; ".join(FAILS))

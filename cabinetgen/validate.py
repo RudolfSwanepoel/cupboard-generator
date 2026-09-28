@@ -765,7 +765,7 @@ def _support_layout(job: Job):
             band = std.board_t
             under = max(u["z1"] for u in flats) - band
             names = " / ".join(sorted({SUPPORT_TYPE_LABEL[u["type"]] for u in flats}))
-            for i, top in drawer_box_tops(c, std):
+            for i, top in drawer_box_tops(c, std, job.materials):
                 if top > under:
                     out.append(Issue(CRITICAL, str(c.number),
                                      f"drawer {i} box reaches {top} up the carcass, into the "
