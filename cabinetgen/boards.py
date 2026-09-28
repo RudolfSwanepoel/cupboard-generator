@@ -118,7 +118,7 @@ class Board:
         return self.thickness <= 3
 
     def tape_name(self, kind: str) -> str:
-        """`PVC WOOD`, `2mm WOOD` ... or '' when the board does not offer that
+        """`PVC BROOKHILL`, `2mm Grey` ... or '' when the board does not offer that
         edging or there is nothing to build a name from."""
         token = self.token
         if not token or kind not in self.offered:

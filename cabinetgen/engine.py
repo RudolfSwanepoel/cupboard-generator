@@ -3,11 +3,12 @@
 Every dimension here comes from Standard. There are no bare numbers in this file
 except panel codes and the 100 mm support width, which is a fixed detail.
 """
+from collections import Counter
 from dataclasses import replace
 from typing import List
 
 from .model import (BLIND_CODE, MATERIALS, PANEL_CODE, Cabinet, Job, Panel,
-                    material_thickness,
+                    material_thickness, panel_signature, resolve_edging,
                     grain_of, resolve_board, tape_for)
 from .room import (arm_shelf_depth, arm_shelf_length, blind_door_width,
                    blind_panel_height, gaps, mitre_blank, mitre_legs,
@@ -208,7 +209,7 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     # by its other name is read as that name (see model.resolve_board)
     if cab.is_panel:
         return [panel_of(cab, mats)]
-    bespoke = resolved(cab.bespoke, mats)
+    bespoke = resolved(cab.bespoke, mats, cab.exterior_board)
     if cab.template == "none":
         return bespoke
     # A corner unit is its own construction, not a straight box wearing a
@@ -452,19 +453,45 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     return born_distinct(P, bespoke)
 
 
-def resolved(panels: List[Panel], materials: dict) -> List[Panel]:
-    """The job's own panels with each board id as this job carries it.
+def resolved(panels: List[Panel], materials: dict, beside=None) -> List[Panel]:
+    """The job's own panels with each board id as this job carries it, and each
+    typed edging name read through the Boards record.
 
-    A panel whose id already resolves to itself is returned as the very same
-    object; only one naming a board by its other id (DECOR for BROOKHILL, or the
-    other way) comes back as a copy with that one field changed. The job is never
+    A panel whose id already resolves to itself, and whose edging is already a
+    project board's own name, is returned as the very same object. One naming a
+    board by its other id (DECOR for BROOKHILL, or the other way) comes back as
+    a copy with that field changed; one whose edging names no project board's
+    Edging Name (the October job's `2mm WOOD`) comes back edged the same kind in
+    the board it was cut beside — `beside`, a board id or a function of the
+    panel giving one (model.resolve_edging, 28 September 2026). The job is never
     touched and no designation moves.
     """
     out = []
     for p in panels:
         mat = resolve_board(materials, p.material)
-        out.append(p if mat == p.material else replace(p, material=mat))
+        near = beside(p) if callable(beside) else beside
+        edge = resolve_edging(materials, p.edge_material, near)
+        if mat == p.material and edge == p.edge_material:
+            out.append(p)
+        else:
+            out.append(replace(p, material=mat, edge_material=edge))
     return out
+
+
+def loose_beside(job: Job):
+    """The board a loose panel's typed edging is read beside: the exterior board
+    of the cabinet it is numbered under, when the job has one, and otherwise the
+    exterior board most of the job's cabinets take (the first, on a tie) — a
+    loose panel belongs to no cabinet, and the fronts it sits among are those.
+    None on a job with no cabinets, which leaves the name as typed."""
+    cabs = {c.number: c for c in job.cabinets if not c.is_panel}
+    common = Counter(c.exterior_board for c in cabs.values()).most_common(1)
+    fallback = common[0][0] if common else None
+
+    def of(p):
+        c = cabs.get(p.cabinet)
+        return c.exterior_board if c else fallback
+    return of
 
 
 def born_distinct(generated: List[Panel], bespoke: List[Panel]) -> List[Panel]:
@@ -478,17 +505,21 @@ def born_distinct(generated: List[Panel], bespoke: List[Panel]) -> List[Panel]:
     carries distinct designations from the day it is defined, and the validator
     says so if it does not.
     """
+    # "Different" is any difference but the qty — board, size, grain, edge
+    # counts, pot holes, edging name (model.panel_signature, ruled 28 September
+    # 2026). Identical lines share a letter and stay separate lines: nothing is
+    # merged, as Plazaboard keep them.
     sigs: dict = {}
     for p in generated + list(bespoke):
         group = sigs.setdefault(p.label, [])
-        sig = (p.material, p.length, p.width)
+        sig = panel_signature(p)
         if sig not in group:
             group.append(sig)
     out = []
     for p in generated:
         group = sigs[p.label]
         if len(group) > 1:
-            idx = group.index((p.material, p.length, p.width))
+            idx = group.index(panel_signature(p))
             p.code = p.code + chr(ord("a") + idx)      # p is new: this names it, it renames nothing
         out.append(p)
     return out + list(bespoke)
@@ -575,7 +606,7 @@ def generate_job(job: Job) -> List[Panel]:
     job.bind_runners()
     for cab in job.cabinets:
         out.extend(generate_cabinet(cab, job.std, job.materials))
-    out.extend(resolved(job.loose, job.materials))
+    out.extend(resolved(job.loose, job.materials, loose_beside(job)))
     # room parts are born here too, so they are named here too: 011a, 011b
     out.extend(born_distinct(resolved(room_panels(job) + plinth_panels(job),
                                       job.materials), []))

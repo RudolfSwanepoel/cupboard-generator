@@ -11,7 +11,7 @@ from .engine import front_stack_check, generate_cabinet, mitre_door_width
 from .export_plaza import effective_price
 from .model import (PANEL_ORIENTATIONS, TAPE_PREFIX, WHITE_TOKEN, Cabinet, Job,
                     Panel, grain_of, is_thin, material_board, material_offers,
-                    material_thickness, material_token, tape_for)
+                    material_thickness, material_token, panel_signature, tape_for)
 from .room import (above_ceiling, arm_shelf_depth, arm_shelf_max_depth,
                    attached_carcass_overlaps, cabinet_by_number, host_of,
                    blind_door_width, blind_opening, blocked_openings,
@@ -36,10 +36,11 @@ EDGING_REF = "EDGING"
 # and deliberately not a limit.
 BOARD_GUIDELINE = 5
 
-ALLOWED_EDGE = {
-    "", "PVC WOOD", "PVC WHITE", "PVC SOLID", "PVC BROOKHILL",
-    "1mm WOOD", "2mm WOOD", "1mm SOLID", "2mm SOLID", "2mm BROOKHILL", "1mm BROOKHILL",
-}
+# The edging names allowed on a cut list whatever the project carries: none.
+# Every other name is what the job's own boards generate (_edge_materials).
+# The settled list of WOOD / SOLID / BROOKHILL names that used to sit here was
+# hardcoded edging, and retired with the typed overrides (28 September 2026).
+ALLOWED_EDGE = {""}
 
 
 @dataclass
@@ -307,14 +308,25 @@ def _labels_unique(panels):
     designation as another of a different size. The fix is in the job, not here:
     the cut list never renames a panel.
     """
-    sizes = defaultdict(set)
+    # "Different" is any difference but the qty (ruled 28 September 2026):
+    # board, size, grain, edge counts, pot holes, edging name — the signature
+    # born_distinct letters generated panels by, so this never fires on one.
+    sigs = defaultdict(list)
     for p in panels:
-        sizes[p.label].add((p.material, p.length, p.width))
+        sig = panel_signature(p)
+        if sig not in sigs[p.label]:
+            sigs[p.label].append(sig)
+
+    def said(sig):
+        m, l, w, grain, el, ew, holes, edge = sig
+        return (f"{m} {l}x{w}" + (" grain" if grain else "") +
+                (f" {edge or 'unedged'} {el}L/{ew}S" if (el or ew or edge) else "") +
+                (f" {holes} holes" if holes else ""))
     return [Issue(WARNING, lab,
                   f"one designation on {len(v)} different panels: " +
-                  ", ".join(f"{m} {l}x{w}" for m, l, w in sorted(v)) +
+                  ", ".join(said(x) for x in v) +
                   " — give each its own in the job", "D13")
-            for lab, v in sizes.items() if len(v) > 1]
+            for lab, v in sigs.items() if len(v) > 1]
 
 
 def _edge_materials(job, panels, covered=frozenset()):
@@ -699,18 +711,21 @@ def _boards_and_tapes(job: Job):
                                  f"{what} {board!r} is not among the boards this "
                                  f"project selected ({', '.join(job.board_ids)})"))
 
-        wants = [("carcass_edge", c.carcass_edge, c.exterior_board, "pvc",
+        # A flat edging string in the job file (carcass_edge, door_edge,
+        # drawer_box_edge) is no longer read (28 September 2026), so every one
+        # of these is asked of its board.
+        wants = [("carcass_edge", c.exterior_board, "pvc",
                   "the fronts of its sides, top, bottom, shelves and dividers")]
         if c.drawer_list:
-            wants.append(("drawer_box_edge", c.drawer_box_edge, c.carcass_board, "pvc",
+            wants.append(("drawer_box_edge", c.carcass_board, "pvc",
                           "its drawer boxes"))
         if c.door_count or c.exposed_sides:
-            wants.append(("door_edge", c.door_edge,
+            wants.append(("door_edge",
                           c.door_edge_board or c.exterior_board,
                           c.door_edge_kind or c.exterior_tape,
                           "its doors and exposed panels"))
         if c.drawer_list:
-            wants.append(("drawer_face_edge", c.door_edge,
+            wants.append(("drawer_face_edge",
                           c.drawer_edge_board or c.door_edge_board or c.exterior_board,
                           c.drawer_edge_kind or c.door_edge_kind or c.exterior_tape,
                           "its drawer faces"))
@@ -719,11 +734,9 @@ def _boards_and_tapes(job: Job):
         # edging. Its one banded edge is the one reached past every time the
         # cupboard is opened, so going out unedged in silence is not an option.
         if c.corner_kind == "blind" and c.blind_width:
-            wants.append(("blind_edge", None, c.blind_panel_board,
+            wants.append(("blind_edge", c.blind_panel_board,
                           c.blind_edge_thickness, "its blind panel"))
-        for field, override, board, thickness, bands in wants:
-            if override is not None:
-                continue                   # this cabinet was told what to use
+        for field, board, thickness, bands in wants:
             if board not in (mats or {}) or tape_for(mats, board, thickness):
                 continue
             name = material_board(mats, board)
@@ -744,8 +757,8 @@ def _boards_and_tapes(job: Job):
                 out.append(Issue(WARNING, str(c.number),
                                  f"{name!r} has no name to build "
                                  f"edging from, so {field} cannot be generated for "
-                                 f"{bands} — give the board an edging name in the "
-                                 f"library, or override the edging on this cabinet"))
+                                 f"{bands} — give the board an Edging Name in the "
+                                 f"library, or choose another board here"))
         if c.exterior_tape not in ("1mm", "2mm"):
             out.append(Issue(WARNING, str(c.number),
                              f"exterior edging {c.exterior_tape!r} is neither 1mm nor "

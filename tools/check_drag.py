@@ -346,7 +346,7 @@ def corner_checks():
             only(generate_cabinet(c), "Blind Panel").length,
             only(generate_cabinet(c), "Blind Panel").width)
            for c in (one_mm, two_mm)],
-          [("1mm WOOD", 2368, 500), ("2mm WOOD", 2368, 500)])
+          [("1mm BROOKHILL", 2368, 500), ("2mm BROOKHILL", 2368, 500)])
 
     print("\nand it is in the one list of which fields hold a board")
     named = blind_cab(1, blind_board="ONLYHERE")

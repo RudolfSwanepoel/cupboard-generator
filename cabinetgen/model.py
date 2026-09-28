@@ -45,10 +45,15 @@ MATERIALS = {
         "name": "SUPER WHITE MELAMINE CHIP 9X6X16MM",
         "tape": "WHITE", "thickness": 16, "grain": "plain", "price": 575.0,
     },
+    # Edging Name BROOKHILL, as the library record has it (ruled 28 September
+    # 2026). The October order's sheet said "WOOD"; Plazaboard keyed it as
+    # Brookhill (their CSV: PVC BROOKHILL, 2MM BROOKHILL; the quote:
+    # EDGING-IMP BROOKHILL), and the job now reads BROOKHILL. The metres per
+    # kind, and so the cost, are exactly what they were.
     "BROOKHILL": {
         "board": "BROOKHILL FUSION CHIP",
         "name": "BROOKHILL FUSION CHIP",
-        "tape": "WOOD", "thickness": 16, "grain": "grain", "price": 999.0,
+        "tape": "BROOKHILL", "thickness": 16, "grain": "grain", "price": 999.0,
     },
     "BACK": {
         "board": "IMPORTED WHITE DECOR 9X6X3MM",
@@ -172,13 +177,79 @@ def is_thin(materials: dict, key: str) -> bool:
 
 
 def tape_for(materials: dict, key: str, thickness: str) -> str:
-    """`PVC WOOD`, `2mm WOOD` ... generated, never mapped. '' when the board does
-    not offer that edging, or has nothing to generate a name from — either way the
-    validator names it rather than guessing."""
+    """`PVC BROOKHILL`, `2mm Grey` ... generated, never mapped: the kind, then the
+    board's Edging Name exactly as typed on the Boards tab, case included. ''
+    when the board does not offer that edging, or has nothing to generate a name
+    from — either way the validator names it rather than guessing."""
     token = material_token(materials, key)
     if not token or thickness not in material_offers(materials, key):
         return ""
     return f"{TAPE_PREFIX[thickness]} {token}"
+
+
+def edging_label(materials: dict, key: str) -> str:
+    """What an Edging Colour dropdown shows for a board: its Edging Name, the
+    very text the order carries after the kind (ruled 28 September 2026).
+
+    Where another board in the project has the same Edging Name — WHITEMEL and
+    BACK are both WHITE — the id follows in brackets, `WHITE (WHITEMEL)`, so the
+    two can be told apart. The stored value is still the board id; only what is
+    shown changes. A board with no Edging Name shows its id.
+    """
+    token = material_token(materials, key)
+    if not token:
+        return key
+    same = [k for k in (materials or {})
+            if k != key and material_token(materials, k).upper() == token.upper()]
+    return f"{token} ({key})" if same else token
+
+
+def edging_parts(name: str):
+    """A typed edging name taken apart: (kind, the rest), kind one of
+    TAPE_PREFIX's keys, matched without regard to case (Plazaboard key `2MM`).
+    (None, name) when it starts with no kind this app knows."""
+    head, _, rest = str(name or "").strip().partition(" ")
+    for kind, prefix in TAPE_PREFIX.items():
+        if head.upper() == prefix.upper() and rest.strip():
+            return kind, rest.strip()
+    return None, str(name or "")
+
+
+def resolve_edging(materials: dict, name: str, beside: str) -> str:
+    """A TYPED edging name — a bespoke or loose panel's `edge_material` — read
+    through the Boards record, as every generated edging is (28 September 2026).
+
+    Its kind is kept. Its colour is the project board whose Edging Name it
+    carries (case aside), written exactly as that board has it; a name that
+    matches no project board's Edging Name — the October job's `2mm WOOD`, a
+    name that order's sheet used and no board carries — is read as the same
+    kind in `beside`, the board it was cut beside (the cabinet's exterior
+    board, which is what front edges take). '' when that board does not offer
+    the kind, which the validator then names. Blank, and anything that does not
+    start with a kind, comes back as it is.
+    """
+    kind, token = edging_parts(name)
+    if kind is None:
+        return name
+    named = [key for key in (materials or {})
+             if material_token(materials, key).upper() == token.upper()]
+    for key in named:
+        got = tape_for(materials, key, kind)
+        if got:
+            return got
+    if named:
+        return ""           # the board it names does not offer the kind
+    return tape_for(materials, beside, kind) if beside else name
+
+
+def panel_signature(p: "Panel") -> tuple:
+    """What makes two cut-list lines the SAME panel: everything but the qty —
+    board, size, grain, banded-edge counts, pot holes and edging name (ruled 28
+    September 2026). Lines with one signature share a designation; one code
+    over several signatures is lettered at birth (engine.born_distinct), and
+    the D13 warning is the same question asked of the finished list."""
+    return (p.material, p.length, p.width, p.grain, p.edge_l, p.edge_w,
+            p.pot_holes, p.edge_material)
 
 
 def material_price(materials: dict, key: str) -> float:
@@ -410,13 +481,14 @@ def support_types_for(kind: str, corner_kind: str = "") -> List[str]:
 
 # What a legacy "white-edged" support row was asking for.
 #
-# Edging is no longer stated anywhere but the Boards record (20 September 2026),
-# so this is NOT an answer any more — nothing returns it as an edging name. It
-# is kept as the description of what such a row meant, and `white_edge_board`
-# finds the project board that actually means it. Every job written so far
-# carries the white melamine that does, so none of them move.
-WHITE_EDGE = "PVC WHITE"
-WHITE_TOKEN = "WHITE"      # the token a legacy 'white' row was always asking for
+# Edging is stated nowhere but the Boards record (20 September 2026), and the
+# old WHITE_EDGE constant ("PVC WHITE") is gone (28 September 2026): nothing
+# returned it any more. This token has to stay, and it is not an edging name: a
+# legacy 'white' row names no board, only the word, so the one way to find the
+# board it meant is to look for the project board whose Edging Name IS that
+# word — which is reading the Boards record, not stating an edging. Every job
+# written so far carries the white melamine that answers it, so none move.
+WHITE_TOKEN = "WHITE"      # the Edging Name a legacy 'white' row was asking for
 
 
 def white_edge_board(materials: dict, prefer: str = "") -> str:
@@ -425,7 +497,7 @@ def white_edge_board(materials: dict, prefer: str = "") -> str:
     The first board in the project that offers PVC under the token WHITE — which
     for every job written so far is the white melamine the row already meant, so
     nothing quoted moves. '' when the project has no such board, and then the
-    caller falls back to WHITE_EDGE and the validator says why.
+    row has no edging name and the validator says why.
     """
     keys = list(materials or {})
     if prefer and prefer in keys:
@@ -438,8 +510,8 @@ def white_edge_board(materials: dict, prefer: str = "") -> str:
 
 
 # The cut-list code an independent panel takes. Ruled 20 September 2026 (Q2):
-# code 08, the existing Exposed Panel, with the role "Panel". Plazaboard's CSV
-# writes the Component column from `Panel.label` alone - the digits, e.g. 1508 -
+# code 08, the existing Exposed Panel, with the role "Panel". The CSV carries
+# `Panel.label` alone - the digits, e.g. 1508, in its Customer Number column -
 # so a new code would have to be signed off with them exactly as 10 and 11 still
 # have to be, and it would say nothing on the order that 08 does not. The role
 # is what tells the two apart in the app's own cut list. One constant, so a code
@@ -447,8 +519,8 @@ def white_edge_board(materials: dict, prefer: str = "") -> str:
 PANEL_CODE = "08"
 
 # A blind corner's flush panel, ruled 22 September 2026 (Q3), on exactly the
-# reasoning above: Plazaboard's CSV writes the Component column from
-# `Panel.label`, so a code of its own would need their sign-off as 10 and 11
+# reasoning above: the CSV carries `Panel.label` (Customer Number) and never
+# the role, so a code of its own would need their sign-off as 10 and 11
 # still do, and would say nothing on the order that 08 does not. The role is
 # what tells it from an exposed end in the app's own cut list. One constant, so
 # a code they do sign off later is one edit.
@@ -633,11 +705,12 @@ class Cabinet:
     drawer_carcass_board: Optional[str] = None
     drawer_face_board: Optional[str] = None
 
-    # ---- edge tapes: derived from the boards, overridable per cabinet -------
-    # None means "derive it" (see carcass_tape / door_tape / drawer_box_tape).
-    # A string is an override for this cabinet only. The three are kept separate
-    # because they are genuinely different tapes: the door edge is 2 mm and the
-    # carcass edge is thin PVC, same colour, different thickness and price.
+    # ---- retired typed edging names (28 September 2026) --------------------
+    # A job file may still carry a flat edging string here ("PVC WOOD", "2mm
+    # WOOD" on five Test.json cabinets). They are kept so the file round-trips
+    # byte for byte, and NOTHING READS THEM: the edging follows the board picked,
+    # through tape_for, so the name on the order is the Boards-tab Edging Name
+    # and the screen and the order can never say two different things.
     carcass_edge: Optional[str] = None
     door_edge: Optional[str] = None
     drawer_box_edge: Optional[str] = None
@@ -1105,14 +1178,12 @@ class Cabinet:
         return (not self.support_rows
                 and self.supports - self.edged_supports - self.white_supports < 0)
 
-    # ---- tapes: the override if there is one, otherwise the board's ---------
+    # ---- tapes: always the board's (typed overrides retired 28 Sept 2026) ---
 
     def carcass_tape(self, materials: dict) -> str:
         """PVC in the EXTERIOR board's colour. It bands the front edges of the
         sides, top and bottom, and the front edges of shelves and dividers, which
         were ruled to match the front rather than the box (14 Sept 2026)."""
-        if self.carcass_edge is not None:
-            return self.carcass_edge
         return tape_for(materials, self.exterior_board, "pvc")
 
     def door_tape(self, materials: dict) -> str:
@@ -1120,11 +1191,9 @@ class Cabinet:
 
         Both are chosen in the Doors section; with neither chosen it is the
         cabinet's exterior tape thickness in the exterior board's colour, which
-        is what this always was. The string override still wins where a job file
-        carries one.
+        is what this always was. A flat `door_edge` string in the job file is
+        no longer read (28 September 2026).
         """
-        if self.door_edge is not None:
-            return self.door_edge
         kind = self.door_edge_kind or self.exterior_tape
         if kind not in EXTERIOR_TAPES:
             kind = "2mm"
@@ -1137,8 +1206,6 @@ class Cabinet:
         doors' choice and then to the cabinet's, so a job written before the two
         were separable is edged exactly as it was quoted.
         """
-        if self.door_edge is not None:
-            return self.door_edge
         kind = self.drawer_edge_kind or self.door_edge_kind or self.exterior_tape
         if kind not in EXTERIOR_TAPES:
             kind = "2mm"
@@ -1198,8 +1265,6 @@ class Cabinet:
         """PVC in the DRAWER CARCASS board's colour: drawer sides and fronts, and
         the white-edged supports. With no drawer carcass chosen that is the
         cabinet's carcass board, which is what it always was."""
-        if self.drawer_box_edge is not None:
-            return self.drawer_box_edge
         return tape_for(materials, self.drawer_carcass, "pvc")
 
     def support_row_cut_board(self, row: "Support") -> str:
@@ -1272,8 +1337,6 @@ class Cabinet:
     def drawer_box_tape_of(self, materials: dict, d: "Drawer") -> str:
         """PVC in one drawer's own box board colour — the same rule as
         drawer_box_tape, for a drawer whose box may differ from the cabinet's."""
-        if self.drawer_box_edge is not None:
-            return self.drawer_box_edge
         return tape_for(materials, self.box_board_of(d), "pvc")
 
     @property

@@ -2091,15 +2091,6 @@ $("editor").addEventListener("click", (e) => {
     if (i >= 0) { selectCabinet(i, {isolate: false}); renderList(); }
     return;
   }
-  if (e.target.closest("[data-clearedge]")) {
-    const c = S.job.cabinets[S.sel];
-    c.door_edge = null;
-    // Repainted once the engine has answered, not before: the note being
-    // cleared is the engine's report of the override, so painting now would
-    // show it again off the reply that still carried it.
-    schedule();
-    return;
-  }
   const rm = e.target.closest("[data-drm]");
   if (rm) {
     const c = S.job.cabinets[S.sel];
@@ -3085,9 +3076,9 @@ function renderSupports() {
     const lost = colour && usable.indexOf(colour) < 0;
     return `<select data-sup="${i}" data-sk="board" title="what colour the edging is"
       ${kind ? "" : "disabled"}>
-      ${lost ? `<option value="${esc(colour)}" selected>${esc(colour)} (not offered)</option>` : ""}
+      ${lost ? `<option value="${esc(colour)}" selected>${esc(edgeLabel(colour))} (not offered)</option>` : ""}
       ${usable.map((k) => `<option value="${esc(k)}"${k === colour ? " selected" : ""}>${
-        esc(k)}</option>`).join("")}</select>`;
+        esc(edgeLabel(k))}</option>`).join("")}</select>`;
   };
 
   if (!supportsTyped(c)) {
@@ -3098,7 +3089,7 @@ function renderSupports() {
         <td class="n">${i + 1}</td>
         <td>${esc(r.eff_cut_board || "")}</td>
         <td>${esc(r.eff_kind ? (pre[r.eff_kind] || r.eff_kind) : "not edged")}</td>
-        <td>${esc(r.eff_kind ? (r.eff_board || "") : "")}</td>
+        <td>${esc(r.eff_kind ? edgeLabel(r.eff_board || "") : "")}</td>
         <td>${r.qty}</td>
         <td class="note" data-suprow="${i}"></td>
       </tr>`).join("");
@@ -3368,6 +3359,16 @@ function anyBoardOffers(kind) {
   return ((S.res && S.res.boards) || []).some((k) => boardOffers(k, kind));
 }
 
+// What an Edging Colour dropdown shows for a board: its Edging Name off the
+// Boards tab, the very text the order writes after the kind, with the id in
+// brackets where two project boards share one — "WHITE (WHITEMEL)". The server
+// works the label out (edging_label); the stored value is still the board id
+// (28 September 2026).
+function edgeLabel(key) {
+  const m = ((S.res && S.res.materials) || {})[key] || {};
+  return m.edging_label || key || "";
+}
+
 // One edging control: how thick, and what colour. 'which' is "door" or "drawer".
 // Both dropdowns are filtered by the Boards tab: a kind no board offers is not
 // listed, and the colour list holds only boards that offer the chosen kind. A
@@ -3376,12 +3377,10 @@ function anyBoardOffers(kind) {
 function edgingHTML(c, which, opts) {
   const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
   const e = (g && g.edging && g.edging[which]) || {};
-  const mats = (S.res && S.res.materials) || {};
   const keys = (S.res && S.res.boards) || [];
   const all = (opts && opts.kinds) || S.def.exterior_tapes || ["1mm", "2mm"];
   const kind = c[which + "_edge_kind"] || e.kind || "2mm";
   const board = c[which + "_edge_board"] || e.board || c.exterior_board;
-  const override = g && g.edge_override;
   const pre = S.def.edging_prefix || {};
 
   // Nothing in the project can be edged at all: say what to do, rather than
@@ -3406,10 +3405,10 @@ function edgingHTML(c, which, opts) {
           `<option value="${esc(k)}"${k === kind ? " selected" : ""}>${esc(k)}</option>`
           ).join("")}</select>
         <select data-edge="${which}" data-ek="board" title="what colour">${
-          boardLost ? `<option value="${esc(board)}" selected>${esc(board || "—")} (not offered)</option>` : ""
+          boardLost ? `<option value="${esc(board)}" selected>${esc(edgeLabel(board) || "—")} (not offered)</option>` : ""
           }${colourKeys.map((k) =>
-          `<option value="${esc(k)}"${k === board ? " selected" : ""}>${esc(k)} — ${
-            esc((mats[k] || {}).board || k)}</option>`).join("")}</select>
+          `<option value="${esc(k)}"${k === board ? " selected" : ""}>${
+            esc(edgeLabel(k))}</option>`).join("")}</select>
         <b data-edgename="${which}" class="${e.name ? "" : (kindLost || boardLost ? "over" : "off")}">${
           esc(e.name || (kindLost || boardLost
             ? `${pre[kind] || kind} not offered by ${board || "that board"}`
@@ -3419,9 +3418,6 @@ function edgingHTML(c, which, opts) {
         This cabinet still asks for an edging its board no longer offers. It is kept
         exactly as it was stored — tick it on the board in the Boards tab, or choose
         another here. The export is blocked until one of those is done.</span>` : ""}
-      ${override ? `<span class="note">This job file names the edging outright as
-        <b>${esc(override)}</b>, and that still wins over the two choices above.
-        <button data-clearedge="1">Clear it</button></span>` : ""}
     </div>`;
 }
 
@@ -3558,11 +3554,11 @@ function renderPanel() {
               k === p.edge_kind ? " selected" : ""}>${esc(pre[k] || k)}</option>`).join("")}
           </select>
           <select data-pk="edge_board" title="what colour" ${p.edge_kind ? "" : "disabled"}>
-            <option value=""${p.edge_board ? "" : " selected"}>(${esc(p.board || "—")})</option>
+            <option value=""${p.edge_board ? "" : " selected"}>(${esc(p.board ? edgeLabel(p.board) : "—")})</option>
             ${colourLost ? `<option value="${esc(colour)}" selected>${
-              esc(colour)} (not offered)</option>` : ""}
+              esc(edgeLabel(colour))} (not offered)</option>` : ""}
             ${colourKeys.map((k) => `<option value="${esc(k)}"${
-              k === p.edge_board ? " selected" : ""}>${esc(k)}</option>`).join("")}
+              k === p.edge_board ? " selected" : ""}>${esc(edgeLabel(k))}</option>`).join("")}
           </select>
           <b data-paneledge="1" class="${(info && info.line.edge_material) ? "" : "off"}">${
             esc((info && info.line.edge_material) || "no edging")}</b>

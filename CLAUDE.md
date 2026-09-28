@@ -36,6 +36,7 @@ python tools/check_scene.py
 python tools/check_supports.py
 python tools/check_attached.py
 python tools/check_runners.py
+python tools/check_export.py
 python tools/snapshot.py --compare baseline.json
 ```
 
@@ -73,6 +74,96 @@ line, and `regen_check` says so rather than failing. Every other figure in this
 list comes out of the engine and is checked on any machine.
 
 ## Status
+
+**The Plazaboard CSV: right columns, right numbers, right edging names (28
+September 2026, brief `Claude outputs/plaza-csv-columns-brief-2026-09-28.md`,
+agreed with Rudolf; reference: Plazaboard's own files for the October job in
+`Sample Plaza cutlist and quote/`).** Benchmark unchanged (272 / 59 / 30, 92 pot
+holes, 18 / 9 / 6, R28,363.50 — the edging is priced by kind, and the metres per
+kind did not move); every `check_*.py` green, twenty-one now with
+`tools/check_export.py`. What it is:
+
+1. **Columns.** The code used to write the item number under `Component` and
+   the designation under `Material`, and never wrote the board — whatever this
+   file said about "Component is written from `Panel.label`" was wrong. Now
+   `export_plaza.HEADER` is **`Customer Number`** (the designation,
+   `Panel.label`) in front of `PLAZA_HEADER`, Plazaboard's template byte for
+   byte (`JOB NO ` with its trailing space, four blank headings, two `total
+   edging`): `Component` is their item number 1…n restarting per file,
+   `Material` the board id. `holes` stays the line total; a zero edging total
+   is written `0` (theirs), not `0.0`; no padding rows.
+2. **One number per panel, no merging.** Every line stays a line. What makes
+   two lines the same panel is `model.panel_signature` — everything but the
+   qty: board, size, grain, edge counts, pot holes, edging name.
+   `engine.born_distinct` letters by it at birth (it used to read board and
+   size only), and D13 asks the same question of the finished list, so it
+   never fires on a generated job (pinned for every job the checks know).
+   Lettered for the first time: October **104, 404, 2704, 2804, 2904, 3004**
+   (supports differing only in edging); Test.json **204, 304, 404, 604, 704,
+   1504** (404 reads `404a, 404b, 404b, 404b, 404c`); 1517 differs only in qty
+   and keeps its number. Letters follow the order the lines are born in, so
+   re-entering Test.json cabinet 7's legacy supports (Front first) swaps
+   704a / 704b — the same lines, the same cost (pinned in `check_supports.py`).
+3. **Edging names: the Boards tab's, and nothing else.** The edge mat is the
+   kind + the board's Edging Name exactly as typed (`PVC Grey`). The flat
+   `carcass_edge` / `door_edge` / `drawer_box_edge` strings are **no longer
+   read** — kept in the file for the byte-for-byte round trip, the editor's
+   "Clear it" offer gone, `/api/compute`'s `edge_override` / `tape_overrides`
+   gone. A bespoke or loose panel's typed `edge_material` goes through
+   `model.resolve_edging` (in `engine.resolved`): kept if it names a project
+   board's Edging Name (case aside, rewritten exactly as the board has it),
+   otherwise the same kind in the board it was cut beside — the cabinet's
+   exterior board (`engine.loose_beside` for a loose panel: the cabinet of that
+   number, else the exterior board most cabinets take). The house `MATERIALS`
+   BROOKHILL token is `BROOKHILL` (was `WOOD`). `model.WHITE_EDGE` is gone;
+   `WHITE_TOKEN` stays and says why (a legacy white row names only the word, so
+   the board is found by its Edging Name). `validate.ALLOWED_EDGE` is `{""}` —
+   the hardcoded WOOD / SOLID names are gone; W10 asks only what the project's
+   boards generate. Every Edging Colour dropdown — doors, drawers, supports,
+   Panel design — shows the board's **Edging Name** (`model.edging_label`,
+   served as `edging_label` on each board: `WHITE (WHITEMEL)` where two boards
+   share one), the stored value still the id. The blind panel's dropdown picks
+   the board it is CUT from (its edging colour follows), so it keeps the board
+   names; its "Ordered as" is the generated name.
+4. **What moved.** October: every `PVC WOOD` / `2mm WOOD` is `PVC BROOKHILL` /
+   `2mm BROOKHILL` (metres 167.082 / 179.272, as before); the typed panels this
+   touched are 305b, 505b, 701a-c, 702, 703, 705, 707, 1301, 1302, 1307, 608 and
+   2408, listed in `check_export.py`. Test.json: cabinets 1-3's WOOD
+   overrides read BROOKHILL, **cabinets 4 and 5's read `Grey`** (their exterior
+   board is GREY — the brief expected BROOKHILL), and **cabinet 4's drawer
+   faces go from `2mm WOOD` to `1mm Grey`**, the 1 mm its Drawers section
+   chose, which the `door_edge` override had been masking; its total R11,316.00
+   → R11,257.50. `Test_Build.json` reads BROOKHILL, total unchanged.
+   `snapshot.py --compare` against the tree before: only designations
+   (`code`), edging names, the edging summary, Test's total, and the edging
+   legend line on the drawings; no issue moved on any job.
+5. **Found on the way, fixed:** the board swap's "each board gains and loses"
+   tally was taken of the before list AFTER the in-place re-derivation had
+   rewritten the bespoke and loose panels under it (the `engine.resolved`
+   identity lesson again): October's MEL -> BROOKHILL read 254 / 77 before,
+   and is the true 272 / 59 now. `board_swap` copies the before list.
+6. **`tools/check_export.py`** pins it: the header off Plazaboard's own CSV;
+   columns 1-3 for every job (benchmark, live Test.json, every fixture); no
+   number on two different panels, read off the files; no WOOD; every edge mat
+   a kind + an Edging Name in that project; the frozen Test.json facts (404,
+   1517, the dropdown labels) off **`tools/fixtures/Test_export.json`** (Test.json
+   at 201d360 — a check never reads live workshop data); and **the October job
+   against Plazaboard's files**, as a multiset per board outside
+   `regen_check.KNOWN`, every remaining difference listed and pinned with its
+   reason: their MEL file drops the four edge-flag columns from item 29 on
+   (27 lines), cabinet 7's corner sides / top / bottom are edged in our job and
+   not in theirs, their extra 2730 x 1300 line in MEL and BRK, the W2 filler
+   (our 2882, their 2730), and four backs keyed the other way round. Also
+   listed rather than hidden: inside the KNOWN cabinets Plazaboard keyed every
+   MEL edging as PVC BROOKHILL, including our 9 PVC WHITE lines (drawer sides,
+   white-edged supports).
+
+**Report back — open, for Rudolf.** (a) Plazaboard keyed the October job's
+white edging (33.5 m of drawer sides and white-edged supports) as PVC
+BROOKHILL; the job still says PVC WHITE. (b) Test.json cabinets 4 and 5 now
+order Grey edging, and cabinet 4's drawer faces 1 mm rather than 2 mm — check
+that is what is wanted. (c) Their files carry a 2730 x 1300 line in MEL and in
+BRK that is on no sheet we sent.
 
 **The export folder, organised (28 September 2026, brief
 `Claude outputs/output-folders-brief-2026-09-28.md`, agreed with Rudolf).**
@@ -907,10 +998,11 @@ and `Check It Still Works.bat` included.
 Open questions from the brief that Rudolf has not ruled: **Q1** line endings
 and git hygiene (the working tree is CRLF, HEAD is LF; edit without changing a
 file's existing endings and review with `--ignore-space-at-eol`), **Q5**
-`WHITE_EDGE`. **Q2 is ruled: a panel takes code 08 with the role "Panel"**
-(20 September 2026) — Plazaboard's CSV writes the Component column from
-`Panel.label` alone, so a new code would need their sign-off and would say
-nothing on the order that 08 does not. **Q3 is ruled: carcass-front edging the
+`WHITE_EDGE` (gone since 28 September 2026). **Q2 is ruled: a panel takes code 08 with the role "Panel"**
+(20 September 2026) — the CSV carries the designation (`Panel.label`, in the
+Customer Number column since 28 September 2026) and never the role, so a new
+code would need their sign-off and would say nothing on the order that 08 does
+not. **Q3 is ruled: carcass-front edging the
 exterior board does not offer is a CRITICAL.** **Q4 is ruled: drawer-face grain runs vertical, up
 the face height, exactly as the cut list has it. Never question it.** The
 proposed hard rules H5 and H6 are not in this file yet because they are his to
@@ -1442,6 +1534,10 @@ tools/check_supports.py    typed supports: the worked positions, what each cuts,
                            criticals, legacy rows unchanged, tape inside the size, the scene
 tools/check_runners.py     runners: the catalogue, LEGACY, the length and width a runner gives, the
                            swap, the delete guard; the drawer setting; the drawer checks
+tools/check_export.py      the Plazaboard CSV: columns, one number per panel, Boards-tab edging
+                           names, and the October job against Plazaboard's own files
+Sample Plaza cutlist and quote/  Plazaboard's CSVs and quotation for the October job — the
+                           reference check_export.py compares against
 tools/ui_check_drawers.py  the drawers / runners / supports brief in the running app (Playwright)
 tools/check_attached.py    attached panels: derived place, attach/detach round trip, moves with
                            the cabinet, the room checks in and tip-up out, delete, duplicate,
@@ -1454,7 +1550,8 @@ tools/fixtures/            frozen job files the checks read. Never reachable fro
                            Test_Build.json, Test_Panels.json (the cut-only panel
                            fixture) and Corner Unit Test.json since 28 September 2026,
                            beside Test_Build_pre_library.json and Test_legacy_supports.json;
-                           Test_drawers.json (Test.json before f4d87b0) for check_runners.
+                           Test_drawers.json (Test.json before f4d87b0) for check_runners;
+                           Test_export.json (Test.json at 201d360) for check_export.
 tools/fixture_jobs.py      job_file(name): jobs/ for Test.json, tools/fixtures/ for the
                            rest. Every check and snapshot.py read job files through it.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
@@ -1472,7 +1569,9 @@ docs/ROOM-LAYOUT-SPEC.md  the room / plan / 3D build spec and its phasing
 - A designation must never sit on two different panels, and **a designation
   never changes** (ruled 14 September 2026). Generated panels are named as they
   are created — `engine.born_distinct` gives 105a / 105b where one code covers
-  two sizes — and nothing is renamed afterwards. `generate_job` is read-only
+  two different panels (any difference but the qty: `model.panel_signature`,
+  28 September 2026), identical ones sharing a letter and staying separate
+  lines — and nothing is renamed afterwards. `generate_job` is read-only
   with respect to the job: a bespoke or loose panel goes onto the cut list
   exactly as the job defines it, so a bespoke cabinet with two sides of
   different sizes must define them as 01a and 01b itself. The D13 warning is
@@ -1555,8 +1654,11 @@ board a saved job uses under a former id.
 
 **The library's BROOKHILL edging token is `BROOKHILL`, deliberately** (ruled 18
 September 2026). New cabinets generate `2mm BROOKHILL` / `PVC BROOKHILL`. The
-October job's `PVC WOOD` / `2mm WOOD` are what that one order was edged with,
-kept because that job is frozen — not a catalogue name to steer new jobs towards.
+October job's sheet said `PVC WOOD` / `2mm WOOD`; Plazaboard keyed it as
+Brookhill (`PVC BROOKHILL`, `2MM BROOKHILL`; the quote `EDGING-IMP BROOKHILL`),
+and since 28 September 2026 the job reads BROOKHILL too — the house record's
+token is BROOKHILL, and its typed WOOD literals resolve through
+`model.resolve_edging`.
 
 **Yield and cut rate are read off what a board IS, not off its id.** Both used to
 be dicts keyed `MEL` / `DECOR` / `BACK`, so a renamed or newly added board fell to
@@ -1638,8 +1740,9 @@ anything reading them.
 naming the cabinet, the board, the kind and what to tick. It blocks the export.
 This bites in one place by design: carcass fronts are PVC in the **exterior**
 board's colour, so an exterior board ticked 2mm-only leaves them with no offered
-edging. That is the rule working, not a bug — the per-cabinet `carcass_edge`
-override is the escape hatch. A missing edging *name* stays a WARNING with its
+edging. That is the rule working, not a bug — choose another exterior board, or
+tick PVC on it (the per-cabinet `carcass_edge` override that used to be the
+escape hatch is no longer read, 28 September 2026). A missing edging *name* stays a WARNING with its
 wording unchanged (`check_boards.py` pins the phrase "no name to build edging
 from"); the two are different faults. A cabinet named by an `EDGING` critical
 does not also collect the per-panel "edges specified but no edge material"
@@ -1663,8 +1766,9 @@ the kinds that board offers: `Support.board` and `Support.kind`. Both blank mean
 the row predates the control, and it is then read from its old `edge` and edged
 exactly as that job was quoted: front-edged takes the carcass edging, and
 white-edged resolves through `model.white_edge_board` — the project's board whose
-PVC token is WHITE — rather than through a constant. `model.WHITE_EDGE` survives
-only as the fallback when the project has no such board. `Test.json` cabinet 7 is
+PVC token is WHITE — rather than through a constant; a project with no such
+board gives the row no name and the validator says why (`model.WHITE_EDGE` is
+gone, 28 September 2026). `Test.json` cabinet 7 is
 the case that proves it: a GREY carcass with three white-edged rows, which still
 come out `PVC WHITE`. `board` and `kind` are written to the job file only when a
 row actually names them, so a file saved before the control round-trips byte for
@@ -1985,8 +2089,9 @@ PVC <token>    the thin carcass tape
 
 **The token is its own field, not the board's name.** Edging names are decided
 per order — there is no fixed Plazaboard edging name to look up for a board (ruled
-18 September 2026; the October job's "WOOD" was that order's choice for a
-woodgrain board, not a catalogue rule). The token is what this workshop wants on
+18 September 2026; the October sheet's "WOOD" was that order's choice for a
+woodgrain board, not a catalogue rule — and Plazaboard keyed it as BROOKHILL
+anyway). The token is what this workshop wants on
 the order, and keeping it separate stops a long board description such as
 "BROOKHILL FUSION CHIP" landing on an order as an edging name — D6/W10 in the
 other direction, where a board name reached an order as a tape. A board with a
@@ -2010,10 +2115,16 @@ dropdown, and the colour is a *board*, so the name is still generated from that
 board's token and a board name still cannot reach a real order as a tape. Each
 half is `None` for "follow the cabinet", and the fall-through is
 drawer → door → `Cabinet.exterior_tape` / `exterior_board`, so a job quoted
-before the two were separable is edged exactly as it was quoted. The flat string
-overrides (`carcass_edge`, `door_edge`, `drawer_box_edge`) are still read and
-still win where a job file carries one; the editor says so and offers to clear it
-rather than showing dropdowns the cut list is ignoring.
+before the two were separable is edged exactly as it was quoted. **The flat
+string overrides (`carcass_edge`, `door_edge`, `drawer_box_edge`) are retired**
+(28 September 2026): kept in a job file that carries them, so it round-trips
+byte for byte, and read by nothing — the edging is always the Boards-tab Edging
+Name of the board picked, so the screen and the order cannot disagree.
+
+**An Edging Colour dropdown shows the board's Edging Name**, not its id
+(`model.edging_label`, the `edging_label` field of each board on
+`/api/compute`): `Grey`, `BROOKHILL`, and `WHITE (WHITEMEL)` / `WHITE (BACK)`
+where two project boards share a name. The stored value is the id.
 
 **`Cabinet.exterior_tape` is 1mm or 2mm, per cabinet, and has no dimensional
 effect whatsoever.** It is the fallback the two section choices fall through to.
@@ -2110,8 +2221,9 @@ list. Off `kind` alone a round trip loses nothing: switch to Panel and back and
 every field is where it was, template included. Same bargain as the tickboxes.
 
 **Code 08, role "Panel"** (`model.PANEL_CODE`, ruled 20 September 2026, Q2).
-Plazaboard's CSV writes the Component column from `Panel.label` — the digits,
-`1508` — and never from `CODES[code]` or `Panel.role`, so a new code would need
+The CSV writes the designation, `Panel.label` — the digits, `1508` — in its
+Customer Number column (28 September 2026; `Component` is Plazaboard's item
+number), and never `CODES[code]` or `Panel.role`, so a new code would need
 their sign-off exactly as 10 and 11 still do, and would say nothing on the order
 that 08 does not. The role is what tells a panel from an exposed end in the
 app's own cut list. One constant, so a code they do sign off later is one edit.
@@ -2614,8 +2726,8 @@ stays live because the footprint really is read. Everything in Structure — bac
 supports, shelves — is the ordinary engine path, unchanged.
 
 **The blind panel is code 08 with the role "Blind Panel"** (`model.BLIND_CODE`,
-Q3), on the same reasoning as a panel's 08: Plazaboard write the Component column
-from `Panel.label`, so a code of its own would need their sign-off and would say
+Q3), on the same reasoning as a panel's 08: the CSV carries `Panel.label` (in
+Customer Number), never the role, so a code of its own would need their sign-off and would say
 nothing on the order that 08 does not.
 
 It casts a shadow on the return wall like any corner unit, its own depth wide, so
@@ -2793,7 +2905,8 @@ exactly what it always cut and is **named in a warning**; nothing is migrated on
 a guess. `Test_Build.json` cabinet 4 is the one real case (0 total, 4 white).
 
 **White-edged means edged white: `PVC WHITE`, whatever the boards are** (ruled 18
-September 2026, `model.WHITE_EDGE`). It used to take the drawer-box tape, which
+September 2026; through `model.white_edge_board`, the project board whose Edging
+Name is WHITE, since `model.WHITE_EDGE` went on 28 September 2026). It used to take the drawer-box tape, which
 follows the carcass board, so on a GREY carcass a row labelled "White-edged" went
 out as `PVC Grey`. `Cabinet.support_tape` is the one answer; the engine cuts from
 it and the editor's Edging column shows it. The October job is unaffected (its
@@ -3403,6 +3516,10 @@ Everything the filler, plinth and hinge-drawing work needed was ruled on
 
 - Plazaboard's `holes` column is the **line total** (per panel × qty). Ours is
   per panel. `export_plaza.rows_for` does the multiplication — don't double it.
+- The CSV is `Customer Number` (our designation) in front of Plazaboard's
+  template, byte for byte: `Component` is THEIR item number and `Material` the
+  board id. `check_export.py` reads their header off their own file. Never
+  merge lines, never pad.
 - Edging includes a **70 mm trim allowance per banded edge**. The formula in
   `Standard.edging_m` is exact on all 166 edged rows of the real job. Don't
   "simplify" it.

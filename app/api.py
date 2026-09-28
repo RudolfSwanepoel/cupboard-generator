@@ -36,7 +36,8 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES, D
                               grain_of, hinge_side, is_thin, material_board,
                               material_colour, material_has_edging,
                               material_offers, material_price,
-                              material_record, material_thickness, tape_for)
+                              material_record, material_thickness, material_token,
+                              edging_label, tape_for)
 from cabinetgen.render import pictures_drawn, plan_svg, wall_elevation_svg
 from cabinetgen import scene as SCENE
 from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, drawer_rise,
@@ -368,19 +369,12 @@ def _geometry_info(job, cab, std):
                 "carcass": {"name": cab.carcass_tape(job.materials)},
                 "drawer_box": {"name": cab.drawer_box_tape(job.materials)},
             },
-            # A job file may carry a flat edging name written before the two
-            # dropdowns existed. It still wins, so it is reported rather than
-            # letting the dropdowns show something the cut list does not say.
-            "edge_override": cab.door_edge,
             # The tapes in force and where each came from. Derived values are the
             # engine's answer read back, never worked out in the browser.
             "tapes": cab.tapes(job.materials),
             "exterior_tape": cab.exterior_tape,
             "carcass_thickness": material_thickness(job.materials, cab.carcass_board),
             "exterior_thickness": material_thickness(job.materials, cab.exterior_board),
-            "tape_overrides": {"carcass_edge": cab.carcass_edge,
-                               "door_edge": cab.door_edge,
-                               "drawer_box_edge": cab.drawer_box_edge},
             # Each row as it will be cut: what it is edged in, and the name that
             # produces. Both are the engine's answer — the editor shows them, it
             # does not work them out.
@@ -562,6 +556,13 @@ def _board_payload(job, key):
             "grain": B.Board(id=key, grain=str(
                 (job.materials or {}).get(key, {}).get("grain", "plain"))).grain
             if isinstance((job.materials or {}).get(key), dict) else "plain",
+            # The board's Edging Name, as the Boards tab has it, and what an
+            # Edging Colour dropdown shows for it: the name, with the id in
+            # brackets where another project board shares it (28 September
+            # 2026). The stored value stays the id; the order and the screen
+            # read the same name.
+            "edging_name": material_token(job.materials, key),
+            "edging_label": edging_label(job.materials, key),
             "pvc": tape_for(job.materials, key, "pvc"),
             "1mm": tape_for(job.materials, key, "1mm"),
             "2mm": tape_for(job.materials, key, "2mm"),
@@ -1197,7 +1198,11 @@ def board_swap(payload):
     if old_id not in (job.materials or {}):
         return {"ok": False, "error": f"this project has no board {old_id!r}"}
 
-    before_panels = generate_job(job)
+    # Copies, so the "before" list stays the before list: engine.resolved hands
+    # a bespoke or loose panel back as the very object the job holds, and the
+    # in-place re-derivation below would otherwise rewrite it under the tally
+    # of what each board gains and loses, the grain list and the rotation cost.
+    before_panels = [replace(p) for p in generate_job(job)]
     before = _totals(job, before_panels)
     before_issues = validate(job, before_panels)
 

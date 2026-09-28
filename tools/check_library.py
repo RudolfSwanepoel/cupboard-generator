@@ -210,13 +210,13 @@ def main() -> int:                                                  # noqa: C901
     one = generate_cabinet(box(exterior_tape="1mm"), S, JOB.materials)
     d2 = next(p for p in two if p.role == "Door")
     d1 = next(p for p in one if p.role == "Door")
-    check("2 mm orders the 2 mm tape", d2.edge_material, "2mm WOOD")
-    check("1 mm orders the 1 mm tape", d1.edge_material, "1mm WOOD")
+    check("2 mm orders the 2 mm tape", d2.edge_material, "2mm BROOKHILL")
+    check("1 mm orders the 1 mm tape", d1.edge_material, "1mm BROOKHILL")
     check("and the door is cut to exactly the same size either way",
           (d1.length, d1.width), (d2.length, d2.width))
     check("the carcass tape is the thin PVC whichever is chosen, not selectable",
           [next(p for p in c if p.role == "Side").edge_material for c in (one, two)],
-          ["PVC WOOD", "PVC WOOD"])
+          ["PVC BROOKHILL", "PVC BROOKHILL"])
     check("the whole panel list is size-identical",
           [(p.code, p.length, p.width, p.qty) for p in one],
           [(p.code, p.length, p.width, p.qty) for p in two])
@@ -397,10 +397,12 @@ def main() -> int:                                                  # noqa: C901
     # so a carcass swap left them behind. They follow the drawer carcass board.
     check("and every panel whose board or tape moves",
           len(pre["panels"]), 111)
-    check("two support lines sharing a designation are told apart by shape",
+    # Two support lines that differ only in edging used to share 104 and be told
+    # apart by shape; each has its own letter now (28 September 2026).
+    check("two support lines that differ in edging each have their own designation",
           [(x["label"], x["tape_from"], x["tape_to"])
-           for x in pre["panels"] if x["label"] == "104"],
-          [("104", "", ""), ("104", "PVC WOOD", "PVC WOOD")])
+           for x in pre["panels"] if x["label"].startswith("104")],
+          [("104a", "", ""), ("104b", "PVC BROOKHILL", "PVC BROOKHILL")])
     # MEL disappears entirely, where it used to be left holding 3 boards: a swap
     # moves EVERY use of the old board now, bespoke and loose panels included
     # (ruled 20 September 2026). A board that is swapped out must not still be

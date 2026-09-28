@@ -168,7 +168,7 @@ def main():
     r = swap(j, "MEL", "BROOKHILL", apply=True)
     panel = job_from_dict(r["job"]).cabinets[0].bespoke[0]
     check("the old board's PVC becomes the new board's PVC",
-          panel.edge_material, "PVC WOOD")
+          panel.edge_material, "PVC BROOKHILL")
     check("nothing is left unmapped", r["unmapped"], [])
 
     print(NL + "an edging that never matched the old board is left alone")
@@ -248,9 +248,13 @@ def main():
     check("every hand-specified panel was re-derived, none left at grain 0",
           [p.label for p in after if p.material == "BROOKHILL" and not p.grain], [])
     check("and the swap said how many it re-typed", len(r["retyped"]), 9)
+    # MEL 272 / BROOKHILL 59 before, which is the benchmark. This read 254 / 77
+    # until 28 September 2026: the tally was taken of the before list AFTER the
+    # in-place re-derivation had rewritten the 18 MEL bespoke and loose panels
+    # under it — the resolved-identity bug again, now fixed by copying.
     check("it reports the panels each board gains and loses",
           {m["board"]: (m["before"], m["after"]) for m in r["moved_by_board"]},
-          {"MEL": (254, 0), "BROOKHILL": (77, 331)})
+          {"MEL": (272, 0), "BROOKHILL": (59, 331)})
 
     print(NL + "the diff reports a hand-specified panel's REAL before value")
     # engine.resolved hands a bespoke or loose panel back as the very same object
@@ -269,7 +273,7 @@ def main():
           (r["panels"][0]["from"], r["panels"][0]["to"]), ("MEL", "BROOKHILL"))
     check("and the edging it really had before",
           (r["panels"][0]["tape_from"], r["panels"][0]["tape_to"]),
-          ("PVC WHITE", "PVC WOOD"))
+          ("PVC WHITE", "PVC BROOKHILL"))
 
     print(NL + "on the October job that is the 102 generated plus the 9 typed")
     oct_pre = api.board_swap({"job": job_to_dict(JOB), "from": "MEL",

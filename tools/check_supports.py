@@ -171,7 +171,7 @@ def main():
     check("no edging kind: nothing banded whatever is ticked", (sup[0].edge_l, sup[0].edge_w, sup[0].edge_material), (0, 0, ""))
     rows = typed(0, 0, 1, kind="2mm", board="BROOKHILL", cut_board="MEL")
     sup = [p for p in generate_cabinet(box(support_rows=rows), std, MATERIALS) if p.role == "Support"]
-    check("cut from one board, edged in another's 2mm", (sup[0].material, sup[0].edge_material), ("MEL", "2mm WOOD"))
+    check("cut from one board, edged in another's 2mm", (sup[0].material, sup[0].edge_material), ("MEL", "2mm BROOKHILL"))
     legacy = [p for p in generate_cabinet(box(support_rows=[Support(edge="front", qty=2)]), std, MATERIALS) if p.role == "Support"]
     check("a legacy row bands one long edge, as it always did", (legacy[0].edge_l, legacy[0].edge_w), (1, 0))
 
@@ -332,7 +332,7 @@ def main():
             Support(type="back", qty=1)]
     sup = [p for p in generate_cabinet(box(support_rows=rows), std, MATERIALS) if p.role == "Support"]
     check("three Back rows, three lines, each in its own edging",
-          [(p.edge_l, p.edge_w, p.edge_material) for p in sup], [(1, 0, "PVC WHITE"), (2, 0, "2mm WOOD"), (0, 0, "")])
+          [(p.edge_l, p.edge_w, p.edge_material) for p in sup], [(1, 0, "PVC WHITE"), (2, 0, "2mm BROOKHILL"), (0, 0, "")])
     L = lay(box(support_rows=rows))
     check("placed as Back 1, 2, 3 across the rows", sorted(L), [("back", 1), ("back", 2), ("back", 3)])
     parts = dict((p.label, (p, t)) for p, t in interior_parts(box(support_rows=rows), std, MATERIALS))
@@ -382,7 +382,16 @@ def main():
     check("cabinet 7 (base, white x3 + front x1): the front-edged rail is the Front, the three white are one Back row",
           [(r.type, r.qty, r.board, r.kind) for r in seven.support_rows],
           [("front", 1, "BROOKHILL", "pvc"), ("back", 3, "WHITEMEL", "pvc")])
-    check("  the same lines, Front first", sorted(x for x in lines(re) if x[0] == 7), sorted(x for x in before_lines if x[0] == 7))
+    # The two lines differ in edging, so each has its own letter (28 September
+    # 2026), and letters follow the order the rows are born in: re-entered, the
+    # Front comes first and takes 704a. The same lines apart from the letter.
+    def unlettered(xs):
+        return sorted(x[:1] + (x[1].rstrip("abcdefghij"),) + x[2:] for x in xs)
+    check("  the same lines, Front first", unlettered(x for x in lines(re) if x[0] == 7),
+          unlettered(x for x in before_lines if x[0] == 7))
+    check("  lettered in the order they are born: the Front 704a once re-entered",
+          [(x[1], x[8]) for x in lines(re) if x[0] == 7],
+          [("704a", "PVC BROOKHILL"), ("704b", "PVC WHITE")])
     check("  the job's total is still unchanged", cost(re), before_cost)
     check("  nothing but the two cabinets' rows moved", [x for x in lines(re) if x[0] not in (6, 7)], [x for x in before_lines if x[0] not in (6, 7)])
     tall = box(kind="tall", height=2400, support_rows=[Support(edge="front", qty=1), Support(edge="none", qty=2)])

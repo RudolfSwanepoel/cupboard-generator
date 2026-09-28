@@ -97,7 +97,9 @@ def main() -> int:                                                  # noqa: C901
     off = bank(has_drawers=False)
     check("with the tickbox untouched a stack is built, as it always was",
           sorted(x[0] for x in built),
-          ["3001", "3003", "3004", "3004", "3017", "3018", "3019", "3020a", "3020b"])
+          # 3004a / 3004b: the plain supports and the front-edged one differ in
+          # edging, so each has its own letter (28 September 2026)
+          ["3001", "3003", "3004a", "3004b", "3017", "3018", "3019", "3020a", "3020b"])
     check("unticked, none of it is", lines(Job(name="b", cabinets=[off]), 30),
           sorted(x for x in built if not x[0].startswith(("3017", "3018", "3019", "3020"))))
     check("and the stack is still there in the job file, face for face",
@@ -113,7 +115,7 @@ def main() -> int:                                                  # noqa: C901
     check("the panels that would go, by designation",
           sorted(x["label"] for x in r["removed"]),
           ["3017", "3018", "3019", "3020a", "3020b"])
-    check("and the ones that stay", r["kept"], ["3001", "3003", "3004"])
+    check("and the ones that stay", r["kept"], ["3001", "3003", "3004a", "3004b"])
     kept_before = {x[0]: x[1:] for x in built if x[0] in set(r["kept"])}
     kept_after = {x[0]: x[1:] for x in lines(Job(name="e", cabinets=[off]), 30)}
     check("every designation that survives is the same panel it was",

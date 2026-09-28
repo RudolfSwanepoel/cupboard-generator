@@ -47,7 +47,7 @@ sys.path.insert(0, ROOT)
 from cabinetgen import boards as B                                            # noqa: E402
 from cabinetgen.engine import generate_cabinet, generate_job                  # noqa: E402
 from cabinetgen.model import (MATERIALS, Cabinet, Drawer, Job,                # noqa: E402
-                              Support, WHITE_EDGE, is_thin, material_colour,
+                              Support, is_thin, material_colour,
                               material_offers, NO_COLOUR, tape_for,
                               white_edge_board)
 from cabinetgen.standard import STANDARD as S                                 # noqa: E402
@@ -144,7 +144,7 @@ def main():
     print("\nthe job's copy of a record answers the same way")
     m = mats(BROOKHILL={"edging_kinds": ["2mm"]})
     check("offers", list(material_offers(m, "BROOKHILL")), ["2mm"])
-    check("2mm generates", tape_for(m, "BROOKHILL", "2mm"), "2mm WOOD")
+    check("2mm generates", tape_for(m, "BROOKHILL", "2mm"), "2mm BROOKHILL")
     check("PVC does not", tape_for(m, "BROOKHILL", "pvc"), "")
     m_off = mats(BROOKHILL={"has_edging": False})
     check("Has Edging off offers nothing", list(material_offers(m_off, "BROOKHILL")), [])
@@ -197,11 +197,11 @@ def main():
     check("and it is a warning, not a critical",
           {i.level for i in warn}, {"warning"})
 
-    print("\nan override still silences it — the cabinet was told what to use")
+    print("\na typed override no longer silences it — it is not read (28 Sept 2026)")
     m = mats(BROOKHILL={"has_edging": False})
-    check("no EDGING critical", criticals(
+    check("the EDGING critical stands", len(criticals(
         box(carcass_edge="PVC WOOD", door_edge="2mm WOOD", exterior_tape="2mm"),
-        m, "EDGING"), [])
+        m, "EDGING")) >= 1, True)
 
     # --- supports -----------------------------------------------------------
     print("\na support row names a board and a kind that board offers")
@@ -224,7 +224,7 @@ def main():
     check("white resolves through the project's white board, not a constant",
           white_edge_board(MATERIALS), "MEL")
     check("and still comes out as it always did",
-          cab.support_row_tape(MATERIALS, legacy_white), WHITE_EDGE)
+          cab.support_row_tape(MATERIALS, legacy_white), "PVC WHITE")
     check("front takes the carcass edging (PVC in the exterior colour)",
           cab.support_row_tape(MATERIALS, legacy_front),
           cab.carcass_tape(MATERIALS))

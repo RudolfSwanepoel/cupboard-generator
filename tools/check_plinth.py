@@ -97,7 +97,7 @@ def main() -> int:
     check("width is the ruled plinth height", p.width, 100)
     check("carcass board", p.material, "MEL")
     check("banded both long edges, not the ends", (p.edge_l, p.edge_w), (2, 0))
-    check("in the carcass edging", p.edge_material, "PVC WOOD")
+    check("in the carcass edging", p.edge_material, "PVC BROOKHILL")
     check("and says which run it belongs to",
           "wall A" in p.note and "cabinets 1-2" in p.note, True)
     check("it reaches the cut list",

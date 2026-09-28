@@ -1,7 +1,9 @@
 """Plazaboard export and job costing.
 
-One CSV per board type, in Plazaboard's own column order, with their edging and
-hole maths pre-computed so the counter file matches ours line for line.
+One CSV per board type: our designation in front, then Plazaboard's own template
+columns exactly (ruled 28 September 2026, checked against their files for the
+October job in `Sample Plaza cutlist and quote/`), with their edging and hole
+maths pre-computed so the counter file matches ours line for line.
 """
 import csv
 import math
@@ -12,9 +14,16 @@ from typing import List
 from .model import Job, Panel, grain_of, material_board, material_price, material_thickness
 from .standard import Standard, STANDARD
 
-HEADER = ["Component", "Material", "Length", "Width", "qty", "Invoice Number", "JOB NO ",
-          "Grain", "edge l", "edge w", "holes", "edge mat", "", "", "", "",
-          "total edging", "total edging"]
+# Plazaboard's template header, byte for byte — `JOB NO ` with its trailing
+# space, the four blank headings over the edge flags, both `total edging`.
+# tools/check_export.py reads it off their own CSV and compares.
+PLAZA_HEADER = ["Component", "Material", "Length", "Width", "qty", "Invoice Number",
+                "JOB NO ", "Grain", "edge l", "edge w", "holes", "edge mat",
+                "", "", "", "", "total edging", "total edging"]
+# One column in FRONT, and nothing else changed: the panel designation, under
+# the heading Rudolf's convention gives it. Component is Plazaboard's item
+# number, 1..n restarting in each file; Material is the board id.
+HEADER = ["Customer Number"] + PLAZA_HEADER
 
 # Rate card, quotation VRG_SOQ497999, 21 Oct 2025. Incl VAT.
 #
@@ -88,18 +97,28 @@ def effective_price(job: Job, mat: str) -> float:
             or RATES["board"].get(material_board(job.materials, mat), 0.0))
 
 
+EDGING_COL = HEADER.index("total edging")    # the line's metres; the next is the running total
+
+
 def rows_for(panels: List[Panel], std: Standard = STANDARD):
+    """One row per cut-list line, in order. Nothing is merged: identical panels
+    stay separate lines sharing one designation, as Plazaboard keep them."""
     out = []
     for i, p in enumerate(panels, start=1):
         el, ew = p.edge_l, p.edge_w
         flags = ["1" if el >= 1 else "", "1" if el >= 2 else "",
                  "1" if ew >= 1 else "", "1" if ew >= 2 else ""]
+        metres = round(p.edging_m(std), 3)
         out.append([
-            i, p.label, p.length, p.width, p.qty, "", "",
+            p.label,                         # Customer Number: our designation
+            i,                               # Component: Plazaboard's item number
+            p.material,                      # Material: the board id
+            p.length, p.width, p.qty, "", "",
             p.grain, el or "", ew or "",
             p.pot_holes * p.qty or "",       # Plazaboard's holes column is the line total
             p.edge_material, *flags,
-            round(p.edging_m(std), 3), "",
+            metres or 0,                     # a zero total is written 0, as theirs is
+            "",
         ])
     return out
 
@@ -117,8 +136,8 @@ def write_csvs(job: Job, panels: List[Panel], outdir: str) -> List[str]:
             w.writerow(HEADER)
             running = 0.0
             for row in rows_for(ps, job.std):
-                running += row[16]
-                row[17] = round(running)
+                running += row[EDGING_COL]
+                row[EDGING_COL + 1] = round(running)
                 w.writerow(row)
         written.append(path)
     return written

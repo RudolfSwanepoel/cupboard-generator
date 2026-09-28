@@ -10,16 +10,19 @@ What is pinned here, and why:
     was typed into the engine on every carcass panel, so a decor or microwave
     cupboard with a Brookhill carcass could not be expressed at all. Each board
     nests and prices as its own material.
-  * **Tape is a lookup on the board, never a name built out of one.** "PVC WOOD"
-    and "2mm WOOD" are what the October order was edged with; nothing about
-    "BROOKHILL FUSION CHIP" spells either. A board with no tape of the thickness
+  * **Tape is a lookup on the board, never a name built out of one.** "PVC
+    BROOKHILL" and "2mm BROOKHILL" are what the October order was edged with
+    (the sheet sent said WOOD; Plazaboard keyed it as Brookhill, and the job now
+    reads BROOKHILL — 28 September 2026); the token is the board's Edging Name,
+    not "BROOKHILL FUSION CHIP". A board with no tape of the thickness
     a cabinet needs is named in a warning rather than guessed at — D6 / W10 is
     exactly that mistake reaching a real order.
   * **Derivation reproduces the October job.** Every tape on that job was
     reconciled against the stored value before the fields were switched over,
     with no mismatches, which is why the fixture states none of them any more.
-  * **An override is per cabinet** and beats the derivation, which is how a job
-    written before the boards keeps saying what it always said.
+  * **A typed override is retired** (28 September 2026): a flat edging string
+    on a cabinet is kept in the file and never read, so the edging on the order
+    is always the Boards-tab Edging Name of the board picked.
   * **Supports are rows, and nothing subtracts.** The old total-minus-subsets
     model let `edged + white` exceed the total and dropped the negative plain
     count in silence. A migrated cabinet cuts the same list in the same order,
@@ -118,7 +121,7 @@ def main() -> int:                                                  # noqa: C901
     print("\ntape names are generated from the board's token, not mapped")
     check("PVC, 1 mm and 2 mm all come off one token",
           [tape_for(MATERIALS, "BROOKHILL", k) for k in ("pvc", "1mm", "2mm")],
-          ["PVC WOOD", "1mm WOOD", "2mm WOOD"])
+          ["PVC BROOKHILL", "1mm BROOKHILL", "2mm BROOKHILL"])
     check("the white board generates its own three the same way",
           [tape_for(MATERIALS, "MEL", k) for k in ("pvc", "1mm", "2mm")],
           ["PVC WHITE", "1mm WHITE", "2mm WHITE"])
@@ -128,12 +131,12 @@ def main() -> int:                                                  # noqa: C901
     check("the token is not the board's name, and the tape proves it",
           (tape_for(MATERIALS, "BROOKHILL", "pvc"),
            "PVC " + material_board(MATERIALS, "BROOKHILL")),
-          ("PVC WOOD", "PVC BROOKHILL FUSION CHIP"))
+          ("PVC BROOKHILL", "PVC BROOKHILL FUSION CHIP"))
     renamed = {"MEL": dict(MATERIALS["MEL"]),
                "BROOKHILL": dict(MATERIALS["BROOKHILL"], board="SOME OTHER CHIP",
                              name="SOME OTHER CHIP")}
     check("so renaming the board does not move the tape",
-          box().carcass_tape(renamed), "PVC WOOD")
+          box().carcass_tape(renamed), "PVC BROOKHILL")
     check("a board with nothing to build from generates nothing, and invents nothing",
           tape_for({"X": {"name": "", "tape": ""}}, "X", "pvc"), "")
 
@@ -162,17 +165,17 @@ def main() -> int:                                                  # noqa: C901
 
     print("the three tapes come off the two boards")
     c = box()
-    check("carcass edge is PVC in the exterior colour", c.carcass_tape(MATERIALS), "PVC WOOD")
-    check("door edge is 2 mm in the exterior colour", c.door_tape(MATERIALS), "2mm WOOD")
+    check("carcass edge is PVC in the exterior colour", c.carcass_tape(MATERIALS), "PVC BROOKHILL")
+    check("door edge is 2 mm in the exterior colour", c.door_tape(MATERIALS), "2mm BROOKHILL")
     check("drawer box edge is PVC in the carcass colour",
           c.drawer_box_tape(MATERIALS), "PVC WHITE")
     d = by_code(generate_cabinet(c))
     check("shelf and divider fronts match the front, not the box (ruled 14 Sept 2026)",
-          (d["05"].edge_material, d["09"].edge_material), ("PVC WOOD", "PVC WOOD"))
+          (d["05"].edge_material, d["09"].edge_material), ("PVC BROOKHILL", "PVC BROOKHILL"))
     check("drawer sides and fronts take the box tape",
           (d["18"].edge_material, d["19"].edge_material), ("PVC WHITE", "PVC WHITE"))
     check("a Brookhill carcass takes its drawer boxes in the Brookhill PVC",
-          box(carcass_board="BROOKHILL").drawer_box_tape(MATERIALS), "PVC WOOD")
+          box(carcass_board="BROOKHILL").drawer_box_tape(MATERIALS), "PVC BROOKHILL")
 
     print("\na board with nothing to generate from is named, never guessed at")
     nameless = {"MEL": {"name": "", "tape": "", "thickness": 16, "grain": "plain"},
@@ -185,22 +188,29 @@ def main() -> int:                                                  # noqa: C901
     check("and no tape name is invented in its place",
           by_code(generate_cabinet(box(exterior_board="MEL"), S, nameless))["07"].edge_material,
           "")
-    check("an override silences it, because the cabinet was told what to use",
-          [i.message for i in validate(
+    check("a typed override no longer silences it: it is not read (28 Sept 2026)",
+          len([i.message for i in validate(
               Job(name="n3", boards=["MEL", "BROOKHILL"], materials=nameless,
                   cabinets=[box(exterior_board="MEL", door_edge="2mm SOLID")]), [])
-           if "no name to build edging from" in i.message and "door_edge" in i.message],
-          [])
+               if "no name to build edging from" in i.message and "door_edge" in i.message]),
+          1)
 
-    print("\nan override beats the derivation, per cabinet")
-    over = by_code(generate_cabinet(box(carcass_edge="PVC BROOKHILL")))
-    check("the override is what lands on the panel", over["01"].edge_material,
-          "PVC BROOKHILL")
-    check("and the tapes it does not name are still derived",
-          over["07"].edge_material, "2mm WOOD")
+    print("\na typed override is kept in the file and never read (28 Sept 2026)")
+    over = box(carcass_edge="PVC SOLID", door_edge="2mm SOLID",
+               drawer_box_edge="PVC SOLID")
+    got = by_code(generate_cabinet(over))
+    check("the carcass edging is the exterior board's Edging Name",
+          got["01"].edge_material, "PVC BROOKHILL")
+    check("the doors' likewise", got["07"].edge_material, "2mm BROOKHILL")
+    check("the drawer boxes' the carcass board's", got["18"].edge_material, "PVC WHITE")
+    check("and the file still carries all three, untouched",
+          {k: cabinet_to_dict(over)[k] for k in ("carcass_edge", "door_edge",
+                                                 "drawer_box_edge")},
+          {"carcass_edge": "PVC SOLID", "door_edge": "2mm SOLID",
+           "drawer_box_edge": "PVC SOLID"})
 
     print("\nthe October job derives exactly what it was quoted with")
-    stated = {"carcass_edge": "PVC WOOD", "door_edge": "2mm WOOD",
+    stated = {"carcass_edge": "PVC BROOKHILL", "door_edge": "2mm BROOKHILL",
               "drawer_box_edge": "PVC WHITE"}
     mismatches = [(c.number, f, c.tapes(JOB.materials)[f], v)
                   for c in JOB.cabinets if c.template != "none"
@@ -215,7 +225,7 @@ def main() -> int:                                                  # noqa: C901
     check("the total is the sum of the rows", rows.support_total, 6)
     got = [(x.qty, x.edge_material) for x in generate_cabinet(rows) if x.code[:2] == "04"]
     check("one cut-list line per row, in row order",
-          got, [(1, "PVC WOOD"), (2, "PVC WHITE"), (3, "")])
+          got, [(1, "PVC BROOKHILL"), (2, "PVC WHITE"), (3, "")])
     check("a zero-quantity row makes nothing",
           [x.qty for x in generate_cabinet(box(support_rows=[Support("front", 0),
                                                              Support("none", 2)]))
@@ -229,7 +239,7 @@ def main() -> int:                                                  # noqa: C901
           [("none", 2), ("front", 1), ("white", 1)])
     check("and the panels come out that way",
           [(x.qty, x.edge_material) for x in generate_cabinet(legacy) if x.code[:2] == "04"],
-          [(2, ""), (1, "PVC WOOD"), (1, "PVC WHITE")])
+          [(2, ""), (1, "PVC BROOKHILL"), (1, "PVC WHITE")])
     check("rows win over the old numbers once they exist",
           [(r.edge, r.qty) for r in Cabinet(number=1, width=600, height=2000, depth=500,
                                             supports=4, edged_supports=1, white_supports=1,
@@ -262,7 +272,7 @@ def main() -> int:                                                  # noqa: C901
     check("decor is read as the exterior board", back.exterior_board, "DECOR")
     check("and the carcass board defaults to the white it always was",
           back.carcass_board, "MEL")
-    check("a tape it stated is kept as the override it now is",
+    check("a tape it stated is kept in the file (and no longer read)",
           (back.carcass_edge, back.door_edge, back.drawer_box_edge),
           ("PVC WOOD", "2mm WOOD", "PVC WHITE"))
     check("its supports migrate", [(r.edge, r.qty) for r in back.support_list],
@@ -279,9 +289,11 @@ def main() -> int:                                                  # noqa: C901
         j = load(job_file(name))
         check(f"{name} generates the same number of panel lines",
               len(generate_job(j)), want)
-        check(f"  and its tapes are unchanged",
+        # WOOD until 28 September 2026: its typed edging names are retired, and
+        # its DECOR reads the house record's Edging Name, BROOKHILL
+        check(f"  and its tapes are the boards' Edging Names",
               sorted({x.edge_material for x in generate_job(j) if x.edge_material}),
-              ["2mm WOOD", "PVC WHITE", "PVC WOOD"])
+              ["2mm BROOKHILL", "PVC BROOKHILL", "PVC WHITE"])
 
     print("\nDECOR is BROOKHILL's former id, and still resolves (18 Sept 2026)")
     check("the only alias is the one rename", BOARD_ALIASES, {"DECOR": "BROOKHILL"})
@@ -297,7 +309,7 @@ def main() -> int:                                                  # noqa: C901
           resolve_board({"DECOR": "BROOKHILL FUSION CHIP"}, "BROOKHILL"), "DECOR")
     check("DECOR prices, grains and tapes as the board it is",
           (material_board(MATERIALS, "DECOR"), grain_of(MATERIALS, "DECOR"),
-           tape_for(MATERIALS, "DECOR", "2mm")), ("BROOKHILL FUSION CHIP", 1, "2mm WOOD"))
+           tape_for(MATERIALS, "DECOR", "2mm")), ("BROOKHILL FUSION CHIP", 1, "2mm BROOKHILL"))
     wood = sorted({p.material for p in generate_job(JOB)} - {"MEL", "BACK"})
     check("the October job's literal DECOR panels and its template doors are one board",
           wood, ["BROOKHILL"])
@@ -340,7 +352,7 @@ def main() -> int:                                                  # noqa: C901
           [("BROOKHILL", 200, 1), ("MEL", 200, 1), ("BROOKHILL", 300, 1)])
     check("the box's PVC follows that drawer's box board",
           sorted({p.edge_material for p in generate_cabinet(odd, S, MATERIALS)
-                  if p.code[:2] == "18"}), ["PVC WHITE", "PVC WOOD"])
+                  if p.code[:2] == "18"}), ["PVC BROOKHILL", "PVC WHITE"])
     check("nothing else on the cabinet moves",
           lines(odd, "01") == lines(plain, "01") and lines(odd, "07") == lines(plain, "07"),
           True)
