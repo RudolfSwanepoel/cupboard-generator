@@ -37,6 +37,9 @@ class Standard:
     # `runner_lengths` (350 / 450 / 500) is `hardware.LEGACY` now, and the old
     # `drawer_front_deduct` 59 is two of its 13.5 clearances plus two box sides.
     runner_clearance: int = 40  # minimum space behind the runner
+    # The least clear gap between two INNER drawer boxes, one over the other
+    # (ruled by Rudolf, 28 September 2026). Less is a critical.
+    inner_drawer_min_gap: int = 30
     drawer_base_offset: int = 16    # base groove sits this far up from the bottom edge
     # Authoring aids for the face-height editor, not construction dimensions. The
     # heights they produce are what gets ordered; these only decide where a stack

@@ -408,51 +408,108 @@ def inner_drawers():
 
 
 def drawer_checks():
-    """Part 5: the drawer checks, off the one layout, with worked numbers."""
-    print("\nPart 5 — the drawer checks, stable ids, off room.drawer_layout")
+    """The drawer checks — "faces lead, boxes follow", ruled by Rudolf on 28
+    September 2026 (replacing the brief's Part 5 box-height rules): worked
+    numbers for every rule and every stable id."""
+    from cabinetgen.room import drawer_layout
+    print("\nfaces lead, boxes follow (ruled 28 September 2026) — the drawer checks")
 
-    # the lower drawer is the last in the list: face 170 at 0-170, box 21-171
-    c = box(runner=H.SEED_ID, drawers=[Drawer(face_height=545, box_height=150),
-                                       Drawer(face_height=170, box_height=150)])
+    def two(top_face=545, low_face=170, low_box=150, low_off=None, top_box=150, top_off=None):
+        # W 600 H 720: the lower drawer is the last in the list, face 0-low_face;
+        # the upper face starts 2 above it
+        return box(runner=H.SEED_ID, drawers=[
+            Drawer(face_height=top_face, box_height=top_box, offset=top_off),
+            Drawer(face_height=low_face, box_height=low_box, offset=low_off)])
+
+    print("  rules 2 and 5: each box sits its offset (default 21) above its own face bottom")
+    c = two(low_face=200)
+    L = {u["n"]: u for u in drawer_layout(c, STANDARD, job_of(c).materials)}
+    check("bottom drawer, face 0-200, box 150 at the default: box 21-171", (L[2]["offset"], L[2]["box"][4:]), (21, (21, 171)))
+    check("  the tallest box that face takes is 200 - 21 = 179", L[2]["max_box"], 179)
+    check("upper drawer, face 202-747: box 223-373, the tallest 747 - 223 = 524",
+          (L[1]["box"][4:], L[1]["max_box"]), ((223, 373), 524))
+    c = two(low_face=200, low_off=40)
+    L = {u["n"]: u for u in drawer_layout(c, STANDARD, job_of(c).materials)}
+    check("the bottom drawer raised to 40: box 40-190, the tallest 160", (L[2]["box"][4:], L[2]["max_box"]), ((40, 190), 160))
+    check("  and raising it is not a fault", [i.check for i in validate(job_of(c), generate_job(job_of(c)))
+                                           if i.check.startswith("drawer-")], [])
+
+    print("  rule 1: every box within its own face (drawer-box-face)")
+    got = issues(job_of(two()), "drawer-box-face")
+    check("face 170, box 150 at 21: the box runs 21-171, 1 above the face top at 170",
+          (len(got), got and "runs 21-171, 1 above the face top at 170" in got[0].message), (1, True))
+    check("  and says the tallest box it takes: 149", bool(got) and "tallest box this face takes is 149" in got[0].message, True)
+    check("face 171, box 150: its top level with the face top is inside", issues(job_of(two(low_face=171)), "drawer-box-face"), [])
+    c = two(low_face=200, top_off=-5)
     got = issues(job_of(c), "drawer-box-face")
-    check("face 170, box 150: the box reaches 21 + 150 = 171, 1 above the face top: drawer-box-face",
-          (len(got), got and "reaches 171, 1 above the face top at 170" in got[0].message), (1, True))
-    check("  and says what would fit: a face of 171, or a box of 149",
-          bool(got) and "at least 171, or the box 149" in got[0].message, True)
-    c = box(runner=H.SEED_ID, drawers=[Drawer(face_height=544, box_height=150),
-                                       Drawer(face_height=171, box_height=150)])
-    check("face 171, box 150: the top level with the face top is clear", issues(job_of(c), "drawer-box-face"), [])
-    c = box(runner=H.SEED_ID, drawers=[Drawer(face_height=545, box_height=150),
-                                       Drawer(face_height=170, box_height=170)])
-    check("a box as tall as its face: drawer-box-height names it, and drawer-box-face does not repeat it",
-          (len(issues(job_of(c), "drawer-box-height")), issues(job_of(c), "drawer-box-face")), (1, []))
+    check("an upper box set 5 BELOW its own face bottom: 5 below the face bottom at 202",
+          (len(got), got and "5 below the face bottom at 202" in got[0].message), (1, True))
+    c = two(low_face=200, top_off=0, top_box=545)
+    check("an upper box as tall as its face at offset 0 lies within it: allowed now",
+          issues(job_of(c), "drawer-box-face"), [])
+    check("  (drawer-box-height, 'box not shorter than its face', is retired)",
+          [i.check for i in validate(job_of(c), generate_job(job_of(c))) if i.check == "drawer-box-height"], [])
+    c = two(low_face=200, top_off=400)
+    got = issues(job_of(c), "drawer-box-face")
+    check("an upper box raised to 400 in a 545 face: 150 + 400 runs past the top by 5",
+          (len(got), got and "5 above the face top at 747" in got[0].message), (1, True))
     test = load(job_file("Test"))
     got = sorted((i.where, i.message.split(":")[0]) for i in validate(test, generate_job(test))
                  if i.check == "drawer-box-face")
-    check("Test.json cabinet 4 (faces 110 / 165 / 220 over boxes 90 / 150 / 200): drawers 1-3, "
-          "over by 1, 6 and 1", got, [("4", "drawer 1"), ("4", "drawer 2"), ("4", "drawer 3")])
+    check("Test.json cabinet 4 at default offsets (faces 110 / 165 / 220, boxes 90 / 150 / 200): drawers 1-3",
+          got, [("4", "drawer 1"), ("4", "drawer 2"), ("4", "drawer 3")])
+    check("  and its top drawer is still support-foul", sorted(i.where for i in validate(test, generate_job(test))
+                                                          if i.check == "support-drawer-foul"), ["4"])
 
-    inner = [Drawer(face_height=150, box_height=150, inner=True, z=160),
-             Drawer(face_height=150, box_height=150, inner=True, z=21)]
-    c = box(runner=H.SEED_ID, doors=1, drawers=inner)
-    got = issues(job_of(c), "drawer-box-clash")
-    check("inner drawers at 21 and 160, boxes 150: the lower reaches 171, into the upper at 160: drawer-box-clash",
+    print("  rule 3: the bottom drawer never below 21 (drawer-bottom-offset)")
+    got = issues(job_of(two(low_face=200, low_off=15)), "drawer-bottom-offset")
+    check("the bottom drawer set to 15: below 21, its runner under the bottom panel",
+          (len(got), got and "set 15 above its face bottom" in got[0].message), (1, True))
+    check("  21 exactly is the default and fine", issues(job_of(two(low_face=200, low_off=21)), "drawer-bottom-offset"), [])
+    check("  an UPPER drawer may go lower than 21 (10)", issues(job_of(two(low_face=200, top_off=10)), "drawer-bottom-offset"), [])
+
+    print("  rules 7 and 8: inner drawers' gap, and boxes clashing")
+    def inner(z_top, z_low=21, h=150):
+        return box(runner=H.SEED_ID, doors=1, drawers=[
+            Drawer(face_height=h, box_height=h, inner=True, z=z_top),
+            Drawer(face_height=h, box_height=h, inner=True, z=z_low)])
+    check("Standard.inner_drawer_min_gap is 30", STANDARD.inner_drawer_min_gap, 30)
+    got = issues(job_of(inner(160)), "drawer-box-clash")
+    check("inner at 21 and 160, boxes 150: 171 into 160 — drawer-box-clash",
           (len(got), got and "drawer 2: its box reaches 171, into drawer 1's box above, which starts at 160"
            in got[0].message), (1, True))
-    c.drawers[0].z = 171
-    check("  at 171 they touch, and touching is clear", issues(job_of(c), "drawer-box-clash"), [])
+    check("  and not also a gap message", issues(job_of(inner(160)), "drawer-inner-gap"), [])
+    got = issues(job_of(inner(190)), "drawer-inner-gap")
+    check("inner at 21 and 190: 19 clear, under 30 — drawer-inner-gap",
+          (len(got), got and "19 clear" in got[0].message), (1, True))
+    check("  at 201: 30 clear, fine", (issues(job_of(inner(201)), "drawer-inner-gap"),
+                                      issues(job_of(inner(201)), "drawer-box-clash")), ([], []))
+    check("  the equal spacing's own defaults (21 / 365 in 720) are clear",
+          [i.check for i in validate(job_of(inner(None)), generate_job(job_of(inner(None))))
+           if i.check.startswith("drawer-")], [])
 
-    c = box(runner=H.SEED_ID, drawers=[Drawer(face_height=545, box_height=150),
-                                       Drawer(face_height=170, box_height=44)])
+    print("  kept: the runner checks")
+    c = two(low_face=200, low_box=44)
     got = issues(job_of(c), "drawer-runner-height")
     check("a 44 box on a 45 runner: drawer-runner-height", (len(got), got and "44" in got[0].message), (1, True))
-    c.drawers[1].box_height = 45
-    check("  45 on 45 fits", issues(job_of(c), "drawer-runner-height"), [])
+    check("  45 on 45 fits", issues(job_of(two(low_face=200, low_box=45)), "drawer-runner-height"), [])
     check("no length fitting is still runner-depth (its id kept)",
           len([i for i in validate(job_of(box(runner=H.SEED_ID, depth=330)), [])
                if i.check == "runner-depth"]), 1)
     ids = {i.check for i in validate(OCT, generate_job(OCT)) if i.check.startswith("drawer-")}
     check("the October job raises none of them", ids, set())
+
+    print("  the job file, and the divider drag")
+    from cabinetgen.store import cabinet_to_dict
+    from cabinetgen.drawers import split_pair
+    d = cabinet_to_dict(two())
+    check("a default offset is not written", any("offset" in x for x in d["drawers"]), False)
+    d = cabinet_to_dict(two(low_off=40))
+    check("  a set one is", [x.get("offset") for x in d["drawers"]], [None, 40])
+    check("split_pair holds each face to its own box + offset (top 21, bottom 40)",
+          split_pair(200, 300, 10, 90, 116, None, STANDARD, 21, 40), (111, 389))
+    check("  and the bottom face to 116 + 40 when dragged down", split_pair(200, 300, 400, 90, 116, None, STANDARD, 21, 40),
+          (502 - 2 - 156, 156))
 
 
 def scene_3d():

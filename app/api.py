@@ -333,11 +333,15 @@ def _geometry_info(job, cab, std):
             # where each drawer's face and box stand (room.drawer_layout): the
             # editor reads an inner drawer's face size and box top off it
             "drawer_layout": [{"n": u["n"], "inner": u["inner"], "face": list(u["face"]),
+                               "offset": u["offset"], "max_box": u["max_box"],
                                "face_w": round(u["face_x"][1] - u["face_x"][0], 1),
                                "box": [round(v, 1) for v in u["box"]],
                                "travel": u["travel"]}
                               for u in drawer_layout(cab, std, job.materials)],
             "inner_drawers": bool(cab.inner_drawers),
+            # the default box offset over its face bottom — the bottom panel
+            # plus the runner's lift (21) — what a blank Offset cell means
+            "drawer_rise": drawer_rise(cab, std),
             "doors_on": bool(cab.door_count),
             "door_count": cab.door_count,
             # Which board each leaf is cut from, resolved, and which of those was
@@ -1517,16 +1521,26 @@ def drawer_divider(payload):
     projects onto a wall track, and posts the millimetre it reached. The two
     heights come back from drawers.split_pair; the rest of the stack is untouched.
     """
-    # With the job and cabinet posted, each face is held clear of its own box
-    # as the drawer setting hangs it (`room.drawer_rise`); without, as before.
-    rise = 0
+    # Each face is held clear of its own box at that drawer's own offset
+    # (faces lead, boxes follow): the job and the pair's two drawer indices
+    # say which. Without them, as before.
+    rise = bottom_rise = 0
     if payload.get("job") is not None and payload.get("index") is not None:
         _job_, cab = _cabinet_of(payload)
-        rise = drawer_rise(cab, STANDARD)
+        default = drawer_rise(cab, STANDARD)
+
+        def off(k):
+            try:
+                d = cab.drawers[int(payload.get(k))]
+            except (TypeError, ValueError, IndexError):
+                return default
+            return default if d.offset is None else int(d.offset)
+        rise, bottom_rise = off("above"), off("below")
     top, bottom = split_pair(int(payload["top"]), int(payload["bottom"]),
                              int(payload["at"]),
                              int(payload.get("top_box") or 0),
-                             int(payload.get("bottom_box") or 0), rise=rise)
+                             int(payload.get("bottom_box") or 0), rise=rise,
+                             bottom_rise=bottom_rise)
     return {"ok": True, "top": top, "bottom": bottom}
 
 

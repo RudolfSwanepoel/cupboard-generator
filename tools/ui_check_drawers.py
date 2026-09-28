@@ -357,8 +357,44 @@ def stage_3d(pw):
     browser.close()
 
 
+def stage_offset(pw):
+    print("\nfaces lead, boxes follow — the Offset column and the tallest box (ruled 28 Sept)")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    load_job(page, "Test")
+    select(page, 4)                          # faces 110 / 165 / 220 / 276, boxes 90 / 150 / 200 / 240
+    page.wait_for_selector('#drawerbox input[data-dk="offset"]', timeout=5000)
+    check("an Offset cell per drawer, blank = the default 21",
+          page.evaluate("() => [...document.querySelectorAll('#drawerbox input[data-dk=\"offset\"]')].map((x) => [x.value, x.placeholder])"),
+          [["", "21"]] * 4)
+    maxes = page.evaluate("() => [...document.querySelectorAll('#drawerbox [data-maxbox]')].map((x) => x.textContent)")
+    check("beside each Box h, the tallest box its face takes: face less 21", maxes, ["≤89", "≤144", "≤199", "≤255"])
+    crit = lambda cid: page.evaluate(f"() => S.res.issues.filter((i) => i.where === '4' && i.check === {json.dumps(cid)}).length")
+    check("at the defaults, drawers 1-3 are outside their faces (Test.json not edited)", crit("drawer-box-face"), 3)
+    page.fill('#drawerbox input[data-d="1"][data-dk="box_height"]', "144")
+    page.dispatch_event('#drawerbox input[data-d="1"][data-dk="box_height"]', "change")
+    computed(page)
+    check("drawer 2's box down to its 144: one fewer outside its face", crit("drawer-box-face"), 2)
+    page.fill('#drawerbox input[data-d="3"][data-dk="offset"]', "15")
+    page.dispatch_event('#drawerbox input[data-d="3"][data-dk="offset"]', "change")
+    computed(page)
+    check("the bottom drawer's offset to 15: drawer-bottom-offset", crit("drawer-bottom-offset"), 1)
+    check("  and its tallest box reads 276 - 15 = 261",
+          page.evaluate("() => document.querySelector('#drawerbox [data-maxbox=\"3\"]').textContent"), "≤261")
+    page.fill('#drawerbox input[data-d="3"][data-dk="offset"]', "")
+    page.dispatch_event('#drawerbox input[data-d="3"][data-dk="offset"]', "change")
+    computed(page)
+    check("cleared, it is the default again (stored as nothing)",
+          (page.evaluate("() => S.job.cabinets[S.sel].drawers[3].offset"), crit("drawer-bottom-offset")), (None, 0))
+    shot(page, "drawer_offsets", "#drawerbox")
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 STAGES = {"supports": stage_supports, "catalogue": stage_catalogue, "runners": stage_runners,
-          "drawers": stage_drawers, "3d": stage_3d}
+          "drawers": stage_drawers, "3d": stage_3d, "offset": stage_offset}
 
 with sync_playwright() as pw:
     for key, fn in STAGES.items():

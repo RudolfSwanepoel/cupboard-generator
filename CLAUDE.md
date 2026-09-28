@@ -170,7 +170,48 @@ into `output/ui_check_drawers/`).
    or box into the top). Editor: Drawers -> **Drawer type** Outer | Inner; for
    inner, **Number of drawers** and a Height per row, with the engine's face
    size and box top beside it. Pinned in `check_runners.py` `inner_drawers()`.
-5. **The drawer checks**, all CRITICAL, all off `room.drawer_layout`
+**FACES LEAD, BOXES FOLLOW — ruled by Rudolf, 28 September 2026, later the
+same day. It REPLACES the box-height rules of Part 5 below and anything said
+earlier about box height.** The faces are spaced first, exactly as ever
+(bottom face flush with the carcass bottom, `stack_gap` 2, `door_height_gap` 3
+at the top); no box position ever moves a face. Then each box is placed
+against its OWN face:
+
+- **Outer drawers.** (1) Every box lies entirely within its own face's height
+  — box bottom >= face bottom AND box top <= face top — or `drawer-box-face`
+  (CRITICAL): a box is never mounted higher or lower than its own face. (2)
+  Each box sits at the bottom of its face, `Drawer.offset` up — per drawer,
+  editable in the drawer row (**Off.**), blank = the default `drawer_rise`,
+  21; written to the job file only when set. (3) The BOTTOM drawer may be
+  raised, never set below 21: `drawer-bottom-offset` (CRITICAL). (4) An upper
+  drawer may go lower or higher, still under rule 1. (5) The tallest box that
+  fits is face − offset (`drawer_layout`'s `max_box`), shown as `≤n` beside
+  Box h, red when the box is over it.
+- **Inner drawers.** (6) Equal spacing as built. (7) At least
+  `Standard.inner_drawer_min_gap` (30) clear between adjacent inner boxes, or
+  `drawer-inner-gap` (CRITICAL).
+- **Kept.** (8) `drawer-box-clash` — a box into the box above (not repeated
+  where `drawer-box-face` already named that drawer; between inner boxes, an
+  overlap rather than a short gap). (9) `support-drawer-foul`. (10) The runner
+  checks: `runner-depth`, `drawer-runner-height`, `drawer-inner-range`.
+- **Retired:** `drawer-box-height` ("box not shorter than its face"), which the
+  face rule replaces — a box as tall as its face at offset 0 lies within it.
+- The divider drag holds each face to its own box + its own offset
+  (`split_pair(..., rise, bottom_rise)`, `/api/drawer-divider` with `above` /
+  `below`).
+- Test.json (not edited): cabinet 4 at the default offsets — drawers 1-3
+  `drawer-box-face` (1, 6 and 1 mm over), the top drawer still
+  `support-drawer-foul`. Snapshot: only those three messages' wording moved.
+  Pinned in `check_runners.py` `drawer_checks()`; `ui_check_drawers.py
+  --stage offset` drives the Offset column in the running app.
+- Also fixed with it, both in the scripts and both pre-existing (seen on the
+  tree before the drawers brief): `ui_check_3d.py`'s arrow drag now awaits
+  the drop's compute and scene before the next arrow is read (it failed 1 run
+  in 4 on "snapped it to 'on top of 6'"), and its no-WebGL stage waits for the
+  cabinet table to paint before counting its rows.
+
+5. **The drawer checks** (as first built — see the ruling above, which
+   replaces the box-height parts), all CRITICAL, all off `room.drawer_layout`
    (`validate._drawer_setting`), pinned in `check_runners.py`
    `drawer_checks()` with worked numbers: **`drawer-box-face`** — a box's top
    above its OWN face's top, every box (**ruled strict by Rudolf**, not only
@@ -211,9 +252,9 @@ open: the inner-drawer face sits on the shelves' line (his answer), heights
 are typed and auto-spaced, all-inner-or-all-outer, runner over depth − 16.
 Two things to look at in Test.json: cabinet 4's drawers now raise four
 criticals (three `drawer-box-face`, one `support-drawer-foul`) — boxes 90 /
-150 / 200 in faces 110 / 165 / 220 need to drop to 89 / 144 / 199, and the top
-box to 76 to clear the Top Front band — so Test.json does not export until
-they are changed; and the Gelmar price per pair is R0.00 in `hardware.json`
+150 / 200 in faces 110 / 165 / 220 need to drop to 89 / 144 / 199 (or their
+offsets lower), and the top box to 76 to clear the Top Front band — so
+Test.json does not export until they are changed; and the Gelmar price per pair is R0.00 in `hardware.json`
 until it is typed in.
 
 **UI restructure, Session 2 — Fresh look, first round (28 September 2026,
@@ -362,6 +403,8 @@ dirty. Nothing else about either changed.
 | A support's per-edge tickboxes (Front / Rear / Left / Right, Inner / Outer) | Supports section | **Long edges** and **Short edges** 0 / 1 / 2 in the same row; which edge a count means is `support_edges_for_counts` |
 | "Cut from" / "Edging" / "Colour" on a support row | Supports section | **Support Material / Edging Material / Edging Colour**, same controls |
 | Face-stack rules (H − 3 fill, elevation faces, plan faces, door above the stack) | read `drawer_list` | read `Cabinet.outer_drawers` — inner drawers are behind the door |
+| "Box not shorter than its face" (`drawer-box-height`) | Validation | **Retired** — replaced by `drawer-box-face`, a box within its own face at its offset (ruling of 28 Sept) |
+| A drawer box's height above its face | fixed at 21 | **Off.** column in the drawer row (`Drawer.offset`, blank = 21) |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**

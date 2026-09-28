@@ -276,6 +276,15 @@ class Drawer:
     # fields are written to the job file only on an inner drawer.
     inner: bool = False
     z: Optional[int] = None
+    # How far an OUTER drawer's box bottom stands above its own face's bottom
+    # (ruled by Rudolf, 28 September 2026: faces lead, boxes follow). None is
+    # the default, `room.drawer_rise` — 21, the bottom panel plus the runner's
+    # lift, so the bottom box's runner stands on the bottom panel. Editable per
+    # drawer: the bottom drawer may be raised, never lowered below 21; an upper
+    # one may go either way. Whatever it is, the box must lie within its own
+    # face's height (`drawer-box-face`). Not read on an inner drawer, whose face
+    # is its box. Written to the job file only when set.
+    offset: Optional[int] = None
 
 
 @dataclass

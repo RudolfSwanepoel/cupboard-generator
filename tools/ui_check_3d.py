@@ -210,6 +210,11 @@ def stage_f1(pw):
     check_true("without WebGL the tab says so in one line", "WebGL" in note)
     check("and nothing else broke", errs2, [])
     page2.click('nav [data-tab="cabinets"]')
+    # the table paints after the click lands: wait for it rather than read the first frame
+    try:
+        page2.wait_for_function("() => document.querySelectorAll('#cabtable tr').length > 3", timeout=10000)
+    except Exception:                                        # noqa: BLE001 — the check below says so
+        pass
     check_true("the rest of the app still works",
                page2.evaluate("() => document.querySelectorAll('#cabtable tr').length > 3"))
     ctx2.close()
@@ -808,6 +813,11 @@ def stage_f6(pw):
             time.sleep(pause)
         page.mouse.up()
         page.wait_for_function("() => !V3D.dragInfo().dragging", timeout=10000)
+        # the drop's compute and the scene it refreshes, awaited — waiting on
+        # the scene flags alone could pass before that compute had even set
+        # them, and the next arrow was then read where it used to be (a flake
+        # seen 1 run in 4 on the tree before the drawers brief, 28 Sept 2026)
+        page.evaluate("async () => { clearTimeout(computeTimer); computeTimer = null; await compute(); }")
         page.wait_for_function("() => !S.sceneStale && sceneTimer === null", timeout=15000)
         settle(page)
 

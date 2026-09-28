@@ -445,13 +445,18 @@
   #drawerbox th{background:transparent;box-shadow:none;position:static}
   #drawerbox input,#drawerbox select{padding:2px 3px}
   #drawerbox col.c-n{width:18px}
-  #drawerbox col.c-mode{width:56px}
+  #drawerbox col.c-mode{width:52px}
   #drawerbox col.c-val{width:50px}
   #drawerbox col.c-mm{width:36px}
   #drawerbox col.c-box{width:50px}
-  #drawerbox col.c-base{width:66px}
+  #drawerbox col.c-base{width:60px}
   #drawerbox col.c-mat{width:auto}
   #drawerbox col.c-rm{width:30px}
+  #drawerbox col.c-boxmax{width:78px}
+  #drawerbox col.c-off{width:42px}
+  #drawerbox td [data-maxbox]{margin-left:3px;font-size:10px}
+  #drawerbox td [data-maxbox].over{color:var(--crit);font-weight:600}
+  #drawerbox td input[data-dk="box_height"]{width:44px}
   #drawerbox col.c-z{width:62px}
   #drawerbox col.c-read{width:64px}
   #elevation{position:relative}
@@ -1952,9 +1957,14 @@ $("editor").addEventListener("input", (e) => {
   // "" is not a board: it hands this drawer back to the cabinet's
   else if (dk === "box_board" || dk === "face_board") d[dk] = e.target.value || null;
   else if (dk === "share") d.share = parseFloat(e.target.value) || 0;
+  // blank is the default offset (21): stored as nothing, not as 0
+  else if (dk === "offset") d.offset = e.target.value === "" ? null : (parseInt(e.target.value, 10) || 0);
   else d[dk] = parseInt(e.target.value, 10) || 0;
   // an inner drawer is outside the face stack: nothing to solve, only compute
   if (d.inner) { schedule(); return; }
+  // a box height or an offset moves no face, so the solve below would not
+  // compute: the engine's checks and the tallest-box figure still have to
+  if (dk === "box_height" || dk === "offset") schedule();
   solveStack();
 });
 
@@ -2678,9 +2688,19 @@ function renderDrawers() {
         `<option value="${esc(k)}"${k === v ? " selected" : ""}>${
         esc(k)}</option>`).join("")}</select></td>`;
 
+  // Faces lead, boxes follow (ruled 28 September 2026): each box sits its
+  // drawer's Offset above its own face bottom (blank = the default, 21) and
+  // must lie within that face. The tallest box that fits — face less offset —
+  // is the engine's figure (room.drawer_layout), shown beside Box h.
+  const gd = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const lay = {};
+  ((gd && gd.drawer_layout) || []).forEach((u) => { lay[u.n] = u; });
+  const rise = (gd && gd.drawer_rise) || 21;
   const rows = c.drawers.map((d, i) => {
     const share = (d.mode || "fixed") === "share";
     const val = share ? (d.share === undefined ? 1 : d.share) : d.face_height;
+    const u = lay[i + 1];
+    const over = u && !u.inner && (u.box[5] > u.face[1] || u.box[4] < u.face[0]);
     return `<tr>
       <td class="n">${i + 1}</td>
       <td><select data-d="${i}" data-dk="mode">
@@ -2690,7 +2710,12 @@ function renderDrawers() {
            data-dk="${share ? "share" : "face_height"}" value="${val}"></td>
       <td class="n mono" data-mm="${i}">${d.face_height}</td>
       <td><input type="number" step="1" data-d="${i}" data-dk="box_height"
-           value="${d.box_height}"></td>
+           value="${d.box_height}"><span class="note mono${over ? " over" : ""}" data-maxbox="${i}"
+           title="the tallest box this face takes at this offset (face less offset)">${
+           u ? "≤" + u.max_box : ""}</span></td>
+      <td><input type="number" step="1" data-d="${i}" data-dk="offset"
+           value="${d.offset === null || d.offset === undefined ? "" : d.offset}" placeholder="${rise}"
+           title="how far the box bottom sits above this face's bottom — blank is ${rise}; the bottom drawer may be raised, never below ${rise}"></td>
       <td><select data-d="${i}" data-dk="base">${(S.def.bases || []).map((b) =>
         `<option${b === d.base ? " selected" : ""}>${esc(b)}</option>`).join("")}</select></td>
       ${boardCell(i, "box_board", d.box_board || "", boxDefault,
@@ -2703,20 +2728,25 @@ function renderDrawers() {
 
   box.innerHTML = `${drawerTypeHTML(c)}<table class="rows">
     <colgroup><col class="c-n"><col class="c-mode"><col class="c-val"><col class="c-mm">
-      <col class="c-box"><col class="c-base"><col class="c-mat"><col class="c-mat">
+      <col class="c-boxmax"><col class="c-off"><col class="c-base"><col class="c-mat"><col class="c-mat">
       <col class="c-rm"></colgroup>
     <thead><tr>
       <th class="n">#</th><th>Mode</th><th>Value</th><th class="n">mm</th>
-      <th title="box side height">Box h</th><th>Base</th>
+      <th title="box side height, and the tallest this face takes">Box h</th>
+      <th title="Offset: the box bottom above its face bottom (blank = ${rise})">Off.</th><th>Base</th>
       <th title="box material">Box mat.</th><th title="face material">Face mat.</th><th></th>
     </tr></thead><tbody>${rows ||
-      `<tr><td colspan="9" class="note">No faces yet — add one.</td></tr>`}</tbody></table>
+      `<tr><td colspan="10" class="note">No faces yet — add one.</td></tr>`}</tbody></table>
     <div class="dtot" id="dtot"></div>
     <div class="presets">
       <button data-preset="equal">Equal</button>
       <button data-preset="graduated">Graduated</button>
       <button id="dadd">+ Face</button>
     </div>
+    <p class="hint">Faces lead, boxes follow: each box sits <b>Offset</b> above the bottom of
+      its own face (blank is ${rise} — the runner standing on the bottom panel) and must lie
+      within that face; the figure beside <b>Box h</b> is the tallest box that fits. The
+      bottom drawer may be raised, never set below ${rise}.</p>
     <p class="hint">Listed top to bottom. The ${std.stack_gap} mm gap between faces
       comes from the standard and is never typed per drawer. Drag the join between
       two faces in the elevation to pin just those two at the heights you drag to.
@@ -4902,7 +4932,7 @@ async function endFaceDrag() {
   const r = await post("/api/drawer-divider", {
     top: a.face_height, bottom: b.face_height, at: d.at,
     top_box: a.box_height, bottom_box: b.box_height,
-    job: S.job, index: S.job.cabinets.indexOf(d.cab)});
+    job: S.job, index: S.job.cabinets.indexOf(d.cab), above: d.above, below: d.below});
   if (!r.ok) { toast(r.error, true); return; }
   a.mode = "fixed"; a.face_height = r.top;
   b.mode = "fixed"; b.face_height = r.bottom;

@@ -367,12 +367,9 @@ def _zero_quantities(panels):
 
 
 def _drawer_boxes(cabinets):
-    """A box side taller than its own face would show above the drawer front.
-
-    A face of no height at all is caught first and said plainly: it means the
-    fixed rows in the stack have eaten the whole opening, and the share rows
-    have nothing left to divide.
-    """
+    """A face of no height at all, said plainly: it means the fixed rows in the
+    stack have eaten the whole opening, and the share rows have nothing left
+    to divide. Where a box stands against its face is `_drawer_setting`'s."""
     out = []
     for c in cabinets:
         # A cabinet switched to Panel keeps its drawer stack in the job file and
@@ -389,77 +386,93 @@ def _drawer_boxes(cabinets):
                                  f"faces over-run the opening, leaving nothing for the "
                                  f"shared ones", check="drawer-face-overrun"))
                 continue
-            if d.box_height >= d.face_height:
-                out.append(Issue(CRITICAL, str(c.number),
-                                 f"drawer {i}: box {d.box_height} is not shorter than "
-                                 f"its face {d.face_height}", check="drawer-box-height"))
+            # "box not shorter than its face" (drawer-box-height) is retired:
+            # replaced by the face rule in _drawer_setting (ruled 28 Sept 2026,
+            # "faces lead, boxes follow") — a box may be as tall as its face
+            # at offset 0, if it then lies within it.
     return out
 
 
 def _drawer_setting(job: Job):
-    """The drawer checks off the drawer setting (Part 5 of the drawers /
-    runners / supports brief, 28 September 2026). Every position is
+    """The drawer checks — "faces lead, boxes follow" (ruled by Rudolf, 28
+    September 2026, replacing the brief's Part 5 box-height rules). The faces
+    are spaced exactly as always; each box then sits at the bottom of its own
+    face, its drawer's `offset` up (default 21). Every position is
     `room.drawer_layout`'s — the one place a box is placed — so these, the
-    support-foul critical and the 3D cannot disagree. All CRITICAL:
+    support-foul critical and the 3D cannot disagree. All CRITICAL, stable ids:
 
-    * `drawer-box-face`: a box taller than its face allows — its top above its
-      own face's top (ruled strict by Rudolf: every box, not only the top one).
-      A box hangs `drawer_rise` (21) above its face bottom, so a face must be
-      at least box + 21. Where the old `drawer-box-height` (box not shorter
-      than its face) already names the drawer, this does not repeat it.
-    * `drawer-box-clash`: a box whose top is above the bottom of the box
-      above it. With every outer box hung the same 21 off its face, an outer
-      box can only reach the box above by first being taller than its face,
-      which the two checks above already name — so in practice this is inner
-      drawers at typed heights, and it is not repeated where they have spoken.
-    * `drawer-runner-height`: a box lower than its runner's `height` (45) —
-      the inner member cannot be fixed to a drawer side it overhangs. (No
-      length on the record fitting the depth is `runner-depth`, which keeps
-      its id.)
-
-    An inner drawer's face IS its box, so the first cannot arise on one.
+    * `drawer-box-face` (rule 1): an outer box not entirely within its own
+      face's height — its bottom below the face bottom, or its top above the
+      face top. A box can never be mounted higher or lower than its own face.
+      The tallest box a face takes is its height less the offset.
+    * `drawer-bottom-offset` (rule 3): the BOTTOM drawer's offset below the
+      default (21) — its runner would stand below the bottom panel. It may be
+      raised, never lowered.
+    * `drawer-box-clash` (rule 8): a box into the box above it. Where
+      `drawer-box-face` has already named the drawer it is not repeated (an
+      outer box within its own face cannot reach the next); between inner
+      drawers it is a box overlapping the one above.
+    * `drawer-inner-gap` (rule 7): less than `Standard.inner_drawer_min_gap`
+      (30) clear between two inner boxes, one over the other, where they do
+      not already overlap.
+    * `drawer-runner-height`: a box lower than its runner's `height` (45).
+      The runner checks are otherwise unchanged (`runner-depth`, and the
+      inner drawers' `drawer-inner-range`).
     """
-    from .room import drawer_layout
+    from .room import drawer_layout, drawer_rise
     out = []
+    std = job.std
     for c in job.cabinets:
         if c.is_panel or not c.drawer_list:
             continue
         try:
-            lay = drawer_layout(c, job.std, job.materials)
+            lay = drawer_layout(c, std, job.materials)
         except ValueError:
             continue                       # no runner fits: runner-depth says so
         rr = c.runner_or_legacy
-        by_n = {u["n"]: u for u in lay}
-        # the box above each box: the next one up the carcass
-        order = sorted(lay, key=lambda u: u["box"][4])
-        above = {order[k]["n"]: order[k + 1] for k in range(len(order) - 1)}
         drawers = c.drawer_list
-        for n, u in sorted(by_n.items()):
-            d = drawers[u["index"]]
-            top, face_top = u["box"][5], u["face"][1]
-            nxt = above.get(n)
-            into = nxt is not None and top > nxt["box"][4]
-            said = False
-            if not u["inner"] and top > face_top and d.box_height < d.face_height:
+        rise = drawer_rise(c, std)
+        outer = [u for u in lay if not u["inner"]]
+        lowest = min(outer, key=lambda u: u["face"][0]) if outer else None
+        named = set()
+        for u in outer:
+            f0, f1 = u["face"]
+            if f1 <= f0:
+                continue                   # no face at all: drawer-face-overrun says so
+            b0, b1 = u["box"][4], u["box"][5]
+            if b0 < f0 or b1 > f1:
+                where = (f"{f0 - b0} below the face bottom at {f0}" if b0 < f0
+                         else f"{b1 - f1} above the face top at {f1}")
                 out.append(Issue(CRITICAL, str(c.number),
-                                 f"drawer {n}: its box stands {u['box'][4] - u['face'][0]} above "
-                                 f"its face bottom and reaches {top}, {top - face_top} above the "
-                                 f"face top at {face_top}"
-                                 f" — the face needs to be at least "
-                                   f"{d.box_height + u['box'][4] - u['face'][0]}, or the box "
-                                   f"{face_top - u['box'][4]}",
-                                 check="drawer-box-face"))
-                said = True
-            elif not u["inner"] and d.box_height >= d.face_height:
-                said = True               # drawer-box-height has named it
-            if into and not said:
+                                 f"drawer {u['n']}: its box runs {b0}-{b1}, {where} — a box "
+                                 f"must lie within its own face. At an offset of "
+                                 f"{u['offset']} the tallest box this face takes is "
+                                 f"{u['max_box']}", check="drawer-box-face"))
+                named.add(u["n"])
+        if lowest is not None and lowest["offset"] < rise:
+            out.append(Issue(CRITICAL, str(c.number),
+                             f"drawer {lowest['n']} is the bottom drawer and its box is set "
+                             f"{lowest['offset']} above its face bottom — below {rise}, its "
+                             f"runner would stand below the bottom panel. Raise it to at "
+                             f"least {rise}", check="drawer-bottom-offset"))
+        order = sorted(lay, key=lambda u: u["box"][4])
+        for lo, hi in zip(order, order[1:]):
+            gap = hi["box"][4] - lo["box"][5]
+            if gap < 0 and lo["n"] not in named:
                 out.append(Issue(CRITICAL, str(c.number),
-                                 f"drawer {n}: its box reaches {top}, into drawer "
-                                 f"{nxt['n']}'s box above, which starts at {nxt['box'][4]}",
+                                 f"drawer {lo['n']}: its box reaches {lo['box'][5]}, into "
+                                 f"drawer {hi['n']}'s box above, which starts at {hi['box'][4]}",
                                  check="drawer-box-clash"))
+            elif 0 <= gap < std.inner_drawer_min_gap and lo["inner"] and hi["inner"]:
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"inner drawers {lo['n']} and {hi['n']}: {gap} clear between "
+                                 f"their boxes ({lo['box'][5]} to {hi['box'][4]}) — at least "
+                                 f"{std.inner_drawer_min_gap} is needed", check="drawer-inner-gap"))
+        for u in lay:
+            d = drawers[u["index"]]
             if d.box_height < rr.height:
                 out.append(Issue(CRITICAL, str(c.number),
-                                 f"drawer {n}: box {d.box_height} is lower than its "
+                                 f"drawer {u['n']}: box {d.box_height} is lower than its "
                                  f"{rr.height:g} mm runner ({rr.name or 'runner'}) — the "
                                  f"runner cannot be fixed to it", check="drawer-runner-height"))
     return out

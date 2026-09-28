@@ -164,3 +164,49 @@ per-cabinet exploded view.
 The benchmark figures, the checks, what the snapshot moved and why, the new
 tab's location, and the open question in Part 4. Update `CLAUDE.md`'s Status and
 the "where it lives now" checklist (hard rule 9).
+
+---
+
+## Ruling — faces lead, boxes follow (Rudolf, 28 Sept 2026, later the same day)
+
+Replaces the box-height rules in Part 5 above, and anything said earlier about
+box height.
+
+- Space the faces first, exactly as today (bottom face flush with the carcass
+  bottom, stack_gap 2 between faces, door_height_gap 3 at the top). No box
+  position ever moves a face. Then place each box relative to its OWN face.
+
+**Outer drawers (with a face)**
+1. Every box must lie entirely within its own face's height: box bottom >= face
+   bottom AND box top <= face top. Otherwise CRITICAL. A box can never be
+   mounted higher or lower than its own face.
+2. Each box sits at the bottom of its own face: box bottom = face bottom +
+   offset. The offset is per drawer and editable in the drawer row, default 21.
+3. Bottom drawer: default offset 21 (runner stands on the bottom panel, lift 5,
+   16 bottom). It may be RAISED (any value above 21), but never below 21. Below
+   21 is CRITICAL.
+4. Upper drawers: default 21, may be set lower or higher, still subject to
+   rule 1.
+5. So the tallest box that fits is face height minus its offset. Show that
+   figure beside the box height in the drawer row.
+
+**Inner drawers (face = box, behind a door)**
+6. Keep equal spacing as built (he uses more drawers or bespoke offsets when
+   needed).
+7. Minimum clear gap between adjacent inner boxes: 30 mm, as a new Standard
+   constant (`inner_drawer_min_gap`). Less is CRITICAL.
+
+**Keep**
+8. Box clashes with the box above: CRITICAL.
+9. The top box fouling the Top Front / Top Rear band: CRITICAL.
+10. The existing runner checks unchanged.
+
+**Checks and record.** Stable check ids, worked numbers pinned in
+`tools/check_runners.py`. Test.json cabinet 4 at default offsets (faces
+110/165/220, boxes 90/150/200): drawers 1-3 critical under rule 1; the top
+drawer still support-foul critical. Do not edit Test.json.
+
+**As built:** `Drawer.offset` (None = 21), `drawer-box-face` (rule 1),
+`drawer-bottom-offset` (rule 3), `drawer-inner-gap` (rule 7),
+`drawer-box-clash` (rule 8), `support-drawer-foul` (rule 9); the old
+`drawer-box-height` retired. See CLAUDE.md, Status.

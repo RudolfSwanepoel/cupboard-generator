@@ -1632,10 +1632,13 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
       1. the FACES are spaced exactly as they always were — the bottom face
          flush with the carcass underside, `stack_gap` between faces, the last
          drawer in the list lowest; a door (if any) above them;
-      2. each box hangs off its own face: its bottom is the face bottom plus
-         the bottom drawer's offset — the bottom panel (t) plus the runner's
-         `lift` — so the bottom box sits on a runner standing on the bottom
-         panel, lifted 5: 16 + 5 = 21 above the carcass underside;
+      2. each box sits at the bottom of its OWN face: its bottom is the face
+         bottom plus the drawer's `offset` — by default `drawer_rise`, the
+         bottom panel (t) plus the runner's `lift`, 16 + 5 = 21, so the bottom
+         box sits on a runner standing on the bottom panel. The offset is
+         editable per drawer (ruled 28 September 2026, "faces lead, boxes
+         follow"): the bottom drawer may be raised, never lowered below 21;
+         an upper one either way; every box within its own face's height;
       3. the checks read the result. No box position ever moves a face.
 
     The box front is flush with the carcass front (y 0) and the face overlays
@@ -1683,7 +1686,9 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
     def one(i, d, fz0, fz1, bz0, y0, length, face_x, face_y):
         bh = int(d.box_height or 0)
         return {"n": i + 1, "index": i, "inner": bool(d.inner),
-                "face": (fz0, fz1), "face_x": face_x, "face_y": face_y,
+                "face": (fz0, fz1), "offset": bz0 - fz0,
+                # the tallest box this face takes at this offset (rule 5)
+                "max_box": fz1 - bz0, "face_x": face_x, "face_y": face_y,
                 "face_board": cab.face_board_of(d),
                 "box": (t + clear, W - t - clear, y0, y0 + length, bz0, bz0 + bh),
                 "rails": rails,
@@ -1701,7 +1706,10 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
             continue
         fh = int(d.face_height or 0)
         ft = _front_t(mats, cab.face_board_of(d), std)
-        out.append(one(i, d, at, at + fh, at + offset, 0, outer_len,
+        # the box sits at the bottom of its OWN face, its drawer's offset up —
+        # 21 unless the drawer says otherwise (faces lead, boxes follow)
+        rise = offset if d.offset is None else int(d.offset)
+        out.append(one(i, d, at, at + fh, at + rise, 0, outer_len,
                        (gap / 2, W - gap / 2), (-ft, 0)))
         at += fh + std.stack_gap
     # behind the door: each at its own height, its face the box's size
