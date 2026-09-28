@@ -326,6 +326,7 @@ def main() -> int:
     print("\nno room, no datum")
     plain = kitchen()
     plain.room, plain.placements = None, []
+    # the Run is an internal helper since the UI restructure: see ui_restructure()
     check("falls back to the side-by-side drawing, byte for byte",
           wall_elevation_svg(plain, "A") == elevation_svg(plain), True)
     check("an unknown wall says so instead of crashing",
@@ -595,8 +596,76 @@ def main() -> int:
           re.findall(r'class="(?:ecab|edoor)"[^>]*stroke-dasharray', fa) +
           re.findall(r'<polyline[^>]*stroke-dasharray', fa), [])
 
+    ui_restructure()
+
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0
+
+
+def ui_restructure():
+    """The Run left the UI (UI restructure, 28 September 2026).
+
+    The pins above that compare `wall_elevation_svg(no room)` with
+    `elevation_svg` stay: `elevation_svg` is an INTERNAL helper now — the
+    no-room fallback of `wall_elevation_svg`, and the side-by-side layout
+    (`run_layout`) the 3D tab stands a room-less job on. What moved is that
+    nothing the operator sees or exports draws it any more: the wall
+    elevations are in Room -> Elevation, and the export writes one SVG per
+    wall TICKED, plus the plan, and no `<job>_elevation.svg`."""
+    import shutil
+    import tempfile
+    sys.path.insert(0, os.path.join(ROOT, "app"))
+    import api                                            # noqa: E402
+    from cabinetgen.room import add_wall                  # noqa: E402
+    from cabinetgen.store import job_to_dict             # noqa: E402
+
+    print("\nthe Run left the UI; the export writes the walls ticked, and the plan")
+    j = kitchen()
+    j.room.ceiling = 2700
+    reply = api.compute({"job": job_to_dict(j)})
+    check("compute no longer sends the Run drawing", "elevation" in reply, False)
+    check("the elevation route draws a wall, and only a wall",
+          (api.elevation({"job": job_to_dict(j), "wall": "A"})["ok"],
+           api.elevation({"job": job_to_dict(j)})["ok"]), (True, False))
+    html = open(os.path.join(ROOT, "app", "index.html"), encoding="utf-8").read()
+    check("the UI offers no Run button and reads no Run drawing",
+          ('[["", "Run"]]' in html, "res.elevation" in html), (False, False))
+    check("the wall elevation is in Room -> Elevation, not on the Cabinets tab",
+          html.index('id="elevation"') > html.index('id="tab-room"'), True)
+
+    three = kitchen()
+    three.room.ceiling = 2700
+    three.room.closed = False
+    three.room.walls = three.room.walls[:2]
+    add_wall(three.room, "end", 2000)
+    ids = [w.id for w in three.room.walls]
+    check("a three-wall room to export", len(ids), 3)
+    out = tempfile.mkdtemp(prefix="cupboard_export_")
+    was = api.OUT_DIR
+    try:
+        api.OUT_DIR = out
+        three.name = "exp"
+        r = api.export({"job": job_to_dict(three), "walls": [ids[0], ids[2]]})
+        check("the export goes ahead", (r["ok"], r.get("error", "")), (True, ""))
+        svgs = sorted(f for f in r.get("files", []) if f.endswith(".svg") and not f.startswith("nest_"))
+        check("two of three walls ticked: exactly those two, and the plan",
+              svgs, sorted([f"exp_elevation_{ids[0]}.svg", f"exp_elevation_{ids[2]}.svg",
+                            "exp_plan.svg"]))
+        check("and on disk: no Run drawing, no unticked wall",
+              sorted(f for f in os.listdir(os.path.join(out, "exp"))
+                     if f.endswith(".svg") and not f.startswith("nest_")), svgs)
+        r = api.export({"job": job_to_dict(three)})
+        check("no list at all is every wall",
+              sorted(f for f in r["files"] if f.startswith("exp_elevation_")),
+              sorted(f"exp_elevation_{i}.svg" for i in ids))
+        plain = kitchen()
+        plain.room, plain.placements, plain.name = None, [], "noroom"
+        r = api.export({"job": job_to_dict(plain)})
+        check("a job with no room writes no drawing at all",
+              [f for f in r["files"] if f.endswith(".svg") and not f.startswith("nest_")], [])
+    finally:
+        api.OUT_DIR = was
+        shutil.rmtree(out, ignore_errors=True)
 
 
 if __name__ == "__main__":

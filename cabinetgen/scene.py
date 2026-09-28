@@ -421,6 +421,77 @@ def build(job: Job) -> dict:
     }
 
 
+def build_cabinet(job: Job, number: int) -> dict:
+    """ONE cabinet alone, for the Cabinets tab's 3D view (UI restructure, 28
+    September 2026): the same parts `build` draws for it — carcass, fronts,
+    backing, supports, shelves, bands — plus the panels attached to it, and no
+    room, no walls and no neighbours.
+
+    It stands in its own frame: x along the width from its left side, y out
+    from the back towards the front (the wall it would stand against is y 0),
+    on the floor as Placement.z 0 stands it — on its legs where it has them.
+    An attached panel stands where `room.attached_placement` puts it off that
+    placement, so what the Room draws and what this draws cannot disagree. A
+    selected ATTACHED panel shows its cabinet with it; a standalone panel
+    shows alone. Read-only with respect to the job, like `build`.
+    """
+    from dataclasses import replace
+    from .room import attached_panels, attached_placement, cabinet_by_number, host_of
+    t0 = time.perf_counter()
+    std = job.std
+    mats = job.materials
+    cab = cabinet_by_number(job, number)
+    if cab is None:
+        return {"ok": False, "error": f"no item {number}"}
+    host = host_of(job, cab) if cab.is_panel else None
+    main = host or cab
+    real = placement_for(job, main.number)
+    # standing where Placement.z 0 stands it, facing as it faces in the room
+    p = Placement(cabinet=main.number, wall="", x=0, z=0,
+                  flip=bool(real.flip) if real is not None else False)
+    frame = ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0))
+    items = []
+
+    def entry(c, pl, fr, attached=None):
+        g = geometry(c, std, mats)
+        e = {"number": c.number, "kind": c.kind, "panel": c.is_panel,
+             "corner": c.corner_kind, "template": c.template, "placed": True, "wall": "",
+             "attached": attached, "layer": "panels" if c.is_panel else layer_of(c, pl),
+             "dims": _dims(g), "x": pl.x, "z": pl.z, "y": int(getattr(pl, "y", 0) or 0),
+             "flip": bool(pl.flip),
+             "parts": _parts_for(job, c, pl, fr, carcass_z(c, pl, std), std, mats)}
+        if attached is not None:
+            s = c.panel_spec
+            e["at"] = {"x": int(s.at_x or 0), "y": int(s.at_y or 0), "z": int(s.at_z or 0)}
+        e["hash"] = _hash(e["parts"])
+        return e
+
+    items.append(entry(main, p, frame))
+    if not main.is_panel:
+        sub = replace(job, placements=[p], room=None)
+        for pan in attached_panels(job, main.number):
+            pp = attached_placement(sub, pan, std, mats)
+            if pp is None:
+                continue
+            items.append(entry(pan, pp, ((float(pp.x), float(pp.y)), (1.0, 0.0), (0.0, 1.0)),
+                               attached=main.number))
+    return {
+        "ok": True,
+        "banner": "",
+        "single": main.number,
+        "room": None,
+        "ceiling_measured": False,
+        "looks": _looks(job),
+        "items": items,
+        "room_parts": [],
+        "overlays": {"swings": [], "overlaps": [], "issues": []},
+        "not_drawn": NOT_DRAWN,
+        "tape_mm": TAPE_BAND_MM,
+        "tolerance": std.snap_tolerance,
+        "build_ms": round((time.perf_counter() - t0) * 1000, 1),
+    }
+
+
 def local_outline(job: Job, number: int, outline) -> Optional[list]:
     """A world outline taken back into that cabinet's own frame — for the
     checks, which want to compare what was sent with `room.geometry`."""

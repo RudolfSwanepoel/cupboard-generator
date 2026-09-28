@@ -945,6 +945,56 @@ def default_offsets(job, panel, host, std: Standard = None, materials: dict = No
     return (-int(pg.width), 0, 0)
 
 
+def attach_snap_points(job, panel, host, std: Standard = None, materials: dict = None) -> dict:
+    """Every offset an attached panel's drag may settle on, per axis, in the
+    supports spec's carcass frame — the drag in the Cabinets tab's 3D view
+    (spec B4, built with the UI restructure, 28 September 2026).
+
+    Each is a face or an edge of the carcass meeting a face or an edge of the
+    panel: `x` the panel's left edge (at_x), `y` its front edge back from the
+    front face of the sides (at_y), `z` its underside up from theirs (at_z).
+    The browser picks the nearest within `Standard.snap_tolerance` and works
+    out no offset of its own; what it drops is written to the same three
+    fields Panel design types (hard rule 8). Sorted, one reason per value.
+
+        {"x": [{"v": -16, "why": "against the left side, outside"}, ...],
+         "y": [...], "z": [...]}
+    """
+    std = job.std if std is None else std
+    materials = job.materials if materials is None else materials
+    g = geometry(host, std, materials)
+    pg = panel_geometry(panel, std, materials)
+    xs = [x for x, _ in g.footprint] or [0, g.width]
+    W, D, H, t = int(round(max(xs) - min(xs))), int(g.depth), int(g.height), std.board_t
+    pw, pd, ph = int(pg.width), int(pg.depth), int(pg.height)
+    # a door or a drawer face stands proud by its own board's thickness: an end
+    # panel brought forward by that much finishes flush with the fronts
+    front = host.door_board(0) if (g.door_widths or host.drawer_list) else host.exterior_board
+    ft = _front_t(materials, front, std)
+
+    def axis(cands):
+        seen, out = set(), []
+        for v, why in cands:
+            v = int(v)
+            if v in seen:
+                continue
+            seen.add(v)
+            out.append({"v": v, "why": why})
+        return sorted(out, key=lambda c: c["v"])
+
+    return {
+        "x": axis([(-pw, "against the left side, outside"), (0, "left edges level"),
+                   (t, "against the left side, inside"),
+                   (W - t - pw, "against the right side, inside"),
+                   (W - pw, "right edges level"), (W, "against the right side, outside")]),
+        "y": axis([(0, "front flush with the carcass"), (-ft, "front flush with the fronts"),
+                   (-pd, "in front of the carcass"), (D - pd, "back flush with the carcass"),
+                   (D, "behind the carcass")]),
+        "z": axis([(0, "bottoms level"), (H - ph, "tops level"), (H, "on top of the carcass"),
+                   (-ph, "under the carcass"), (t, "on the bottom panel")]),
+    }
+
+
 def new_attached_panel(job, host, number: int, std: Standard = None):
     """A fresh panel on this cabinet, as "+ Panel on this cabinet" makes it: an
     end panel, side-on, cut from the cabinet's exterior board, the carcass

@@ -40,7 +40,7 @@ from cabinetgen.engine import generate_cabinet, generate_job            # noqa: 
 from cabinetgen.model import (PANEL_CODE, PANEL_ORIENTATIONS, Cabinet,   # noqa: E402
                               Drawer, Job, Panel, PanelSpec, Placement,
                               Support)
-from cabinetgen.render import elevation_svg, plan_svg, tape_legend       # noqa: E402
+from cabinetgen.render import elevation_svg, plan_svg, run_layout, tape_legend  # noqa: E402
 from cabinetgen.room import (cabinet_footprint, clashes as room_clashes,  # noqa: E402
                              free_x, geometry, panel_clashes, placed,
                              placed_panels, rectangular, snap_points,
@@ -238,12 +238,20 @@ def main():
     check("placed() is cabinets only", placed(job_of(pan)), [])
     check("a panel stands on no legs",
           stands_on_legs(pan, type("P", (), {"z": 0, "layer": ""})()), False)
+    # The Run left the UI on 28 September 2026. `elevation_svg` is an internal
+    # helper now (the no-room fallback of `wall_elevation_svg`), and its layout,
+    # `run_layout`, is what the 3D tab stands a room-less job on — so what these
+    # pinned still matters, and is pinned on the layout too.
     check("the Run drawing leaves it out",
           elevation_svg(job_of(pan)).count("No cabinets yet"), 1)
+    check("and so does the Run's layout, which the 3D tab's no-room view reads",
+          [c.number for c, _x in run_layout(job_of(pan))], [])
     cup = Cabinet(number=1, width=600, height=780, depth=570, doors=1,
                   carcass_board="MEL", exterior_board="WOOD", back_board="THIN")
     check("the Run draws the cupboards beside it, and only those",
           elevation_svg(job_of(cup, pan)) == elevation_svg(job_of(cup)), True)
+    check("its layout the same",
+          [c.number for c, _x in run_layout(job_of(cup, pan))], [1])
     check("and the edging legend names no panel",
           tape_legend(job_of(cup, pan)) == tape_legend(job_of(cup)), True)
 

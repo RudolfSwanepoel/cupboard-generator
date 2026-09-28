@@ -61,6 +61,8 @@ def computed(page):
 
 
 def select_row(page, number):
+    if page.evaluate("() => S.tab") != "cabinets":
+        page.click('nav [data-tab="cabinets"]')           # the app opens on Boards
     page.click(f'#cabtable tr[data-i] td.n:first-child:text-is("{number}")')
     page.wait_for_function(f"() => S.sel !== null && S.job.cabinets[S.sel].number === {number}", timeout=5000)
 
@@ -120,11 +122,14 @@ def main():
         page.wait_for_function(f"() => document.querySelector('#plan [data-host=\"1\"]') !== null", timeout=10000)
         check("the plan draws it, marked as cabinet 1's",
               page.evaluate(f"() => document.querySelectorAll('#plan [data-panel=\"{num}\"][data-host=\"1\"]').length > 0"), True)
-        page.click('nav [data-tab="cabinets"]')
+        # the wall elevations live in Room -> Elevation since the UI restructure
+        page.click('#roomsubs [data-roomsub="elev"]')
+        page.wait_for_selector(f'#elevpick [data-elev="{host_place["wall"]}"]', timeout=10000)
         page.click(f'#elevpick [data-elev="{host_place["wall"]}"]')      # the wall the cabinet stands on
         page.wait_for_function(f"() => document.querySelector('#elevation .epanel[data-cab=\"{num}\"]') !== null", timeout=10000)
         check("the wall elevation draws it, marked as cabinet 1's",
               page.evaluate(f"() => !!document.querySelector('#elevation .epanel[data-cab=\"{num}\"][data-host=\"1\"]')"), True)
+        page.click('#roomsubs [data-roomsub="plan"]')
 
         print("\ndragging cabinet 1 in the plan carries the panel with it")
         page.click('nav [data-tab="room"]')

@@ -369,11 +369,89 @@ def main():
     check("/api/support-defaults hands them back for the cabinet's kind", [x["type"] for x in r["rows"]], ["front", "top_rear", "back", "back"])
     check("an existing cabinet's rows are not touched by any of it", job().cabinets[0].support_rows, [])
 
+    restructure()
+
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: {FAILS}")
         sys.exit(1)
     print("ALL OK")
+
+
+def restructure():
+    """The Cabinets tab's 3D (UI restructure, 28 September 2026): one cabinet
+    alone with its attached panels (`scene.build_cabinet`), and the drag of an
+    attached panel there (spec B4) — snap targets off the carcass faces and
+    edges (`room.attach_snap_points`), and the drop written to the very
+    offsets Panel design types (`/api/attach-move`)."""
+    from cabinetgen.room import attach_snap_points
+    print("\nthe Cabinets tab's 3D: one cabinet alone, with its attached panels")
+    j = job()
+    j.cabinets.append(new_attached_panel(j, j.cabinets[0], 4))
+    before = json.dumps(job_to_dict(j), sort_keys=True)
+    one = SC.build_cabinet(j, 1)
+    check("cabinet 1 with its one attached panel, and nothing else",
+          (one["ok"], one["single"], [(i["number"], i["attached"]) for i in one["items"]]),
+          (True, 1, [(1, None), (4, 1)]))
+    check("no room, no walls, no overlays", (one["room"], one["room_parts"], one["overlays"]["swings"]),
+          (None, [], []))
+    check("the attached panel carries its offsets", one["items"][1]["at"], {"x": -16, "y": -16, "z": 0})
+    room = SC.build(j)
+    by = {i["number"]: i for i in room["items"]}
+
+    def ext(item, k):
+        return min(v[k] for q in item["parts"] for v in q["outline"])
+    rel = lambda items: (ext(items[4], 0) - ext(items[1], 0), ext(items[4], 1) - ext(items[1], 1),
+                         min(q["z0"] for q in items[4]["parts"]) - min(q["z0"] for q in items[1]["parts"]))
+    single_by = {i["number"]: i for i in one["items"]}
+    check("the panel stands where the room has it, relative to its cabinet", rel(single_by), rel(by))
+    check("the same parts, tied to the same cut-list lines",
+          [(q["role"], q["line"]) for q in single_by[1]["parts"]], [(q["role"], q["line"]) for q in by[1]["parts"]])
+    check("selecting the attached panel shows its cabinet, with it",
+          (SC.build_cabinet(j, 4)["single"], [i["number"] for i in SC.build_cabinet(j, 4)["items"]]), (1, [1, 4]))
+    check("a standalone panel shows alone", [i["number"] for i in SC.build_cabinet(j, 5)["items"]], [5])
+    check("a cabinet with none, alone", [i["number"] for i in SC.build_cabinet(j, 2)["items"]], [2])
+    unplaced = copy.deepcopy(j)
+    unplaced.placements = []
+    u = SC.build_cabinet(unplaced, 1)
+    check("an unplaced cabinet is drawn all the same, its panel with it",
+          ([i["number"] for i in u["items"]], len(u["items"][0]["parts"]) > 0), ([1, 4], True))
+    check("unknown number: said", SC.build_cabinet(j, 99)["ok"], False)
+    check("read-only with respect to the job", json.dumps(job_to_dict(j), sort_keys=True) == before, True)
+    r = api.scene_cabinet({"job": job_to_dict(j), "number": 1})
+    check("/api/scene-cabinet is that", [i["number"] for i in r["items"]], [1, 4])
+
+    print("\ndragging an attached panel there: the carcass faces and edges, the same offsets")
+    pan = next(c for c in j.cabinets if c.number == 4)
+    snaps = attach_snap_points(j, pan, j.cabinets[0])
+    xs = {c["v"]: c["why"] for c in snaps["x"]}
+    check("across: outside and inside each side, and both edges level",
+          sorted(xs), sorted({-16, 0, 16, 600 - 16 - 16, 600 - 16, 600}))
+    check("  -16 is against the left side, outside — where + Panel puts it", xs[-16], "against the left side, outside")
+    ys = {c["v"] for c in snaps["y"]}
+    check("back: the front face, the fronts, and the back face", {0, -16, 560, -576} <= ys, True)
+    zs = {c["v"] for c in snaps["z"]}
+    check("up: level underneath, on top, under, on the bottom panel", {0, 720, -720, 16} <= zs, True)
+    check("each axis sorted, one reason per value",
+          all([c["v"] for c in snaps[k]] == sorted({c["v"] for c in snaps[k]}) for k in "xyz"), True)
+    m = api.attach_snaps({"job": job_to_dict(j), "cabinet": 4})
+    check("/api/attach-snaps: where it is, the tolerance, the targets",
+          (m["ok"], m["host"], m["at"], m["tolerance"], len(m["x"]) > 0), (True, 1, {"x": -16, "y": -16, "z": 0}, 20, True))
+    check("  refused for a standalone panel", api.attach_snaps({"job": job_to_dict(j), "cabinet": 5})["ok"], False)
+    mv = api.attach_move({"job": job_to_dict(j), "cabinet": 4, "at": {"x": 584.4, "y": -16, "z": 0}})
+    check("the drop: whole millimetres, into at_x / at_y / at_z",
+          (mv["ok"], mv["panel"]["attached_to"], mv["panel"]["at_x"], mv["panel"]["at_y"], mv["panel"]["at_z"]),
+          (True, 1, 584, -16, 0))
+    check("  which puts it against the right side, on cabinet 1's wall", (mv["placed_at"]["wall"], mv["placed_at"]["x"]),
+          ("A", 1000 + 584))
+    k = copy.deepcopy(j)
+    kp = next(c for c in k.cabinets if c.number == 4)
+    kp.panel = PanelSpec(**{**kp.panel.__dict__, "at_x": 584})
+    check("  and the cut list is what it was: only the place moved",
+          [(q.label, q.length, q.width, q.material) for q in generate_job(k)],
+          [(q.label, q.length, q.width, q.material) for q in generate_job(j)])
+    check("  refused for a panel attached to nothing",
+          api.attach_move({"job": job_to_dict(j), "cabinet": 5, "at": {"x": 0}})["ok"], False)
 
 
 if __name__ == "__main__":

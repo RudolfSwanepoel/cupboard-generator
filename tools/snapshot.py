@@ -67,6 +67,9 @@ def take():
         nested = N.nest_job(N.nestable(panels, job.std), job.std)
         s = summarise(job, panels, nested)
         est = estimate_cost(job, s)
+        # the Run: out of the UI and the export since 28 September 2026, kept as
+        # an internal helper (the no-room fallback of wall_elevation_svg), so
+        # still hashed — a change to it is still a change
         svgs = {"elev": elevation_svg(job)}
         if job.room:
             for w in job.room.walls:

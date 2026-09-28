@@ -498,9 +498,12 @@ def stage_f4(pw):
     page.click('nav [data-tab="room"]')
     page.wait_for_function("() => document.querySelector('#plan .cab.sel') !== null", timeout=10000)
     check("the plan shows it selected", page.locator("#plan .cab.sel").first.get_attribute("data-cab"), "7")
-    page.click('nav [data-tab="cabinets"]')
+    # the wall elevations live in Room -> Elevation since the UI restructure
+    page.click('#roomsubs [data-roomsub="elev"]')
     page.wait_for_function("() => document.querySelector('#elevation .ecabg.sel') !== null", timeout=10000)
     check("and the elevation", page.locator("#elevation .ecabg.sel").first.get_attribute("data-cab"), "7")
+    page.click('#roomsubs [data-roomsub="plan"]')
+    page.click('nav [data-tab="cabinets"]')
     check("the cabinet table too", page.locator("#cabtable tr.sel").first.get_attribute("data-i"),
           str(page.evaluate("() => S.sel")))
 
@@ -519,6 +522,7 @@ def stage_f4(pw):
     page.reload()
     page.wait_for_function("() => S.def !== null", timeout=15000)
     check("and remembers it across a reload", page.evaluate("() => document.getElementById('cabdock').classList.contains('closed')"), True)
+    page.click('nav [data-tab="cabinets"]')              # the app opens on Boards
     page.click("#cabdock .docktog")
     check("and opens again", page.evaluate("() => document.getElementById('cabdock').classList.contains('closed')"), False)
     load_job(page, "Test")

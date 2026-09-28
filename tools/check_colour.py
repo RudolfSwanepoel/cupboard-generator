@@ -205,6 +205,9 @@ def main():
     check("nothing warns about colour",
           [i.message for i in issues if "colour" in i.message.lower()], [])
 
+    # The Run left the UI on 28 September 2026 and is an internal helper now
+    # (the no-room fallback of wall_elevation_svg); the drawing itself is
+    # unchanged, so these still hold of it.
     print("\nthe run selects, and says it is not a wall")
     run = R.elevation_svg(job())
     check("every cabinet in the run carries its number",

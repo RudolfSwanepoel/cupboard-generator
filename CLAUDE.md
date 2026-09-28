@@ -40,10 +40,14 @@ python tools/snapshot.py --compare baseline.json
 
 And, with the app running (`python run_app.py --no-window --port 8766`) and
 Playwright installed, `python tools/ui_check_3d.py` drives the 3D view with a
-real mouse in headless Chromium, and `python tools/ui_check_attached.py` the
-attached-panel editor, drags and dialogs. Both are optional — Playwright is the
-only third-party package anywhere near this app, and only those two scripts
-need it — and each says so and exits 0 when it is not installed.
+real mouse in headless Chromium, `python tools/ui_check_attached.py` the
+attached-panel editor, drags and dialogs, and `python tools/ui_check_restructure.py`
+the UI restructure (tab order, Room -> Plan / Elevation, the Cabinets tab's 3D,
+the attached-panel drag, placing from the unplaced list, export by wall), with
+screenshots into `output/ui_check_restructure/`. All three are optional —
+Playwright is the only third-party package anywhere near this app, and only
+those scripts need it — and each says so and exits 0 when it is not installed.
+The cloud machine's Chromium is revision 1194, which is `playwright==1.56.0`.
 
 Regenerates the October 2025 wardrobe from cabinet definitions and diffs it
 against the cut list that was really sent to Plazaboard. Current state:
@@ -65,6 +69,79 @@ line, and `regen_check` says so rather than failing. Every other figure in this
 list comes out of the engine and is checked on any machine.
 
 ## Status
+
+**UI restructure, Session 1 — Structure (28 September 2026, brief
+`Claude outputs/ui-restructure-brief-2026-09-28.md`, agreed with Rudolf).
+Session 2 (styling) is NOT started.** Benchmark unchanged (272 / 59 / 30, 92 pot
+holes, 18 / 9 / 6, R28,363.50 — `regen_check`'s output byte-identical to the
+tree before); every `check_*.py` green, still twenty; `snapshot.py --compare`
+against the tree before identical on every job (the Run's hash included — it is
+an internal helper now, unchanged); every job on disk round-trips byte for byte.
+Exercised in the running app with Playwright: `ui_check_restructure.py` (new,
+seven stages, screenshots), and `ui_check_3d.py` and `ui_check_attached.py`
+re-pointed to where things now live and passing. The short form:
+
+1. **Tabs: Boards · Cabinets · Room · 3D view · Cut list · Nesting · Validation.**
+   The app opens on Boards, and New goes there (a new job starts on Boards);
+   Load leaves the tab as it is. Every internal jump still lands.
+2. **Room has two sub-tabs, Plan | Elevation** (`S.roomSub`). Plan is the Room
+   tab as it was — plan, layers, isolate, drag, zoom, and the Walls, Placements,
+   Gaps and Plinth cards under it. Elevation is the wall views moved from the
+   Cabinets tab, unchanged (wall picker, Line / Finish, zoom, cabinet and divider
+   drags, vertical snap, click-select, legend, dimension lines). With no room it
+   asks for one (**Add a room**). The one editor is docked beside either.
+3. **The Run left the UI.** `/api/compute` no longer sends it; `/api/elevation`
+   needs a wall. **Export** writes one elevation per wall TICKED in a dialog (all
+   ticked by default; `walls` in the payload, all when absent) **plus the plan**
+   (`<job>_plan.svg` — the brief says "the plan as today", but no export ever
+   wrote one, so it is new), and no `<job>_elevation.svg`: a job with no room
+   now exports no drawing. `render.elevation_svg` stays as an **internal
+   helper** — the no-room fallback of `wall_elevation_svg`, pinned byte for byte
+   — and its layout, `run_layout`, is still what the 3D tab stands a room-less
+   job on. The checks that pinned the Run say so; `check_elevation.py`'s
+   `ui_restructure()` pins the export and the Run's absence from the UI.
+4. **The Cabinets tab: the selected cabinet alone in 3D** over the cabinet list,
+   the editor on the right. See **The Cabinets tab's 3D** below. It includes
+   **the attached-panel drag (spec B4)**, built here.
+5. **Placing from a list of unplaced items** — Room (Plan and Elevation) and
+   the 3D tab (reverses the 21 September "not needed"). See **Placing from the
+   unplaced list** below.
+
+**Two pre-existing faults found by the Session 1 checks, fixed:** (a) a drawer
+**divider drag never stuck** — the press also selects the cabinet, which asks
+`/api/drawer-solve` for the rows as they WERE, and that reply landed after the
+divider's write and put the old heights back (`solveStack` now drops a reply
+whose rows changed while it was in flight; the same on HEAD before this work,
+checked on a worktree); (b) the **plan, elevation, divider and 3D drags never
+lit "unsaved changes"** — they call `compute()` directly; each now marks the job
+dirty. Nothing else about either changed.
+
+### Where every moved function lives now (Session 1 checklist)
+
+| Function | Was | Now |
+|---|---|---|
+| Wall elevations (one wall face on) | Cabinets tab, top-left card | Room -> Elevation |
+| Wall picker (Wall A, B…) | Cabinets, elevation header | Room -> Elevation header |
+| The Run (side-by-side) button and drawing | Cabinets, elevation header | **Removed** (brief). `elevation_svg` internal only |
+| Line / Finish toggle | Cabinets, elevation header | Room -> Elevation header |
+| Elevation zoom (−/100%/+, Ctrl-wheel, pinch) | Cabinets | Room -> Elevation |
+| Drag a cabinet / panel along and up the wall, vertical snap | Cabinets elevation | Room -> Elevation (same handlers on `#elevation`) |
+| Drag a drawer divider | Cabinets elevation | Room -> Elevation (and it sticks now) |
+| Click-select in the elevation, opening the editor | Cabinets elevation | Room -> Elevation, editor in the Room dock |
+| Board / tape legend, dimension lines, ceiling / plinth lines | Cabinets elevation | Room -> Elevation (same SVG) |
+| Attached panels travelling with their cabinet's drag | Cabinets elevation | Room -> Elevation (`data-host`) |
+| Plan, layers, isolate, plan drag, plan zoom | Room tab | Room -> Plan |
+| Walls, Placements, Gaps, Plinth cards | Room tab | Room -> Plan (hidden on Elevation) |
+| The one editor (dock) | Cabinets / Room / 3D docks | the same three docks; Room's serves both sub-tabs |
+| Editor's Save (refresh-only) | editor | editor — now also refreshes the Cabinets 3D |
+| Cabinet list (select, Dup, Del, Add) | Cabinets, below the elevation | Cabinets, below the 3D |
+| `<job>_elevation.svg` in the export | always written | **Removed** (brief) |
+| `<job>_elevation_<wall>.svg` | every wall | the walls ticked at export |
+| Plan in the export | — (never written) | `<job>_plan.svg`, always with a room |
+| Starting tab | Cabinets | Boards (start-up and New) |
+| 3D tab (room, handles, list, card, snapshot…) | 3D tab | 3D tab, unchanged; its module is now one `createView()` instance |
+| Attached-panel drag in 3D (spec B4) | not built | Cabinets tab's 3D |
+| Placing an item by drag from a list | not built (ruled not needed 21 Sept) | Room -> Plan, Room -> Elevation, 3D tab |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**
@@ -110,7 +187,8 @@ defaults following the kind. See **Attached panels** below. The short form:
    `Test_Build_pre_library.json`.
 
 **Not built, by the spec's scope:** the drag in the single-cabinet 3D view
-(B4) and the UI restructure.
+(B4) and the UI restructure — **both built since**, in Session 1 of the UI
+restructure (above).
 
 **Every Back support carries its OWN edging (ruled 27 September 2026, later the
 same day, replacing the spec's single Back edging).** A Back is a row of its
@@ -513,12 +591,10 @@ the face height, exactly as the cut list has it. Never question it.** The
 proposed hard rules H5 and H6 are not in this file yet because they are his to
 accept; Part C was built as though they hold.
 
-Awaiting a ruling, and **not built**: **dragging a new cabinet straight from
-the list onto the plan.** It came up in the same conversation as the deferred
-island work and was never separately confirmed once islands were dropped, so it
-is deliberately not here. Isolate covers the case it was meant to solve —
-getting at something that has landed out of reach — without a second way to
-place things.
+**Dragging a new cabinet straight from a list onto the plan** was left unbuilt
+here (awaiting a ruling) — and was then ruled IN by the UI restructure brief (28
+September 2026), for the Plan, the Elevation and the 3D tab. See **Placing from
+the unplaced list**.
 
 Open and not a fault — **`baseline.json` is stale, and deliberately not
 regenerated** (22 September 2026). It is per-machine and gitignored, and
@@ -614,8 +690,68 @@ attached panel (`store.ATTACH_FIELDS`), so every standalone panel and every job
 on disk writes back byte for byte. `tools/check_attached.py` holds all of the
 above, and `tools/ui_check_attached.py` drives the UI.
 
-**Not built:** the drag in the single-cabinet 3D view (spec B4 — arrives with
-the UI restructure); `PanelSpec.anchor` is still reserved and unread.
+**The drag in the single-cabinet 3D view (spec B4)** is built with the UI
+restructure: see **The Cabinets tab's 3D**. `PanelSpec.anchor` is still
+reserved and unread.
+
+## The Cabinets tab's 3D
+
+**The selected cabinet alone** (UI restructure, 28 September 2026). The same
+engine and controls as the 3D tab — `app/view3d.js` is now a factory,
+`createView(opts)`, and the Cabinets tab has its own instance (`V3C`,
+`createView({single: true})`) beside the 3D tab's (`V3D`). Orbit, pan, zoom,
+shaded / edges / x-ray, fronts open, labels, the part pick and card, the view
+cube and the help card; no layers, walls, ceiling, isolate, clearances,
+snapshot or item list — there is nothing of the room to act on.
+
+- **What it draws** is `scene.build_cabinet(job, number)` behind
+  `/api/scene-cabinet`: the cabinet's own parts exactly as `build` draws them
+  (carcass, fronts, backing, supports, shelves, bands; the same cut-list lines),
+  standing in its own frame — x across from its left side, y out from its back,
+  on the floor as `Placement.z` 0 stands it — plus **its attached panels**, put
+  where `room.attached_placement` puts them off that placement, so the room and
+  this cannot disagree. No room, no walls, no neighbours, no overlays. It is
+  read-only, and it draws an unplaced cabinet as well as a placed one.
+- **What it shows**: the selection (`cabShown()`): a selected ATTACHED panel
+  shows its cabinet with it; a standalone panel alone; nothing selected, the
+  first item in the job (the heading says so); no items, a prompt to add one.
+  Selecting anywhere — the list, the plan, the elevation, the 3D tab — changes
+  it (`sync3D`), and every compute refreshes it while the tab is showing
+  (`refreshScene` -> `refreshCabScene`); hidden, it catches up when shown.
+- **A part pick** selects its item (an empty click keeps the selection — this
+  view IS the selection) and **opens the editor at that part's section**
+  (`jumpToSection`, `PART_SECTION`: door -> Doors, support -> Supports, a panel
+  -> Panel design…). The 3D tab's pick does the same now.
+- **The attached-panel drag (spec B4).** A selected attached panel gets three
+  arrows in its cabinet's frame: across (`at_x`), back (`at_y`, towards the
+  back — `-y` in the room frame) and up (`at_z`). One `/api/attach-snaps` on
+  the press — `room.attach_snap_points`: every face or edge of the carcass
+  meeting a face or edge of the panel (outside / inside each side, both edges
+  level; the front face, flush with the fronts, the back face; level
+  underneath, on top, under, on the bottom panel), sorted, one reason each —
+  listening before it lands, the nearest within `snap_tolerance`, and the drop
+  through `/api/attach-move`, which hands back the whole-millimetre offsets to
+  store in the panel's own `at_x` / `at_y` / `at_z` — **the same fields Panel
+  design types** (hard rule 8). The browser works out no offset. Pinned in
+  `check_attached.py`'s `restructure()`.
+
+## Placing from the unplaced list
+
+**Room -> Plan, Room -> Elevation and the 3D tab each carry a slim line of the
+cabinets and standalone panels with no placement** (`renderUnplaced`); never an
+attached panel, which stands where its cabinet puts it; nothing without a room.
+Drag a chip onto a wall. The same bargain as every drag: one `/api/drag` on the
+press, listening before it lands; the pointer onto a wall — the plan's nearest
+track, the elevation's `.etrack`, or in 3D the wall under the cursor
+(`V3D.wallAt`: over the floor, the nearest wall, standing); the item held by
+its middle; the nearest snap the engine named within tolerance — in the
+elevation and 3D the elevation drag's own rule, factored out as `elevSnap` so
+the two cannot disagree; in the plan z 0, as the Placements table puts it. The
+drop writes one placement where it was released, snapped, runs a corner unit
+into its corner (`cornerFollowUp`, as the table does), selects it and
+recomputes, so overlaps, clashes and every other check are the engine's answer.
+The Placements table's wall picker, which lands an item clear of its neighbours
+(`free_x`, E8), is unchanged.
 
 ## The 3D view
 
@@ -912,7 +1048,10 @@ puts every colour through `render._hex` and falls back to neutral.
 **The run selects, it does not drag.** Its cabinets carry `data-cab` in a
 `g.ecabg.erun`; there is no wall to move along, so a press selects the cabinet
 and starts nothing. The run still ignores placements — it is the cabinet list
-drawn side by side, not a view of the room.
+drawn side by side, not a view of the room. **Since 28 September 2026 the Run
+is not in the UI or the export** — `elevation_svg` is an internal helper, the
+no-room fallback of `wall_elevation_svg`; see the Status entry for the UI
+restructure.
 
 ## Layout
 
@@ -936,7 +1075,9 @@ cabinetgen/export_plaza.py Plazaboard CSV + costing off the real rate card
 run_app.py                 starts the local server, opens the window
 app/api.py                 request handlers. Thin — they call cabinetgen.
 app/index.html             the whole UI. Vanilla JS, no build step.
-app/view3d.js              the 3D view: a module loaded the first time its tab opens
+app/view3d.js              the 3D view: a module loaded the first time a 3D view is shown;
+                           `createView()` makes one view — the 3D tab's and the
+                           Cabinets tab's single-cabinet one
 app/vendor/three/          three.js 0.186.0 — three.module.js, three.core.js, LICENSE
 app/vendor/camera-controls/  camera-controls 3.1.2 — camera-controls.module.js, LICENSE
 jobs/                      job definitions. wardrobe_oct2025.py is the fixture.
@@ -967,6 +1108,8 @@ tools/check_attached.py    attached panels: derived place, attach/detach round t
                            the job file; and a new cabinet's supports by kind
 tools/ui_check_3d.py       the 3D view in the running app, with a real mouse (Playwright)
 tools/ui_check_attached.py attached panels in the running app (Playwright)
+tools/ui_check_restructure.py  the UI restructure in the running app (Playwright),
+                           with screenshots into output/ui_check_restructure/
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
@@ -2315,8 +2458,11 @@ leftovers between jobs), and simulated annealing over the panel order. The
 
 `python run_app.py`. See `docs/UI-BRIEF.md` for why it is shaped the way it is.
 
-The elevation and the cabinet list stack in the left column; the **settings panel
-is a column of its own**, starting level with the top of the drawing.
+**Since the UI restructure (28 September 2026)** the Cabinets tab is the selected
+cabinet alone in 3D over the cabinet list, in the left column; the **settings
+panel is a column of its own**, starting level with the top of the 3D view. The
+wall elevations are in Room -> Elevation. See the Status entry and **The
+Cabinets tab's 3D**.
 
 The cabinet editor is seven sections, each a bold heading over its own coloured
 block: **Size · Outline · Structure · Doors · Drawers · Corner Unit ·

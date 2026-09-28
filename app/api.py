@@ -33,11 +33,10 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
                               material_colour, material_has_edging,
                               material_offers, material_price,
                               material_record, material_thickness, tape_for)
-from cabinetgen.render import (elevation_svg, pictures_drawn, plan_svg,
-                               wall_elevation_svg)
+from cabinetgen.render import pictures_drawn, plan_svg, wall_elevation_svg
 from cabinetgen import scene as SCENE
 from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout,
-                             attach_offsets, attached_panels, attached_placement,
+                             attach_offsets, attach_snap_points, attached_panels, attached_placement,
                              cabinet_by_number, host_of, new_attached_panel,
                              arm_shelf_length, arm_shelf_max_depth,
                              blind_door_width, blind_opening,
@@ -1146,7 +1145,11 @@ def _run_info(job, r):
 
 
 def compute(payload):
-    """Panels, issues, summary, cost, elevation and nest layouts in one payload."""
+    """Panels, issues, summary, cost and nest layouts in one payload.
+
+    The side-by-side Run drawing (`render.elevation_svg`) is no longer in the
+    reply: the UI shows walls only, in Room -> Elevation (UI restructure, 28
+    September 2026), and `/api/elevation` draws those on demand."""
     job = _job(payload)
     out = {
         "ok": True, "error": "",
@@ -1156,7 +1159,6 @@ def compute(payload):
         "boards": job.board_ids,
         "materials": {k: _board_payload(job, k) for k in (job.materials or {})},
         "room": _room_info(job),
-        "elevation": elevation_svg(job),
         "panels": [], "issues": [], "blocking": False, "lapsed": [],
         "summary": {"materials": {}, "edging": {}, "potholes": 0},
         "cost": {"lines": [], "total_incl_vat": 0.0},
@@ -1167,8 +1169,8 @@ def compute(payload):
         panels = generate_job(job)
     except Exception as exc:
         # A cabinet the engine refuses to build — too shallow for any runner, a
-        # drawer opening that will not divide. Keep the elevation so the user can
-        # see what they were building when it broke.
+        # drawer opening that will not divide. Say so; the drawings are asked
+        # for separately and show what they can.
         out["ok"] = False
         out["error"] = str(exc)
         return out
@@ -1330,18 +1332,25 @@ def export(payload):
     # An exported drawing is a file on disk, not a page on the server, so a
     # board picture in it is asked for by bare name and copied in beside it —
     # `/pictures/x.png` would 404 the moment the folder is opened or emailed.
-    drawings = [(f"{job.name}_elevation.svg", elevation_svg(job, pictures=""))]
+    # One face-on drawing per wall — the sheet that goes to site with the order
+    # — for the walls TICKED at export (all of them when the browser names
+    # none), and the plan. The side-by-side Run drawing is no longer written
+    # (UI restructure, 28 September 2026).
+    drawings = []
     if job.room is not None:
-        # one face-on drawing per wall: the sheet that goes to site with the order
         drawings += [(f"{job.name}_elevation_{_safe_name(w.id)}.svg",
                       wall_elevation_svg(job, w.id, pictures=""))
-                     for w in job.room.walls]
+                     for w in job.room.walls if w.id in export_walls(job, payload)]
+        drawings.append((f"{job.name}_plan.svg", plan_svg(job)))
     for name, svg in drawings:
         path = os.path.join(outdir, name)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(svg)
         written.append(path)
-    written += _export_pictures(job, outdir)
+    # the pictures go only beside a drawing that asks for them: a wall's
+    # elevation does, the plan (flat colour) does not
+    if any(name.startswith(f"{job.name}_elevation_") for name, _svg in drawings):
+        written += _export_pictures(job, outdir)
     if accepted:
         path = os.path.join(outdir, f"{job.name}_accepted.txt")
         with open(path, "w", encoding="utf-8") as fh:
@@ -1351,6 +1360,19 @@ def export(payload):
         written.append(path)
     return {"ok": True, "dir": outdir, "files": [os.path.basename(p) for p in written],
             "accepted": accepted}
+
+
+def export_walls(job, payload) -> list:
+    """The wall ids an export draws: those the payload's `walls` names that the
+    room has, in the room's order; every wall when `walls` is absent (None)."""
+    if job.room is None:
+        return []
+    ids = [w.id for w in job.room.walls]
+    want = payload.get("walls")
+    if want is None:
+        return ids
+    want = {str(w) for w in want}
+    return [i for i in ids if i in want]
 
 
 def accept(payload):
@@ -1513,19 +1535,23 @@ def plan(payload):
 
 
 def elevation(payload):
-    """One wall face on, or the whole job side by side when no wall is named.
+    """One wall face on.
 
     Separate from /api/compute for the same reason as /api/plan: switching which
-    wall you are looking at should cost a redraw, not a re-nest.
+    wall you are looking at should cost a redraw, not a re-nest. A wall must be
+    named: the side-by-side Run drawing left the UI with the restructure (28
+    September 2026) — `render.elevation_svg` is an internal helper now, the
+    no-room fallback of `wall_elevation_svg` — so with no room the Elevation
+    view asks for a room instead of asking here.
     """
     job = _job(payload)
     wall = payload.get("wall")
+    if not wall:
+        return {"ok": False, "error": "name a wall: the elevation draws one wall face on"}
     # Line or Finish: a view setting only, never saved in the job, and it moves
     # no geometry — the two differ only in how the walls either side are drawn.
     mode = "finish" if payload.get("mode") == "finish" else "line"
-    svg = (wall_elevation_svg(job, str(wall), mode=mode) if wall
-           else elevation_svg(job, mode=mode))
-    return {"ok": True, "svg": svg}
+    return {"ok": True, "svg": wall_elevation_svg(job, str(wall), mode=mode)}
 
 
 def _export_pictures(job, outdir: str) -> list:
@@ -1669,6 +1695,55 @@ def scene(payload):
     for the same reason /api/plan is — a view change costs a redraw, not a
     re-nest — and read-only with respect to the job (pinned in check_scene)."""
     return SCENE.build(_job(payload))
+
+
+def scene_cabinet(payload):
+    """ONE cabinet alone in 3D — the Cabinets tab's view (UI restructure, 28
+    September 2026): its parts, its attached panels, no room. `number` is the
+    selected item; an attached panel brings its cabinet. Read-only."""
+    job = _job(payload)
+    try:
+        number = int(payload.get("number"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "no item named"}
+    return SCENE.build_cabinet(job, number)
+
+
+def attach_snaps(payload):
+    """Everything the drag of an ATTACHED panel in the Cabinets tab's 3D view
+    needs (spec B4): where it is now, and every offset it may settle on, per
+    axis, off the carcass's faces and edges (`room.attach_snap_points`). The
+    browser picks the nearest within tolerance and works out no offset."""
+    job = _job(payload)
+    panel = cabinet_by_number(job, int(payload["cabinet"]))
+    host = host_of(job, panel) if panel is not None and panel.is_panel else None
+    if host is None:
+        return {"ok": False, "error": "that is not a panel attached to a cabinet"}
+    s = panel.panel_spec
+    return dict(attach_snap_points(job, panel, host), ok=True, cabinet=panel.number,
+                host=host.number, tolerance=job.std.snap_tolerance,
+                at={"x": int(s.at_x or 0), "y": int(s.at_y or 0), "z": int(s.at_z or 0)})
+
+
+def attach_move(payload):
+    """The drop of that drag: the offsets to write into the panel's own
+    `at_x`, `at_y`, `at_z` — the same three fields Panel design types (hard
+    rule 8) — whole millimetres, and where that puts it. Nothing is written;
+    the browser stores the reply, exactly as it does for Attach."""
+    job = _job(payload)
+    panel = cabinet_by_number(job, int(payload["cabinet"]))
+    if panel is None or not panel.is_attached:
+        return {"ok": False, "error": "that is not a panel attached to a cabinet"}
+    at = payload.get("at") or {}
+    s = panel.panel_spec
+    try:
+        s.at_x = int(round(float(at.get("x", s.at_x or 0))))
+        s.at_y = int(round(float(at.get("y", s.at_y or 0))))
+        s.at_z = int(round(float(at.get("z", s.at_z or 0))))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "offsets must be numbers"}
+    panel.panel = s
+    return dict(_panel_reply(job, panel), ok=True, placed_at=_placed_at(job, panel))
 
 
 def room_extend(payload):
@@ -1879,6 +1954,9 @@ ROUTES = {
     "/api/drag": drag,
     "/api/elevation": elevation,
     "/api/scene": scene,
+    "/api/scene-cabinet": scene_cabinet,
+    "/api/attach-snaps": attach_snaps,
+    "/api/attach-move": attach_move,
     "/api/snapshot": snapshot,
     "/api/room-extend": room_extend,
 }

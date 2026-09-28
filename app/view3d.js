@@ -62,6 +62,17 @@ const GHOST = 0.30;          // the house opacity for "not the focus"
 const XRAY = 0.35;
 const FLY_MS = 300;
 
+/* ---------- one view, as many times as it is shown ---------------------------
+   UI restructure (28 September 2026): the 3D tab draws the room, and the
+   Cabinets tab draws the ONE selected cabinet alone with the same engine and
+   the same controls. Each is its own instance of everything below — renderer,
+   cameras, state — made by `createView`. `opts.single` is the Cabinets tab's:
+   no walls, no layers, no item list, and move handles only for an ATTACHED
+   panel, which it drags in its cabinet's frame (attached-panels spec B4). */
+
+export function createView(OPTS) {
+OPTS = OPTS || {};
+
 /* ---------- state ------------------------------------------------------------ */
 
 const V = {
@@ -1414,9 +1425,15 @@ function buildBar() {
   B.snap = h("button", {text: "Snapshot", title: "save this view as a PNG into output/<job>/", onclick: () => snapshot()});
   B.fit = h("button", {text: "Fit", title: "F: fit the selection, or everything", onclick: () => fitSelection(true)});
   B.help = h("button", {text: "?", title: "shortcuts", onclick: () => toggleHelp()});
-  bar.append(B.views, B.proj, B.display, B.fit, sep(),
-             B.layers.base, B.layers.wall, B.layers.tall, B.layers.panels, sep(),
-             B.fronts, B.clear, B.walls, B.ceiling, B.labels, B.isolate, sep(), B.snap, B.help);
+  if (OPTS.single) {
+    // the one cabinet alone: nothing to layer, isolate, wall off or clear
+    B.layers = {};
+    bar.append(B.views, B.proj, B.display, B.fit, sep(), B.fronts, B.labels, sep(), B.help);
+  } else {
+    bar.append(B.views, B.proj, B.display, B.fit, sep(),
+               B.layers.base, B.layers.wall, B.layers.tall, B.layers.panels, sep(),
+               B.fronts, B.clear, B.walls, B.ceiling, B.labels, B.isolate, sep(), B.snap, B.help);
+  }
   menu(B.views, () => {
     const out = [
       {label: "Home (isometric)   H", run: () => { if (V.ortho_on) setProjection(false, false); viewHome(true); }},
@@ -1432,7 +1449,7 @@ function buildBar() {
     {label: "Shaded", on: V.display === "shaded", run: () => setDisplay("shaded")},
     {label: "X-ray   X", on: V.display === "xray", run: () => setDisplay("xray")},
   ]);
-  menu(B.walls, () => [
+  if (!OPTS.single) menu(B.walls, () => [
     {label: "Auto (nearest hides)", on: V.walls === "auto", run: () => { V.walls = "auto"; applyWalls(); }},
     {label: "All", on: V.walls === "all", run: () => { V.walls = "all"; applyWalls(); }},
     {label: "None", on: V.walls === "none", run: () => { V.walls = "none"; applyWalls(); }},
@@ -1475,7 +1492,10 @@ function toggleHelp() {
       <b>Keys</b> (pointer over the view)<br>
       F fit · H home · T top · I isometric · 1-9 face on to wall A, B, C… (orthographic) · P perspective / orthographic ·
       O fronts open · C clearances · X x-ray · L labels · Esc clear · ? this card.<br>
-      Nothing is deleted or duplicated from a key.`});
+      Nothing is deleted or duplicated from a key.${OPTS.single ? `<br>
+      <b>An attached panel</b>: select it and drag its arrows — across, back and up its
+      cabinet — to move it; it snaps to the carcass faces and edges and writes the
+      offsets Panel design shows.` : ""}`});
     V.els.view.appendChild(V.helpEl);
   } else {
     V.helpEl.hidden = !V.helpEl.hidden;
@@ -1788,6 +1808,7 @@ function handleMesh(dir, origin, colour, axis) {
 
 function updateHandles() {
   if (V.handles) { V.scene.remove(V.handles); disposeObject(V.handles); V.handles = null; }
+  if (OPTS.single) { updateAttachHandles(); return; }
   const grp = V.sel !== null ? V.groups.get(V.sel) : null;
   const room = V.payload && V.payload.room;
   if (!grp || !room || !grp.visible) { requestRender(); return; }
@@ -1807,6 +1828,29 @@ function updateHandles() {
   hs.add(handleMesh(dir, origin, PAPER.accent, "x"));
   hs.add(handleMesh(new THREE.Vector3(0, 0, 1), origin, PAPER.pivot, "z"));
   if (item.panel) hs.add(handleMesh(nrm, origin, PAPER.warn, "y"));
+  hs.userData = {number: item.number};
+  V.scene.add(hs);
+  V.handles = hs;
+  requestRender();
+}
+
+// The single view (UI restructure, 28 September 2026 — attached-panels spec
+// B4): a selected ATTACHED panel gets three arrows in its cabinet's frame —
+// across (at_x), back (at_y, from the front face of the sides towards the
+// back) and up (at_z). The view stands the cabinet with its back on y 0 and
+// its front towards +y, so "back" is -y in the room frame.
+function updateAttachHandles() {
+  const grp = V.sel !== null ? V.groups.get(V.sel) : null;
+  if (!grp || !grp.visible) { requestRender(); return; }
+  const item = grp.userData.item;
+  if (item.attached === null || item.attached === undefined || !item.at) { requestRender(); return; }
+  const b = new THREE.Box3().setFromObject(grp);
+  const c = b.getCenter(new THREE.Vector3());
+  const origin = new THREE.Vector3(c.x, c.y, b.max.z + 40);
+  const hs = new THREE.Group();
+  hs.add(handleMesh(toRender(1, 0, 0), origin, PAPER.accent, "x"));
+  hs.add(handleMesh(toRender(0, -1, 0), origin, PAPER.warn, "y"));
+  hs.add(handleMesh(new THREE.Vector3(0, 0, 1), origin, PAPER.pivot, "z"));
   hs.userData = {number: item.number};
   V.scene.add(hs);
   V.handles = hs;
@@ -1835,6 +1879,7 @@ function axisParam(e, P0, u) {
 }
 
 function startMove(e, axis) {
+  if (OPTS.single) { startAttachMove(e, axis); return; }
   const grp = V.groups.get(V.sel);
   const item = grp.userData.item;
   const wall = V.payload.room.walls.find((w) => w.id === item.wall);
@@ -1868,7 +1913,60 @@ function onMoveDrag(e) {
   const d = V.dragging;
   if (!d) return;
   if (!d.model) { d.last = {clientX: e.clientX, clientY: e.clientY}; return; }
-  moveDrag(d, e);
+  if (d.attach) moveAttach(d, e); else moveDrag(d, e);
+}
+
+// The attached panel's drag: the same shape as the room's — one request on the
+// press (`attachModel`, the server's snap targets off the carcass faces and
+// edges), listening before it lands, the nearest candidate within tolerance,
+// and the drop handed to index.html (`attachDrop`), which asks the server for
+// the offsets to write. Nothing here works out an offset: the pointer is
+// projected onto the axis (camera maths) and a candidate the engine named is
+// taken, or the pointer's own millimetre when none is near.
+function startAttachMove(e, axis) {
+  const grp = V.groups.get(V.sel);
+  const item = grp.userData.item;
+  const u = axis === "x" ? toRender(1, 0, 0) : axis === "y" ? toRender(0, -1, 0)
+          : new THREE.Vector3(0, 0, 1);
+  V.handles.updateMatrixWorld(true);
+  raycaster.setFromCamera(ndcOf(e), V.camera);
+  const hit = raycaster.intersectObjects(V.handles.children, true)[0];
+  const P0 = hit ? hit.point.clone() : V.handles.children[0].position.clone();
+  const d = {attach: true, number: item.number, axis: axis, u: u, P0: P0, grp: grp, item: item,
+             from: {...item.at}, at: {...item.at}, model: null, last: null, released: false,
+             moved: false, reason: ""};
+  V.dragging = d;
+  V.controls.enabled = false;
+  window.addEventListener("pointermove", onMoveDrag);
+  window.addEventListener("pointerup", endMoveDrag);
+  window.addEventListener("pointercancel", endMoveDrag);
+  status(`moving panel ${item.number} on cabinet ${item.attached} …`);
+  Promise.resolve(V.hooks.attachModel ? V.hooks.attachModel(item.number) : null).then((model) => {
+    if (V.dragging !== d && !d.released) return;
+    if (!model || !model.ok) { d.moved = false; finishMove(d, true); return; }
+    d.model = model;
+    d.from = {...model.at};
+    d.at = {...model.at};
+    if (d.last) moveAttach(d, d.last);
+    if (d.released) finishMove(d, false);
+  });
+}
+
+function moveAttach(d, e) {
+  const t = axisParam(e, d.P0, d.u);
+  if (t === null) return;
+  const m = d.model;
+  d.moved = true;
+  const v0 = d.from[d.axis] + t;
+  const snap = nearestSnap(v0, m[d.axis] || [], (c) => c.v, m.tolerance, null);
+  d.at[d.axis] = snap ? snap.value : Math.round(v0);
+  d.reason = snap ? snap.why : "";
+  // the preview: the panel's group moved by the difference, in the room frame
+  const dx = d.at.x - d.from.x, dy = d.at.y - d.from.y, dz = d.at.z - d.from.z;
+  d.grp.position.set(dx, -dy, dz);                  // at_y runs back: -y in the room frame
+  if (V.handles) V.handles.position.copy(toRender(dx, -dy, dz));
+  status(`panel ${d.item.number}: at_${d.axis} ${d.at[d.axis]} mm${d.reason ? " · " + d.reason : ""}`);
+  requestRender();
 }
 
 function nearestSnap(value, cands, get, tol, span) {
@@ -1977,6 +2075,12 @@ function finishMove(d, cancelled) {
   if (V.handles) V.handles.position.set(0, 0, 0);
   const changed = d.at.x !== d.from.x || d.at.z !== d.from.z || d.at.y !== d.from.y;
   if (cancelled || !d.moved || !changed) { status(V.hint); requestRender(); return; }
+  if (d.attach) {
+    status(`panel ${d.item.number}: at_${d.axis} ${d.at[d.axis]} mm${d.reason ? " · " + d.reason : ""}`);
+    if (V.hooks.attachDrop) V.hooks.attachDrop(d.item.number, {...d.at});
+    requestRender();
+    return;
+  }
   status(`${d.item.number} moved to ${d.axis} ${d.at[d.axis]} mm${d.reason ? " · " + d.reason : ""}`);
   if (V.hooks.drop) V.hooks.drop(d.item.number, {x: d.at.x, z: d.at.z, y: d.item.panel ? d.at.y : undefined});
   requestRender();
@@ -1992,7 +2096,7 @@ function cancelDrag() {
 
 /* ---------- the interface index.html uses ---------------------------------------- */
 
-export function mount(els, hooks) {
+function mount(els, hooks) {
   V.els = els;
   V.hooks = hooks || {};
   const el = els.view;
@@ -2067,7 +2171,7 @@ export function mount(els, hooks) {
   return true;
 }
 
-export function setVisible(on) {
+function setVisible(on) {
   V.visible = !!on;
   if (V.visible) { resize(); requestRender(); }
   else stopLoop();
@@ -2076,7 +2180,7 @@ export function setVisible(on) {
 // A new scene from the server. Only cabinets whose hash changed are rebuilt,
 // and the camera is never moved by an update — only by an explicit Fit, a
 // view or a double-click; a NEW job opens at Home.
-export function update(payload, opts) {
+function update(payload, opts) {
   if (!V.renderer) return;
   const fresh = !!(opts && opts.fresh) || !V.payload;
   V.payload = payload;
@@ -2097,7 +2201,7 @@ export function update(payload, opts) {
 }
 
 // index.html tells the view the one selection; nothing is decided here
-export function select(number) {
+function select(number) {
   if (number === V.sel) { applySelection(); updateList(); requestRender(); return; }
   V.sel = number;
   applyGhosting();
@@ -2106,35 +2210,35 @@ export function select(number) {
   if (number === null) showCard(null, null);
 }
 
-export function setLayers(list) {
+function setLayers(list) {
   V.layers = list === null ? null : new Set(list);
   applyGhosting();
   updateBar();
 }
 
 // and the one isolate — mirrored here, never decided here
-export function isolate(number) {
+function isolate(number) {
   if (number === V.isolate) return;
   setIsolate(number, true);
 }
 
-export function flyTo(number) {
+function flyTo(number) {
   const grp = V.groups.get(number);
   if (grp) fitTo(new THREE.Box3().setFromObject(grp), true);
 }
 
 // For the browser checks: is the camera still, where is an item, and how is a
 // part drawn. None of it is read by the view itself.
-export function idle() { return !V.running && !V.animating; }
+function idle() { return !V.running && !V.animating; }
 
-export function bounds(number) {
+function bounds(number) {
   const grp = V.groups.get(number);
   if (!grp) return null;
   const b = new THREE.Box3().setFromObject(grp);                // render frame
   return {min: [b.min.x, -b.max.y, b.min.z], max: [b.max.x, -b.min.y, b.max.z]};   // room frame
 }
 
-export function partInfo(id) {
+function partInfo(id) {
   for (const grp of [...V.groups.values(), V.roomParts].filter(Boolean)) {
     for (const m of grp.children) {
       if (m.userData.id !== id) continue;
@@ -2149,7 +2253,7 @@ export function partInfo(id) {
   return null;
 }
 
-export function debugCam() {
+function debugCam() {
   const c = V.controls;
   const fo = c.getFocalOffset(new THREE.Vector3());
   return {target: c.getTarget(new THREE.Vector3()).toArray(), distance: c.distance,
@@ -2158,7 +2262,7 @@ export function debugCam() {
           active: c.active};
 }
 
-export function pickHandleAt(clientX, clientY) {
+function pickHandleAt(clientX, clientY) {
   if (!V.handles) return {axis: null, handles: []};
   V.handles.updateMatrixWorld(true);
   const axis = pickHandle({clientX, clientY});
@@ -2172,7 +2276,7 @@ export function pickHandleAt(clientX, clientY) {
   return {axis, handles: boxes, hits, ray: [raycaster.ray.origin.toArray(), raycaster.ray.direction.toArray()]};
 }
 
-export function dragInfo() {
+function dragInfo() {
   const d = V.dragging;
   const hs = V.handles ? V.handles.children.map((g) => ({axis: g.userData.handle, origin: toRoom(g.position),
                                                          dir: toRoom(g.userData.dir)})) : [];
@@ -2180,7 +2284,7 @@ export function dragInfo() {
           hasModel: !!(d && d.model), handles: hs};
 }
 
-export function overlayInfo() {
+function overlayInfo() {
   if (!V.overlays) return {swings: 0, clashes: 0, overlaps: 0};
   let swings = 0, clashes = 0, overlaps = 0;
   V.overlays.children.forEach((o) => {
@@ -2190,13 +2294,13 @@ export function overlayInfo() {
   return {swings, clashes, overlaps};
 }
 
-export function groupIds() {
+function groupIds() {
   const out = {};
   for (const [n, grp] of V.groups) out[n] = grp.uuid;
   return out;
 }
 
-export function debugShell() {
+function debugShell() {
   return (V.wallMeshes || []).map((m) => {
     const b = new THREE.Box3().setFromObject(m);
     return {wall: m.userData.wall, visible: m.visible, side: m.material.side,
@@ -2205,18 +2309,18 @@ export function debugShell() {
   });
 }
 
-export function memory() {
+function memory() {
   const m = V.renderer ? V.renderer.info.memory : {geometries: 0, textures: 0};
   return {geometries: m.geometries, textures: m.textures, groups: V.groups.size, pickables: V.pickables.length};
 }
 
-export function state() {
+function state() {
   return {sel: V.sel, isolate: V.isolate, layers: V.layers ? [...V.layers] : null, display: V.display,
           walls: V.walls, labels: V.labels, ortho: V.ortho_on, fronts: V.frontsOpen,
           clearances: V.clearances, hidden: [...V.hidden]};
 }
 
-export function camera() {
+function camera() {
   const p = V.controls.getPosition(new THREE.Vector3());
   const t = V.controls.getTarget(new THREE.Vector3());
   return {position: toRoom(p), target: toRoom(t), zoom: V.camera.zoom, ortho: V.ortho_on};
@@ -2224,18 +2328,53 @@ export function camera() {
 
 // Screen position of a world point — for the checks, which want to know that
 // a corner stayed under the cursor.
-export function project(x, y, z) {
+function project(x, y, z) {
   const r = V.renderer.domElement.getBoundingClientRect();
   const p = toRender(x, y, z).project(V.camera);
   return {x: (p.x + 1) / 2 * r.width, y: (1 - p.y) / 2 * r.height, depth: p.z};
 }
 
-export function unproject(clientX, clientY) {
+function unproject(clientX, clientY) {
   const hit = pick({clientX, clientY}, true);
   return hit ? toRoom(hit.point) : null;
 }
 
-export function dispose() {
+// Where a point on the canvas falls in the room, for a drop from the unplaced
+// list (UI restructure, 28 September 2026): the wall under the cursor, how far
+// along it and how high — or, over the floor or nothing, the NEAREST wall to
+// the point on the floor, at floor level. Camera maths and a projection onto
+// the wall's line, the plan's `project` in 3D; no dimension of the model.
+function wallAt(clientX, clientY) {
+  const room = V.payload && V.payload.room;
+  if (!room || !V.renderer) return null;
+  const r = V.renderer.domElement.getBoundingClientRect();
+  if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
+  const ev = {clientX, clientY};
+  const along = (w, x, y) => (x - w.start[0]) * w.dir[0] + (y - w.start[1]) * w.dir[1];
+  const hit = pick(ev, true);
+  if (hit && hit.object.userData.kind === "wall") {
+    const [x, y, z] = toRoom(hit.point);
+    const w = room.walls.find((k) => k.id === hit.object.userData.wall);
+    if (w) return {wall: w.id, along: along(w, x, y), up: z, floor: false};
+  }
+  // otherwise the floor under the cursor: where the ray meets z = 0
+  raycaster.setFromCamera(ndcOf(ev), V.camera);
+  const ray = raycaster.ray;
+  if (Math.abs(ray.direction.z) < 1e-9) return null;
+  const k = -ray.origin.z / ray.direction.z;
+  if (k < 0) return null;
+  const [x, y] = toRoom(ray.at(k, new THREE.Vector3()));
+  let best = null;
+  for (const w of room.walls) {
+    const a = Math.max(0, Math.min(w.length, along(w, x, y)));
+    const px = w.start[0] + w.dir[0] * a, py = w.start[1] + w.dir[1] * a;
+    const dist = Math.hypot(x - px, y - py);
+    if (!best || dist < best.dist) best = {wall: w.id, along: along(w, x, y), up: 0, floor: true, dist: dist};
+  }
+  return best;
+}
+
+function dispose() {
   stopLoop();
   if (V.observer) V.observer.disconnect();
   window.removeEventListener("keydown", onKey);
@@ -2253,4 +2392,5 @@ export function dispose() {
   V.renderer = V.scene = V.camera = V.controls = null;
 }
 
-export { resize, fitAll, viewHome, viewTop, viewWall, setProjection, setDisplay };
+  return {mount, setVisible, update, select, setLayers, isolate, flyTo, idle, bounds, partInfo, debugCam, pickHandleAt, dragInfo, overlayInfo, groupIds, debugShell, memory, state, camera, project, unproject, dispose, resize, fitAll, viewHome, viewTop, viewWall, setProjection, setDisplay, wallAt};
+}
