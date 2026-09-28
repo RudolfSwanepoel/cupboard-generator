@@ -134,7 +134,40 @@
       "kind": "base",
       "back": "three",
       "template": "standard",
-      "support_rows": [],
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "BROOKHILL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 2,
+          "board": "WHITEMEL",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front"
+          ]
+        }
+      ],
       "supports": 2,
       "edged_supports": 0,
       "white_supports": 2,
@@ -445,12 +478,37 @@
       "template": "standard",
       "support_rows": [
         {
-          "edge": "white",
-          "qty": 3
+          "edge": "none",
+          "qty": 1,
+          "board": "BROOKHILL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
         },
         {
-          "edge": "front",
-          "qty": 1
+          "edge": "none",
+          "qty": 1,
+          "board": "BROOKHILL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 2,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "BROOKHILL",
+          "type": "back",
+          "edges": [
+            "front"
+          ]
         }
       ],
       "supports": 4,
@@ -506,7 +564,7 @@
       ],
       "has_drawers": true,
       "exposed_sides": 0,
-      "carcass_board": "BROOKHILL",
+      "carcass_board": "WHITEMEL",
       "exterior_board": "BROOKHILL",
       "back_board": "BACK",
       "exterior_tape": "2mm",
