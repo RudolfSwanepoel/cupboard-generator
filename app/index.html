@@ -13,80 +13,147 @@
              "camera-controls": "/vendor/camera-controls/camera-controls.module.js"}}
 </script>
 <style>
+  /* ---------- the one palette ------------------------------------------
+     Session 2 of the UI restructure (28 Sept 2026): styling only. Every
+     colour the page uses is a token here — the drawings' inks first, which
+     the elevation and nest SVGs share and which do not move, then the page
+     chrome. Board colours and pictures in a drawing are data and never come
+     through here. */
   :root{
     /* the elevation and nest SVGs already use these — the page matches them */
     --ink:#191c1a; --muted:#767e78; --rule:#aab1a9; --faint:#d3d7d0;
     --carc:#f2f3f0; --door:#dceaea; --face:#f5ebd6;
-    --bg:#fbfbfa; --panel:#fff; --line:#e3e5e0;
+    --bg:#f3f4f1; --panel:#fff; --line:#e3e5e0;
     --crit:#a4303f; --warn:#8a6d1f; --ok:#2f6b4f;
+    /* page chrome (Session 2) */
+    --ink-2:#2e3330;                 /* a pressed dark button */
+    --surface:#f8f9f7;               /* card headers, table heads, the strip */
+    --surface-2:#eceeea;             /* a hovered row, a pressed control */
+    --viewport:#eef0ec;              /* the 3D paper behind the canvas */
+    --accent:#1f6fd0;                /* the selection, everywhere — the same blue view3d.js draws */
+    --accent-ink:#fff;
+    --accent-soft:#e6effb;
+    --accent-line:#b7cdf0;
+    --crit-soft:#f8e3e6; --warn-soft:#f7efd7; --ok-soft:#e0efe6; --info-soft:#eef0ed;
+    --crit-line:#e2b8be; --warn-line:#e3d3a3; --ok-line:#b9d6c5;
+    --r-s:5px; --r:8px; --r-l:11px;
+    --shadow-1:0 1px 2px rgba(25,28,26,.05),0 1px 1px rgba(25,28,26,.03);
+    --shadow-2:0 8px 24px rgba(25,28,26,.16),0 2px 6px rgba(25,28,26,.08);
+    --focus:0 0 0 3px rgba(31,111,208,.22);
+    --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+    /* the editor's section tints — one coloured block per section */
+    --sec-size:#e7eef5; --sec-size-line:#cfdce8;
+    --sec-outline:#e5f0e7; --sec-outline-line:#c9ded0;
+    --sec-structure:#f3efe2; --sec-structure-line:#e0d8c2;
+    --sec-doors:#dceaee; --sec-doors-line:#c1dae0;
+    --sec-drawers:#f7ead2; --sec-drawers-line:#e6d5b4;
+    --sec-corner:#ece5f3; --sec-corner-line:#d7cbe5;
+    --sec-supports:#eaeee9; --sec-supports-line:#d3dad1;
   }
   *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
   body{margin:0;background:var(--bg);color:var(--ink);
-       font:13px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
-  button{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--rule);
-         border-radius:4px;padding:4px 10px;cursor:pointer}
-  button:hover{background:var(--carc)}
-  button.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
-  button.primary:hover{background:#333836}
-  button:disabled{opacity:.45;cursor:not-allowed}
-  input,select{font:inherit;color:inherit;background:var(--panel);
-               border:1px solid var(--line);border-radius:4px;padding:3px 6px;width:100%}
-  input:focus,select:focus{outline:2px solid var(--door);outline-offset:-1px;
-                           border-color:var(--rule)}
-  table{border-collapse:collapse;width:100%}
-  th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);
-        white-space:nowrap}
-  th{font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;
-     letter-spacing:.04em;position:sticky;top:0;background:var(--bg);z-index:1}
-  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+       font:13px/1.45 var(--font);-webkit-font-smoothing:antialiased}
+  ::selection{background:var(--accent-soft)}
 
-  header{display:flex;gap:8px;align-items:center;padding:8px 14px;
+  /* ---------- controls -------------------------------------------------- */
+  button{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--faint);
+         border-radius:6px;padding:4px 11px;cursor:pointer;line-height:1.35;
+         box-shadow:var(--shadow-1);transition:background .12s,border-color .12s,box-shadow .12s}
+  button:hover{background:var(--surface);border-color:var(--rule)}
+  button:active{background:var(--surface-2);box-shadow:none}
+  button:focus-visible{outline:none;box-shadow:var(--focus)}
+  button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  button.primary:hover{background:#1a5fb4;border-color:#1a5fb4}
+  button:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+  input,select{font:inherit;color:inherit;background:var(--panel);
+               border:1px solid var(--faint);border-radius:6px;padding:4px 8px;width:100%;
+               transition:border-color .12s,box-shadow .12s}
+  input:hover,select:hover{border-color:var(--rule)}
+  input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:var(--focus)}
+  input[type=checkbox],input[type=radio]{accent-color:var(--accent);width:auto;box-shadow:none}
+  select{padding-right:6px}
+  table{border-collapse:collapse;width:100%}
+  th,td{text-align:left;padding:5px 9px;border-bottom:1px solid var(--line);
+        white-space:nowrap}
+  th{font-weight:600;color:var(--muted);font-size:10.5px;text-transform:uppercase;
+     letter-spacing:.05em;position:sticky;top:0;background:var(--surface);z-index:1;
+     box-shadow:inset 0 -1px 0 var(--line)}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  tbody tr:last-child td{border-bottom-color:transparent}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:var(--faint);border-radius:5px;border:2px solid transparent;
+                            background-clip:padding-box}
+  ::-webkit-scrollbar-thumb:hover{background:var(--rule);background-clip:padding-box}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* ---------- header, summary strip, tab bar --------------------------- */
+  header{display:flex;gap:8px;align-items:center;padding:9px 16px;
          background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
-  header h1{font-size:14px;margin:0 10px 0 0;font-weight:700;letter-spacing:.02em}
+  header h1{font-size:14.5px;margin:0 12px 0 0;font-weight:700;letter-spacing:.01em;
+            display:flex;align-items:center;gap:8px}
+  header h1::before{content:"";width:14px;height:14px;border-radius:4px;background:var(--accent);
+                    box-shadow:inset 3px -3px 0 rgba(255,255,255,.35)}
   header .grow{flex:1}
+  header button{padding:5px 12px}
   #jobname{width:190px}
   .grain b{font-size:11px;text-transform:uppercase;letter-spacing:.3px}
   .grain{white-space:nowrap}
-  .dirty{font-size:11.5px;font-weight:700;color:var(--crit);border:1px solid var(--crit);border-radius:3px;padding:2px 7px;white-space:nowrap}
+  .dirty{font-size:11px;font-weight:700;color:var(--crit);background:var(--crit-soft);
+         border:1px solid var(--crit-line);border-radius:999px;padding:2px 9px;white-space:nowrap}
+  .dirty::before{content:"● ";font-size:9px}
   #joblist{width:170px}
 
-  #strip{display:flex;gap:22px;align-items:center;padding:9px 14px;
-         background:var(--carc);border-bottom:1px solid var(--line);flex-wrap:wrap}
-  #strip .cell{display:flex;flex-direction:column;gap:1px}
-  #strip .k{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
-  #strip .v{font-size:15px;font-variant-numeric:tabular-nums}
-  .pill{border-radius:10px;padding:1px 8px;font-size:12px;display:inline-block}
-  .pill.crit{background:#f6e0e3;color:var(--crit)}
-  .pill.warn{background:#f6efd9;color:var(--warn)}
-  .pill.ok{background:#dfeee6;color:var(--ok)}
+  #strip{display:flex;gap:0;align-items:stretch;padding:0 16px;
+         background:var(--surface);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  #strip .cell{display:flex;flex-direction:column;gap:1px;padding:8px 22px 8px 0;
+               margin-right:22px;border-right:1px solid var(--line);justify-content:center}
+  #strip .cell:last-child{border-right:none}
+  #strip .k{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+            font-weight:600}
+  #strip .v{font-size:15px;font-variant-numeric:tabular-nums;font-weight:500}
+  .pill{border-radius:999px;padding:1px 9px;font-size:11.5px;display:inline-block;
+        font-weight:600;line-height:1.5;background:var(--info-soft);color:var(--ink);
+        border:1px solid transparent;white-space:nowrap}
+  .pill.crit{background:var(--crit-soft);color:var(--crit);border-color:var(--crit-line)}
+  .pill.warn{background:var(--warn-soft);color:var(--warn);border-color:var(--warn-line)}
+  .pill.ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok-line)}
+  /* colour AND a mark: a critical is never told from a warning by hue alone */
+  .pill.crit::before{content:"✕ ";font-size:10px}
+  .pill.warn::before{content:"▲ ";font-size:9.5px}
+  .pill.ok::before{content:"✓ ";font-size:10.5px}
 
-  nav{display:flex;gap:2px;padding:0 14px;background:var(--panel);
+  nav{display:flex;gap:2px;padding:0 16px;background:var(--panel);
       border-bottom:1px solid var(--line)}
-  nav button{border:none;border-bottom:2px solid transparent;border-radius:0;
-             padding:8px 14px;background:none;color:var(--muted)}
-  nav button:hover{background:var(--carc)}
-  nav button.on{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
+  nav button{border:none;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;
+             padding:9px 15px;background:none;color:var(--muted);box-shadow:none;
+             margin-bottom:-1px;font-weight:500}
+  nav button:hover{background:var(--surface);color:var(--ink)}
+  nav button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
 
-  main{padding:14px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:6px;
-        margin-bottom:14px}
-  .card>h2{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
-           margin:0;padding:8px 12px;border-bottom:1px solid var(--line)}
-  .card>.body{padding:10px 12px}
+  /* ---------- cards ----------------------------------------------------- */
+  main{padding:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-l);
+        margin-bottom:16px;box-shadow:var(--shadow-1)}
+  .card>h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+           margin:0;padding:9px 14px;border-bottom:1px solid var(--line);font-weight:700;
+           background:var(--surface);border-radius:var(--r-l) var(--r-l) 0 0}
+  .card>h2 button{text-transform:none;letter-spacing:0;font-weight:500}
+  .card>.body{padding:12px 14px}
   .scroll{overflow:auto}
 
-  #cabwrap,.split{display:flex;gap:14px;align-items:flex-start}
+  #cabwrap,.split{display:flex;gap:16px;align-items:flex-start}
   /* The elevation and the list stack on the left; the settings panel is a
      column of its own, starting level with the top of the drawing. */
   #cabmain{flex:1;min-width:0}
   #cabmain>.card:last-child{margin-bottom:0}
   #layers,#elevpick,.zoombar{float:right;margin-top:-3px;display:flex;gap:3px}
   #layers button,#elevpick button,.zoombar button{padding:2px 9px;font-size:11px;
-                                  text-transform:none;letter-spacing:0}
+                                  text-transform:none;letter-spacing:0;box-shadow:none}
   #elevpick .elevmode{display:flex;gap:3px;margin-left:10px;padding-left:10px;
                       border-left:1px solid var(--line)}
-  #layers button.on,#elevpick button.on{background:var(--ink);color:#fff;
-                                        border-color:var(--ink)}
+  #layers button.on,#elevpick button.on{background:var(--accent);color:var(--accent-ink);
+                                        border-color:var(--accent)}
   .zoombar{margin-left:10px}
   .zoombar button{min-width:26px}
   #elevation svg,#plan svg{display:block}
@@ -94,16 +161,17 @@
   #elevation svg .epanel:hover .epan{stroke-width:2.6}
   #cablist{flex:1;min-width:0}
 
-  /* The 3D tab: toolbar over a three-column row — item list, viewport, dock —
-     over a status line. The row takes whatever height the tab has, and the
+  /* ---------- the 3D tab -------------------------------------------------
+     Toolbar over a three-column row — item list, viewport, dock — over a
+     status line. The row takes whatever height the tab has, and the
      viewport takes whatever width the two side columns leave. */
   #v3d{display:flex;flex-direction:column;gap:8px;min-height:240px}
-  .v3dbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:24px}
-  .v3dbar button{padding:2px 9px;font-size:11px}
-  .v3dbar button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .v3dbar{display:flex;gap:5px;align-items:center;flex-wrap:wrap;min-height:26px}
+  .v3dbar button{padding:3px 10px;font-size:11.5px;box-shadow:none}
+  .v3dbar button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
   #v3dmain{display:flex;gap:8px;flex:1;min-height:0}
-  .v3dview{flex:1;min-width:0;position:relative;background:#eef0ec;
-           border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .v3dview{flex:1;min-width:0;position:relative;background:var(--viewport);
+           border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
   .v3dview canvas{display:block;width:100%;height:100%;outline:none;touch-action:none}
   .v3dview .v3dnote{position:absolute;left:0;right:0;top:0;padding:8px 12px;
                     font-size:12px;color:var(--muted);background:rgba(255,255,255,.85);
@@ -112,7 +180,7 @@
              overflow:hidden;text-overflow:ellipsis}
   /* The Cabinets tab's 3D (UI restructure, 28 Sept 2026): the one selected
      cabinet alone, the same view as the 3D tab's, over the cabinet list. */
-  #cab3d{display:flex;flex-direction:column;gap:6px;padding:8px 12px}
+  #cab3d{display:flex;flex-direction:column;gap:7px;padding:10px 14px 12px}
   #c3dview{flex:none;height:clamp(300px,48vh,560px)}
   #c3dview .v3dlegend{max-width:210px}
   #c3dview .v3dempty{position:absolute;inset:0;display:flex;align-items:center;
@@ -120,27 +188,32 @@
                      background:rgba(238,240,236,.92);z-index:4}
   #c3dview .v3dempty[hidden]{display:none}
   /* Room's two sub-tabs, and the slim list of what is not placed yet */
-  .subtabs{display:flex;gap:2px;margin:0 0 10px;border-bottom:1px solid var(--line)}
-  .subtabs button{border:none;border-bottom:2px solid transparent;border-radius:0;
-                  padding:5px 14px;background:none;color:var(--muted)}
-  .subtabs button.on{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
+  .subtabs{display:inline-flex;gap:2px;margin:0 0 12px;background:var(--surface);
+           border:1px solid var(--line);border-radius:999px;padding:3px}
+  .subtabs button{border:none;border-radius:999px;padding:4px 16px;background:none;
+                  color:var(--muted);box-shadow:none;font-weight:500}
+  .subtabs button:hover{color:var(--ink)}
+  .subtabs button.on{color:var(--ink);background:var(--panel);font-weight:600;
+                     box-shadow:var(--shadow-1);border:1px solid var(--line)}
   .unplaced{display:flex;gap:5px;align-items:center;flex-wrap:wrap;font-size:11.5px;
-            color:var(--muted);margin:0 0 8px;min-height:0}
+            color:var(--muted);margin:0 0 10px;min-height:0}
   .unplaced:empty{display:none}
-  .unplaced .upchip{border:1px solid var(--rule);border-radius:11px;padding:1px 9px;
+  .unplaced .upchip{border:1px dashed var(--rule);border-radius:999px;padding:2px 10px;
                     background:var(--panel);color:var(--ink);cursor:grab;user-select:none;
-                    touch-action:none}
-  .unplaced .upchip:hover{background:var(--carc)}
+                    touch-action:none;font-weight:500}
+  .unplaced .upchip:hover{background:var(--accent-soft);border-color:var(--accent-line);
+                          border-style:solid}
   #updrag{position:fixed;z-index:40;pointer-events:none;background:var(--ink);color:#fff;
-          font-size:11px;padding:2px 8px;border-radius:3px;white-space:nowrap;display:none}
-  #editor .sec.flash{outline:2px solid #1f6fd0;outline-offset:1px}
+          font-size:11px;padding:3px 9px;border-radius:6px;white-space:nowrap;display:none;
+          box-shadow:var(--shadow-2)}
+  #editor .sec.flash{outline:2px solid var(--accent);outline-offset:1px}
   /* overlays inside the viewport: labels, dimension figures, the view cube,
      the legend, the help card; and the toolbar's dropdowns */
-  .v3dview .v3dlabel{position:absolute;padding:1px 6px;border-radius:9px;
-                     background:rgba(255,255,255,.92);border:1px solid var(--rule);
+  .v3dview .v3dlabel{position:absolute;padding:1px 7px;border-radius:999px;
+                     background:rgba(255,255,255,.94);border:1px solid var(--rule);
                      font-size:11px;font-weight:600;cursor:pointer;user-select:none;
-                     line-height:14px}
-  .v3dview .v3dlabel.sel{background:#1f6fd0;color:#fff;border-color:#1f6fd0}
+                     line-height:14px;box-shadow:var(--shadow-1)}
+  .v3dview .v3dlabel.sel{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
   .v3dview .v3dbadge{position:absolute;width:16px;height:16px;line-height:14px;text-align:center;
                      border-radius:8px;font-size:10px;font-weight:700;cursor:pointer;
                      border:1px solid transparent;color:#fff}
@@ -148,111 +221,140 @@
   .v3dview .v3dbadge.warning{background:var(--warn)}
   .v3dview .v3dbadge.accepted{background:var(--rule)}
   .v3dview .v3ddim{position:absolute;transform:translate(-50%,-50%);font-size:11px;
-                   color:#1f6fd0;background:rgba(255,255,255,.88);padding:0 4px;
-                   border-radius:3px;pointer-events:none;white-space:nowrap}
+                   color:var(--accent);background:rgba(255,255,255,.9);padding:0 5px;
+                   border-radius:4px;pointer-events:none;white-space:nowrap;font-weight:600}
   .v3dview .v3dcube{position:absolute;right:10px;top:10px;cursor:pointer;touch-action:none}
   .v3dview .v3dlegend{position:absolute;right:10px;bottom:10px;max-width:280px;
-                      background:rgba(255,255,255,.93);border:1px solid var(--line);
-                      border-radius:5px;padding:6px 9px;font-size:11px}
+                      background:rgba(255,255,255,.94);border:1px solid var(--line);
+                      border-radius:var(--r);padding:7px 10px;font-size:11px;
+                      box-shadow:var(--shadow-1)}
   .v3dlegend .hd{font-weight:600;display:flex;justify-content:space-between;gap:8px;
                  align-items:center}
-  .v3dlegend .hd .tog{padding:0 6px;font-size:11px;line-height:14px}
+  .v3dlegend .hd .tog{padding:0 6px;font-size:11px;line-height:14px;box-shadow:none}
   .v3dlegend.closed .rows,.v3dlegend.closed .nd{display:none}
   .v3dlegend .row{display:flex;gap:6px;align-items:center;margin-top:3px}
-  .v3dlegend .sw{width:22px;height:14px;border:1px solid var(--rule);border-radius:2px;
+  .v3dlegend .sw{width:22px;height:14px;border:1px solid var(--rule);border-radius:3px;
                  display:inline-block;flex:none}
   .v3dlegend .nd{margin-top:5px;color:var(--muted)}
   .v3dview .v3dhelp{position:absolute;left:10px;top:10px;max-width:540px;
                     background:rgba(255,255,255,.96);border:1px solid var(--line);
-                    border-radius:5px;padding:8px 10px;font-size:11.5px;line-height:1.5}
+                    border-radius:var(--r);padding:9px 11px;font-size:11.5px;line-height:1.5;
+                    box-shadow:var(--shadow-2)}
   .v3dbar{position:relative}
-  .v3dbar .v3dmenu{position:absolute;top:26px;z-index:20;background:var(--panel);
-                   border:1px solid var(--line);border-radius:5px;padding:3px;
+  .v3dbar .v3dmenu{position:absolute;top:28px;z-index:20;background:var(--panel);
+                   border:1px solid var(--line);border-radius:var(--r);padding:4px;
                    display:flex;flex-direction:column;min-width:190px;
-                   box-shadow:0 4px 14px rgba(0,0,0,.12)}
+                   box-shadow:var(--shadow-2)}
   .v3dbar .v3dmenu[hidden]{display:none}
-  .v3dbar .v3dmenu button{text-align:left;border:none;background:none;padding:4px 8px;
-                          font-size:11.5px}
-  .v3dbar .v3dmenu button:hover{background:var(--carc)}
-  .v3dbar .v3dmenu button.on{font-weight:700}
+  /* the box is made empty and unhidden, and filled on its first open: until
+     then it drew as a stray pill under the toolbar (seen 28 Sept 2026) */
+  .v3dbar .v3dmenu:empty{display:none}
+  .v3dbar .v3dmenu button{text-align:left;border:none;background:none;padding:5px 9px;
+                          font-size:11.5px;border-radius:5px}
+  .v3dbar .v3dmenu button:hover{background:var(--surface-2)}
+  .v3dbar .v3dmenu button.on{font-weight:700;color:var(--accent)}
   .v3dbar .sep{width:1px;height:18px;background:var(--line);margin:0 3px}
+
+  /* ---------- the one editor and its dock ------------------------------- */
   #editor{width:560px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
           overflow:auto}
   /* The docked editor (F4): a thin strip with a chevron on its left, the
      editor beside it; closed, only the strip. On the 3D tab it fills the
      tab's height instead of sticking to the page. */
   .dock{display:flex;flex:none;align-items:flex-start;gap:0}
-  .dockstrip{width:16px;flex:none;align-self:stretch;display:flex;align-items:flex-start;
-             justify-content:center;padding-top:6px}
-  .dockstrip .docktog{padding:0 2px;font-size:10px;line-height:16px;border:none;
-                      background:none;color:var(--muted);cursor:pointer}
+  .dockstrip{width:18px;flex:none;align-self:stretch;display:flex;align-items:flex-start;
+             justify-content:center;padding-top:8px;position:relative}
+  .dockstrip::before{content:"";position:absolute;left:8px;top:34px;bottom:8px;width:1px;
+                     background:var(--line);border-radius:1px}
+  .dockstrip .docktog{padding:0;width:18px;height:18px;font-size:9px;line-height:16px;
+                      border:1px solid var(--line);border-radius:999px;box-shadow:none;
+                      background:var(--panel);color:var(--muted);cursor:pointer;
+                      transition:transform .15s,background .12s,color .12s}
+  .dockstrip .docktog:hover{background:var(--accent-soft);color:var(--accent);
+                            border-color:var(--accent-line)}
   .dock.closed #editor{display:none}
   .dock.closed .docktog{transform:rotate(180deg)}
-  #roomwrap{display:flex;gap:14px;align-items:flex-start}
+  .dock.closed .dockstrip::before{display:none}
+  #roomwrap{display:flex;gap:16px;align-items:flex-start}
   #v3ddock{align-self:stretch;min-height:0}
   #v3ddock #editor{position:static;max-height:100%;height:100%;margin-top:0}
   #roomdock #editor{margin-top:0}
-  #editor .dockissues{padding:6px 12px 0;font-size:11.5px}
-  #editor .dockissues div{margin:2px 0;cursor:pointer}
+  #editor .dockissues{padding:8px 14px 0;font-size:11.5px}
+  #editor .dockissues div{margin:2px 0;cursor:pointer;padding:3px 8px;border-radius:5px;
+                          border:1px solid transparent}
+  #editor .dockissues div:hover{border-color:var(--line);background:var(--surface)}
   #editor .dockissues .critical{color:var(--crit)}
   #editor .dockissues .warning{color:var(--warn)}
   #editor .dockissues .accepted{color:var(--muted)}
-  #plan .cab.sel{stroke:#1f6fd0 !important;stroke-width:2 !important}
-  #elevation .ecabg.sel .ecab,#elevation .ecabg.sel .epan{stroke:#1f6fd0 !important;stroke-width:2.5 !important}
-  #cutlist tr.flash td{background:#dbe7f7}
+  #editor .dockissues .critical::before{content:"✕ ";font-weight:700;font-size:10px}
+  #editor .dockissues .warning::before{content:"▲ ";font-weight:700;font-size:9.5px}
+  #editor .dockissues .accepted::before{content:"✓ ";font-weight:700;font-size:10.5px}
+  #plan .cab.sel{stroke:var(--accent) !important;stroke-width:2 !important}
+  #elevation .ecabg.sel .ecab,#elevation .ecabg.sel .epan{stroke:var(--accent) !important;stroke-width:2.5 !important}
+  #cutlist tr.flash td{background:var(--accent-soft)}
   /* the 3D tab's item list and part card */
   #v3dlist{width:190px;flex:none;font-size:11.5px;display:flex;flex-direction:column;
-           min-height:0;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+           min-height:0;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);
+           box-shadow:var(--shadow-1)}
   #v3dlist.closed{width:22px}
-  #v3dlist .hd{display:flex;justify-content:space-between;align-items:center;padding:5px 8px;
+  #v3dlist .hd{display:flex;justify-content:space-between;align-items:center;padding:6px 9px;
                border-bottom:1px solid var(--line);font-size:10.5px;text-transform:uppercase;
-               letter-spacing:.05em;color:var(--muted)}
+               letter-spacing:.05em;color:var(--muted);font-weight:700;background:var(--surface);
+               border-radius:var(--r) var(--r) 0 0}
   #v3dlist.closed .hd span,#v3dlist.closed .rows{display:none}
-  #v3dlist .hd button{padding:0 4px;border:none;background:none;font-size:11px}
+  #v3dlist .hd button{padding:0 4px;border:none;background:none;font-size:11px;box-shadow:none}
   #v3dlist .rows{overflow:auto;flex:1}
-  #v3dlist .row{display:flex;gap:6px;align-items:center;padding:3px 8px;cursor:pointer;
+  #v3dlist .row{display:flex;gap:6px;align-items:center;padding:4px 9px;cursor:pointer;
                 border-bottom:1px solid var(--line)}
-  #v3dlist .row:hover{background:var(--carc)}
-  #v3dlist .row.sel{background:var(--door)}
+  #v3dlist .row:hover{background:var(--surface)}
+  #v3dlist .row.sel{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
   #v3dlist .row.off{color:var(--muted)}
   #v3dlist .row .n{width:22px;font-weight:600;text-align:right}
   #v3dlist .row .d{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #v3dlist .row .eye{padding:0 4px;border:none;background:none;font-size:12px;opacity:.7}
+  #v3dlist .row .eye{padding:0 4px;border:none;background:none;font-size:12px;opacity:.7;
+                     box-shadow:none}
   #v3dlist .row.hidden3d .eye{opacity:.25}
   .v3dview .v3dcard{position:absolute;left:10px;bottom:10px;max-width:min(340px,calc(100% - 310px));
-                    background:rgba(255,255,255,.95);border:1px solid var(--line);
-                    border-radius:5px;padding:7px 10px;font-size:11.5px;line-height:1.45}
+                    background:rgba(255,255,255,.96);border:1px solid var(--line);
+                    border-radius:var(--r);padding:8px 11px;font-size:11.5px;line-height:1.45;
+                    box-shadow:var(--shadow-2)}
   .v3dview .v3dcard b{font-size:12px}
-  .v3dview .v3dcard .x{float:right;padding:0 5px;border:none;background:none}
-  .v3dview .v3dcard button.go{margin-top:4px;padding:2px 8px;font-size:11px}
+  .v3dview .v3dcard .x{float:right;padding:0 5px;border:none;background:none;box-shadow:none}
+  .v3dview .v3dcard button.go{margin-top:5px;padding:2px 9px;font-size:11px}
   .v3dview .v3dctx{position:absolute;z-index:30;background:var(--panel);border:1px solid var(--line);
-                   border-radius:5px;padding:3px;display:flex;flex-direction:column;min-width:170px;
-                   box-shadow:0 4px 14px rgba(0,0,0,.12)}
-  .v3dview .v3dctx button{text-align:left;border:none;background:none;padding:4px 8px;font-size:11.5px}
-  .v3dview .v3dctx button:hover{background:var(--carc)}
+                   border-radius:var(--r);padding:4px;display:flex;flex-direction:column;min-width:170px;
+                   box-shadow:var(--shadow-2)}
+  .v3dview .v3dctx button{text-align:left;border:none;background:none;padding:5px 9px;font-size:11.5px;
+                          border-radius:5px;box-shadow:none}
+  .v3dview .v3dctx button:hover{background:var(--surface-2)}
   .v3dview .v3dctx[hidden]{display:none}
-  #cablist tr.sel td{background:var(--door)}
+  #cablist tr.sel td{background:var(--accent-soft)}
+  #cablist tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
   #cablist tbody tr{cursor:pointer}
-  #cablist tbody tr:hover td{background:var(--carc)}
-  #cablist tr.sel:hover td{background:var(--door)}
+  #cablist tbody tr:hover td{background:var(--surface)}
+  #cablist tr.sel:hover td{background:var(--accent-soft)}
 
   fieldset{border:none;border-top:1px solid var(--line);margin:0;padding:10px 0 4px}
   fieldset:first-of-type{border-top:none;padding-top:0}
   legend{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
-         padding:0}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:7px 10px;margin-top:7px}
-  .f{display:flex;flex-direction:column;gap:2px}
-  .f label{font-size:11px;color:var(--muted)}
+         padding:0;font-weight:700}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin-top:8px}
+  .f{display:flex;flex-direction:column;gap:3px}
+  .f label{font-size:11px;color:var(--muted);font-weight:500}
   .f.wide{grid-column:1/-1}
 
-  /* One coloured block per section, so the eye finds Doors without reading. */
-  .sec{border:1px solid var(--line);border-radius:5px;padding:8px 10px 10px;
-       margin-bottom:9px}
+  /* One coloured block per section, so the eye finds Doors without reading.
+     The tints are tokens: a section's colour is its own, and nowhere else. */
+  .sec{border:1px solid var(--line);border-radius:var(--r);padding:9px 12px 11px;
+       margin-bottom:10px}
   .sec>h3{margin:0;font-size:12.5px;font-weight:700;letter-spacing:.01em;
           display:flex;align-items:center;gap:8px}
-  .f .prob{display:block;color:var(--crit);font-size:11px;line-height:1.35;margin-top:2px}
-  .f input.bad{border-color:var(--crit);background:#fbeef0}
-  .cdiag{margin:6px 0 4px;border:1px solid var(--line);border-radius:5px;background:var(--panel);padding:4px}
+  .f .prob{display:block;color:var(--crit);font-size:11px;line-height:1.35;margin-top:2px;
+           font-weight:500}
+  .f .prob::before{content:"▲ ";font-size:9.5px}
+  .f input.bad{border-color:var(--crit);background:var(--crit-soft)}
+  .cdiag{margin:6px 0 4px;border:1px solid var(--line);border-radius:var(--r-s);
+         background:var(--panel);padding:4px}
   .cdiag svg{display:block;width:100%;height:auto;max-height:260px}
   .cfix{color:var(--crit);font-weight:600}
   .sec>.hint{font-size:11px;color:var(--muted);margin:3px 0 0;line-height:1.35}
@@ -260,15 +362,17 @@
   .sec .tick{margin-left:auto;font-weight:400;font-size:11px;color:var(--muted);
              display:flex;align-items:center;gap:5px;cursor:pointer}
   .sec .tick input{width:auto;cursor:pointer}
-  .sec .grid{margin-top:7px}
-  .sec.s-size{background:#e7eef5;border-color:#cfdce8}
-  .sec.s-outline{background:#e5f0e7;border-color:#c9ded0}
-  .sec.s-structure{background:#f3efe2;border-color:#e0d8c2}
-  .sec.s-doors{background:#dceaee;border-color:#c1dae0}
-  .sec.s-drawers{background:#f7ead2;border-color:#e6d5b4}
-  .sec.s-corner{background:#ece5f3;border-color:#d7cbe5}
-  .sec.s-supports{background:#eaeee9;border-color:#d3dad1}
-  .supblock{border-top:1px solid #d3dad1;padding:6px 0 4px}
+  .sec .grid{margin-top:8px}
+  .sec.s-size{background:var(--sec-size);border-color:var(--sec-size-line)}
+  .sec.s-outline{background:var(--sec-outline);border-color:var(--sec-outline-line)}
+  .sec.s-structure{background:var(--sec-structure);border-color:var(--sec-structure-line)}
+  .sec.s-doors{background:var(--sec-doors);border-color:var(--sec-doors-line)}
+  .sec.s-drawers{background:var(--sec-drawers);border-color:var(--sec-drawers-line)}
+  .sec.s-corner{background:var(--sec-corner);border-color:var(--sec-corner-line)}
+  .sec.s-supports{background:var(--sec-supports);border-color:var(--sec-supports-line)}
+  .sec input,.sec select{background:rgba(255,255,255,.85)}
+  .sec input:focus,.sec select:focus{background:var(--panel)}
+  .supblock{border-top:1px solid var(--sec-supports-line);padding:6px 0 4px}
   .supblock:first-of-type{border-top:0}
   .supblock h4{margin:0;font-size:12px;display:flex;align-items:center;gap:8px}
   .supblock h4 input[type=number]{width:52px}
@@ -276,9 +380,9 @@
   .supblock .edges{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:5px;font-size:11px}
   .supblock .edges label{display:flex;align-items:center;gap:3px}
   .supblock .drawn{font-size:11px;color:var(--muted);margin-top:4px}
-  .supblock h4 .mini{margin-left:auto;padding:0 6px;line-height:16px;font-size:12px}
+  .supblock h4 .mini{margin-left:auto;padding:0 6px;line-height:16px;font-size:12px;box-shadow:none}
   .supblock.isback{border-top-style:dashed}
-  #editor h2 .edsave{float:right;font-size:11px;padding:2px 9px}
+  #editor h2 .edsave{float:right;font-size:11px;padding:2px 10px}
   table.rows.asquoted td{color:var(--muted)}
   .unavail input,.unavail select{opacity:.5;background:var(--carc)}
   .unavail label{opacity:.65}
@@ -289,26 +393,28 @@
   .leaf .hinge{flex:none;min-width:136px}  /* so each leaf's board lines up */
   .swing{font-size:11.5px;margin-top:6px}
   .swing.bad{color:var(--warn)}
+  .swing.bad::before{content:"▲ ";font-size:9.5px}
   .swing.ok{color:var(--ok)}
+  .swing.ok::before{content:"✓ ";font-size:10.5px}
   .dtot{display:flex;gap:16px;align-items:baseline;margin-top:7px;
         font-variant-numeric:tabular-nums}
   .dtot .over{color:var(--crit);font-weight:700}
   .presets{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
   /* the Boards tab's swatch, not a drawing legend's <rect class="swatch">,
      which this used to resize to 26 px and push over its own text */
-  .swatch:not(rect){width:26px;height:26px;border-radius:3px;display:block;object-fit:cover;
-          border:1px solid var(--rule)}
+  .swatch:not(rect){width:26px;height:26px;border-radius:5px;display:block;object-fit:cover;
+          border:1px solid var(--rule);box-shadow:var(--shadow-1)}
   .swatch.none{background:repeating-linear-gradient(45deg,var(--carc),var(--carc) 4px,
                var(--panel) 4px,var(--panel) 8px)}
   /* The board picture: Browse…, or drop the image straight on it. A drop on
      this backend hands over the file's CONTENTS and no path, so the bytes go
      to the server and it copies them into Pictures/ — see cabinetgen/pictures.py. */
   .picdrop{display:flex;gap:10px;align-items:flex-start;margin-top:4px;padding:8px;
-           border:1px dashed var(--rule);border-radius:5px}
+           border:1px dashed var(--rule);border-radius:var(--r)}
   .picdrop.empty{opacity:.92}
   .picdrop.over{border-color:var(--ok);border-style:solid;
-                background:rgba(60,160,120,.08)}
-  .picpreview{width:72px;height:72px;flex:0 0 auto;border-radius:4px;
+                background:var(--ok-soft)}
+  .picpreview{width:72px;height:72px;flex:0 0 auto;border-radius:6px;
               object-fit:cover;border:1px solid var(--rule);display:block}
   .picpreview.none{background:repeating-linear-gradient(45deg,var(--carc),var(--carc) 5px,
                    var(--panel) 5px,var(--panel) 10px)}
@@ -317,13 +423,14 @@
   header .grow,.matline .grow{flex:1}
   .orients{display:flex;gap:6px;flex-wrap:wrap}
   .orient{display:flex;align-items:center;gap:6px;padding:5px 8px;
-          border:1px solid var(--rule);border-radius:6px;cursor:pointer;
-          font-size:11px;line-height:1.15;max-width:170px}
-  .orient.on{border-color:var(--ink);background:rgba(0,0,0,.04)}
+          border:1px solid var(--rule);border-radius:var(--r);cursor:pointer;
+          font-size:11px;line-height:1.15;max-width:170px;background:var(--panel)}
+  .orient:hover{border-color:var(--accent-line)}
+  .orient.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:var(--focus)}
   .orient input{margin:0}
   .orient svg{flex:0 0 auto;color:var(--ink)}
   .tape{margin-top:8px}
-  .tape>label{font-size:11px;color:var(--muted);display:block}
+  .tape>label{font-size:11px;color:var(--muted);display:block;font-weight:500}
   .tape .leaf{margin-top:2px}
   .tape .leaf select{flex:1;min-width:0}
   .tape .leaf b{min-width:96px;font-variant-numeric:tabular-nums}
@@ -335,6 +442,7 @@
      let the numbers and board ids have the room, not the labels */
   #drawerbox table{table-layout:fixed}
   #drawerbox th,#drawerbox td{padding:2px 3px;font-size:11.5px}
+  #drawerbox th{background:transparent;box-shadow:none;position:static}
   #drawerbox input,#drawerbox select{padding:2px 3px}
   #drawerbox col.c-n{width:18px}
   #drawerbox col.c-mode{width:56px}
@@ -351,43 +459,62 @@
   #elevation svg .ecabg:hover .ecab{stroke-width:2.2}
   #elevation svg .ecabg.dragging{cursor:grabbing;opacity:.6}
   #elevdrag{position:absolute;background:var(--ink);color:#fff;font-size:11px;
-            padding:2px 7px;border-radius:3px;pointer-events:none;display:none;
-            white-space:nowrap;z-index:5}
+            padding:3px 8px;border-radius:6px;pointer-events:none;display:none;
+            white-space:nowrap;z-index:5;box-shadow:var(--shadow-2)}
   #elevation svg .fdiv{cursor:ns-resize}
   #elevation svg .fdiv:hover{stroke-opacity:.9}
   .rows td,.rows th{padding:3px 5px}
+  .rows th{background:transparent;box-shadow:none;position:static}
   .note{color:var(--muted);font-size:11.5px}
   .mono{font-variant-numeric:tabular-nums}
-  .bespoke{background:var(--face);border:1px solid var(--rule);border-radius:4px;
+  .bespoke{background:var(--face);border:1px solid var(--rule);border-radius:var(--r-s);
            padding:7px 9px;font-size:12px;margin-top:8px}
 
-  .issue{display:flex;gap:9px;padding:6px 12px;border-bottom:1px solid var(--line);
+  /* ---------- issues: colour AND a mark, never colour alone ------------- */
+  .issue{display:flex;gap:10px;padding:7px 14px;border-bottom:1px solid var(--line);
          align-items:baseline}
-  .issue .lvl{flex:none;width:64px;font-size:10.5px;text-transform:uppercase;
-              letter-spacing:.04em;font-weight:700}
-  .issue.critical .lvl{color:var(--crit)}
-  .issue.warning .lvl{color:var(--warn)}
+  .issue:last-child{border-bottom:none}
+  .issue .lvl{flex:none;min-width:84px;font-size:10px;text-transform:uppercase;
+              letter-spacing:.05em;font-weight:700;border-radius:999px;padding:1px 8px;
+              text-align:center;background:var(--info-soft);color:var(--muted);line-height:1.6}
+  .issue.critical .lvl{color:var(--crit);background:var(--crit-soft)}
+  .issue.critical .lvl::before{content:"✕ "}
+  .issue.warning .lvl{color:var(--warn);background:var(--warn-soft)}
+  .issue.warning .lvl::before{content:"▲ ";font-size:9px}
   .issue .where{flex:none;width:70px;color:var(--muted);font-variant-numeric:tabular-nums}
   .issue .msg{flex:1}
   .issue .ref{flex:none;color:var(--muted);font-size:11px}
-  .issue.accepted{color:var(--muted);background:#f4f5f3}
-  .issue.accepted .lvl{color:var(--muted)}
+  .issue.accepted{color:var(--muted);background:var(--surface)}
+  .issue.accepted .lvl{color:var(--ok);background:var(--ok-soft)}
+  .issue.accepted .lvl::before{content:"✓ "}
   .issue .why{display:block;font-size:11.5px;margin-top:2px}
   .issue .acts{flex:none;display:flex;gap:6px;align-items:baseline}
   .acceptform{display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap}
   .acceptform input{width:260px}
-  .lapsenote{padding:6px 12px;border-bottom:1px solid var(--line);font-size:12px;
-             color:var(--warn);background:#fbf7ea}
-  tr.hasissue td{background:#fdf6f7}
+  .lapsenote{padding:7px 14px;border-bottom:1px solid var(--line);font-size:12px;
+             color:var(--warn);background:var(--warn-soft)}
+  .lapsenote::before{content:"▲ ";font-size:9.5px;font-weight:700}
+  tr.hasissue td{background:var(--crit-soft)}
   .rowissue{font-size:11.5px;padding:2px 8px 5px 18px}
   .rowissue.critical{color:var(--crit)}
+  .rowissue.critical::before{content:"✕ ";font-weight:700;font-size:10px}
   .rowissue.warning{color:var(--warn)}
+  .rowissue.warning::before{content:"▲ ";font-weight:700;font-size:9.5px}
 
-  .empty{padding:26px 12px;text-align:center;color:var(--muted)}
-  #toast{position:fixed;right:14px;bottom:14px;max-width:520px;background:var(--ink);
-         color:#fff;padding:9px 13px;border-radius:5px;display:none;white-space:pre-wrap;
-         box-shadow:0 3px 14px rgba(0,0,0,.22);z-index:9}
+  .empty{padding:28px 14px;text-align:center;color:var(--muted);margin:10px;
+         border:1px dashed var(--faint);border-radius:var(--r)}
+  td.empty{border:none;margin:0}
+
+  /* ---------- toasts, drag readouts, dialogs ---------------------------- */
+  @keyframes toastin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  #toast{position:fixed;right:16px;bottom:16px;max-width:520px;background:var(--ink);
+         color:#fff;padding:10px 14px 10px 36px;border-radius:var(--r);display:none;
+         white-space:pre-wrap;box-shadow:var(--shadow-2);z-index:9;line-height:1.45;
+         animation:toastin .18s ease-out}
+  #toast::before{content:"✓";position:absolute;left:13px;top:10px;font-weight:700;
+                 color:#9fd7b6}
   #toast.bad{background:var(--crit)}
+  #toast.bad::before{content:"✕";color:#fff}
   #plan svg .cab{cursor:grab}
   #plan svg .cab.dragging{cursor:grabbing}
   /* A label is drawn over the middle of its cabinet — exactly where a cabinet is
@@ -397,20 +524,24 @@
   #plan svg .front{transition:opacity .08s}
   #plan.showfronts svg .front{opacity:1 !important}
   #dragreadout{position:absolute;background:var(--ink);color:#fff;font-size:11px;
-               padding:2px 7px;border-radius:3px;pointer-events:none;display:none;
-               white-space:nowrap;z-index:5}
+               padding:3px 8px;border-radius:6px;pointer-events:none;display:none;
+               white-space:nowrap;z-index:5;box-shadow:var(--shadow-2)}
   #plan{position:relative}
-  .sheetsvg{overflow:auto;border-top:1px solid var(--line);padding:8px 12px}
+  .sheetsvg{overflow:auto;border-top:1px solid var(--line);padding:10px 14px}
   .sheetsvg svg{display:block}
-  .matline{display:flex;gap:18px;align-items:baseline;padding:8px 12px;flex-wrap:wrap}
+  .matline{display:flex;gap:18px;align-items:baseline;padding:9px 14px;flex-wrap:wrap}
   .matline b{font-size:14px}
+  dialog{border:1px solid var(--line);border-radius:var(--r-l);padding:16px 18px;min-width:300px;
+         box-shadow:var(--shadow-2);color:var(--ink)}
+  dialog::backdrop{background:rgba(25,28,26,.35)}
   /* The hand, as two small plan pictures. A corner unit is the one thing in
      this editor where a word ("left") is genuinely ambiguous until you see it,
      so the picture is the control and the word is the label. */
   .hands{display:flex;gap:6px;margin-top:4px}
-  .handopt{flex:1;display:block;border:1px solid var(--rule);border-radius:6px;
-           padding:6px 7px;cursor:pointer;font-size:11px;line-height:1.15}
-  .handopt.on{border-color:var(--ink);background:rgba(0,0,0,.04)}
+  .handopt{flex:1;display:block;border:1px solid var(--rule);border-radius:var(--r);
+           padding:6px 7px;cursor:pointer;font-size:11px;line-height:1.15;background:var(--panel)}
+  .handopt:hover{border-color:var(--accent-line)}
+  .handopt.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:var(--focus)}
   .handopt input{display:none}
   .handopt svg{display:block;width:100%;height:44px;color:var(--ink)}
   .handopt b{display:block;font-size:11.5px;margin-top:3px}
@@ -424,6 +555,19 @@
   .derived input{opacity:.55;background:var(--carc)}
   .derived label{opacity:.7}
   .derived .why{font-size:10.5px;color:var(--muted);font-style:italic}
+
+  /* ---------- narrowed ---------------------------------------------------
+     The pywebview window opens at 1360 x 900. Narrowed past where a 560 px
+     editor and a drawing fit side by side, the dock drops under the drawing
+     with the editor full width; nothing else moves. */
+  @media (max-width:1080px){
+    #cabwrap,#roomwrap,#v3dmain{flex-wrap:wrap}
+    .dock{width:100%}
+    .dock #editor,#v3ddock #editor{width:auto;flex:1;position:static;max-height:none;height:auto}
+    #v3dview{min-height:420px}
+    .split{flex-wrap:wrap}
+    .split>.card[style*="width:500px"]{width:100% !important}
+  }
 </style>
 </head>
 <body>
@@ -568,7 +712,7 @@
 <div id="toast"></div>
 <div id="updrag"></div>
 <!-- Export: which walls' elevations to write (UI restructure, 28 Sept 2026) -->
-<dialog id="exportdlg" style="border:1px solid var(--line);border-radius:6px;padding:14px 16px;min-width:300px">
+<dialog id="exportdlg">
   <form method="dialog">
     <b>Export cut list</b>
     <p class="note" style="margin:6px 0 8px">The Plazaboard CSVs, the sheet layouts and the

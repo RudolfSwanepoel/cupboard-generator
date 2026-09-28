@@ -70,9 +70,73 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
+**UI restructure, Session 2 — Fresh look, first round (28 September 2026,
+the same brief, "styling only").** One `<style>` block in `app/index.html`
+changed and nothing else: no markup moved (one inline `style` attribute on the
+export dialog went into the stylesheet), no handler, no id or class the
+scripts drive. Benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6,
+R28,363.50); every `check_*.py` green; `snapshot.py --compare` identical; and
+**Session 1's three Playwright scripts re-run UNCHANGED and pass**, which is
+what proves nothing functional moved. Before-and-after screenshots of every
+tab and sub-tab are in `Claude outputs/ui-session2-screenshots/`. What it is:
+
+- **The palette is `:root` and nothing else.** The drawings' inks (`--ink`,
+  `--muted`, `--rule`, `--faint`, `--carc`, `--door`, `--face`) keep their
+  values — the elevation and nest SVGs share them. Added: `--accent` (the
+  selection blue view3d.js already drew, `#1f6fd0`, now the one accent:
+  primary buttons, the tab underline, every `.on` toggle, a selected row),
+  `--accent-soft` / `--accent-line`, the soft status pair per level
+  (`--crit-soft` / `--crit-line`, warn, ok, info), `--surface` (card
+  headers, table heads, the strip), `--surface-2`, `--viewport`, the radii
+  (`--r-s` / `--r` / `--r-l`), two shadows, the focus ring, the font stack,
+  and the editor's seven section tints (`--sec-doors`…), which used to be
+  literals on the `.sec` rules. Every hex that was scattered through the
+  stylesheet — the selection blue in five places, the pill tints, the flash
+  row, the issue backgrounds — now reads a token. Board colours and
+  pictures in a drawing are data and do not come through any of it.
+- **Criticals and warnings carry a MARK as well as a colour**, by CSS
+  `::before` so no text a script reads changes: `✕` on a critical, `▲` on a
+  warning, `✓` on ok / accepted — on the strip's pills, every `.pill`, the
+  Validation level badges (now pills), the cut-list row notes, the dock's
+  issue links, the lapse note, a field's problem line, the door-swing
+  verdict, and the two toasts (a tick, a cross).
+- **Tab bar, cards, buttons, inputs, tables, strip, toasts, dock strip, 3D
+  toolbar**, as the brief lists them: accent underline tabs; cards with a
+  tinted header band, larger radius and a hairline shadow; 6 px controls
+  with a hover, a pressed state and an accent focus ring (keyboard focus is
+  `:focus-visible`, so a click shows none); table heads on `--surface`;
+  the strip as cells divided by hairlines; toasts with an icon column and a
+  short rise-in; the dock's chevron as a round button on a hairline; the 3D
+  toolbar's toggles in the accent; Room's Plan | Elevation as a segmented
+  control; the empty states as dashed boxes; a thin scrollbar.
+- **Narrowed** (`@media (max-width:1080px)`): the dock wraps under the
+  drawing with the editor full width, the two-column card rows stack, and
+  nothing else moves. The pywebview window opens at 1360 x 900, where the
+  layout is exactly Session 1's.
+- **One pre-existing nit fixed in CSS:** the 3D toolbar's dropdown box is
+  created empty and unhidden and only filled on its first open, so until the
+  first click anywhere it drew as a stray white pill under "Views";
+  `.v3dmenu:empty` is hidden now.
+
+**Not done, by the brief:** mockups (Rudolf asked for it built directly); the
+per-cabinet exploded view.
+
+**Seen and left alone — a race in the UI scripts' own waits, not in the app.**
+`ui_check_restructure.py`'s `computed()` is a fixed 0.35 s sleep and
+`ui_check_attached.py`'s a 0.45 s one, each raced against the compute a drop
+starts (`compute()` straight after `/api/attach-move`, no debounce). Read too
+early, the derived place (`placed_at`) and the editor's readout are the
+previous compute's, and the line "the room follows: its place on the wall
+moved by the same" (or Attach's "it stands exactly where it did") reports 0
+while the write itself has already passed. Seen in two of five full runs on
+the cloud machine, the same line each time, never in the stage run alone, and
+identically on the tree before Session 2's stylesheet. The scripts were left
+unchanged because the brief runs them unchanged; the fix, when one is wanted,
+is a wait on the compute in flight (`computing` false AND a `S.res` newer than
+the one before the drop) rather than a sleep.
+
 **UI restructure, Session 1 — Structure (28 September 2026, brief
-`Claude outputs/ui-restructure-brief-2026-09-28.md`, agreed with Rudolf).
-Session 2 (styling) is NOT started.** Benchmark unchanged (272 / 59 / 30, 92 pot
+`Claude outputs/ui-restructure-brief-2026-09-28.md`, agreed with Rudolf).** Benchmark unchanged (272 / 59 / 30, 92 pot
 holes, 18 / 9 / 6, R28,363.50 — `regen_check`'s output byte-identical to the
 tree before); every `check_*.py` green, still twenty; `snapshot.py --compare`
 against the tree before identical on every job (the Run's hash included — it is
