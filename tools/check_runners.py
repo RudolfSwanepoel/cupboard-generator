@@ -315,11 +315,104 @@ def drawer_setting():
           (dict(drawer_box_tops(c, STANDARD, j.materials))[1], issues(job_of(c), "support-drawer-foul")), (688, []))
 
 
+def inner_drawers():
+    """Part 4: inner drawers behind the door (ruled with Rudolf, 28 September
+    2026): face = the box's carcass size, front on the shelves' line, heights
+    typed per drawer and equally spaced from the bottom when the count changes,
+    all inner or all outer, the runner picked over the depth less the face."""
+    from cabinetgen.engine import front_stack_check
+    from cabinetgen.room import drawer_layout, inner_drawer_z, solid_parts
+    from cabinetgen.store import cabinet_to_dict
+    print("\ninner drawers: behind the door, the face the box's size")
+
+    def inner(n=2, box_h=150, **kw):
+        return [Drawer(face_height=box_h, box_height=box_h, inner=True) for _ in range(n)]
+
+    c = box(runner=H.SEED_ID, doors=1, drawers=inner(2))
+    j = job_of(c)
+    check("W 600 H 720 (inside 688), two inner drawers: equally spaced from 21",
+          inner_drawer_z(c, STANDARD, j.materials), [21, 365])
+    check("  four: 21, 193, 365, 537", inner_drawer_z(c, STANDARD, j.materials, 4), [21, 193, 365, 537])
+    faces = [p for p in generate_job(j) if p.role == "Drawer Face"]
+    check("the face is the box's carcass size: 150 high x 541 wide (opening 568 - 27)",
+          [(p.length, p.width, p.qty, p.note) for p in faces], [(150, 541, 2, "inner")])
+    check("  a code-20 line off its face board, grain up the height, edged like any face",
+          (faces[0].label[-2:], faces[0].material, faces[0].grain, faces[0].edge_l, faces[0].edge_w),
+          ("20", "BROOKHILL", 1, 2, 2))
+    check("  the box is cut exactly as an outer one's",
+          sorted((p.role, p.length, p.width) for p in generate_job(j) if p.role in ("Drawer Side", "Drawer Front")),
+          [("Drawer Front", 509, 150), ("Drawer Side", 500, 150)])
+    L = {u["n"]: u for u in drawer_layout(c, STANDARD, j.materials)}
+    check("drawer 2 (the lowest) at 21, drawer 1 at 365 — face = box, no stack arithmetic",
+          (L[2]["face"], L[2]["box"][4:], L[1]["face"]), ((21, 171), (21, 171), (365, 515)))
+    check("  its face front on the shelves' line (the carcass front), 16 thick", L[2]["face_y"], (0, 16))
+    check("  the box and the runner start a face thickness back", (L[2]["box"][2], L[2]["rail"][0]), (16, 16))
+    check("  the face spans the box's outside width", L[2]["face_x"], (29.5, 570.5))
+    check("no face-stack arithmetic: the door is H - 3 and the stack check is quiet",
+          front_stack_check(c, STANDARD)[2], 0)
+    check("  and nothing inner is drawn on the front (solid_parts: the door only)",
+          sorted(q.role for q in solid_parts(c, STANDARD, j.materials) if q.front), ["door"])
+    typed = box(runner=H.SEED_ID, doors=1, drawers=inner(2))
+    typed.drawers[0].z = 400
+    L = {u["n"]: u for u in drawer_layout(typed, STANDARD, j.materials)}
+    check("a typed height is where the box stands; the other keeps its default",
+          (L[1]["box"][4], L[2]["box"][4]), (400, 21))
+
+    print("\nthe runner is picked over the depth less the face")
+    deep = box(runner=H.SEED_ID, doors=1, depth=545, drawers=inner(1))
+    check("545 deep: outer drawers get 500 (505 usable) ...", H.SEED.pick(545, 40), 500)
+    check("  an inner one 450 (545 - 16 - 40 = 489)",
+          {p.length for p in generate_job(job_of(deep)) if p.role == "Drawer Side"}, {450})
+    L = drawer_layout(deep, STANDARD, job_of(deep).materials)[0]
+    check("  which leaves 545 - 16 - 450 = 79 behind the box", 545 - L["box"][3], 79)
+
+    print("\nthe job file, and the API")
+    d = cabinet_to_dict(box(drawers=[Drawer(face_height=200, box_height=150)]))
+    check("an outer drawer writes no inner / z", ("inner" in d["drawers"][0], "z" in d["drawers"][0]), (False, False))
+    d = cabinet_to_dict(typed)
+    check("an inner drawer writes both", (d["drawers"][0]["inner"], d["drawers"][0]["z"]), (True, 400))
+    jd = job_to_dict(job_of(box(runner=H.SEED_ID, doors=1, height=2400, kind="tall",
+                                drawers=[Drawer(face_height=300, box_height=180),
+                                         Drawer(face_height=250, box_height=150)])))
+    r = api.inner_drawers({"job": jd, "index": 0, "inner": True})
+    check("make them inner: every height on the equal spacing (inside 2368 / 2)",
+          [(x["inner"], x["z"], x["box_height"]) for x in r["drawers"]], [(True, 1205, 180), (True, 21, 150)])
+    check("  face heights kept, so turning them back restores the stack",
+          [x["face_height"] for x in r["drawers"]], [300, 250])
+    jd["cabinets"][0]["drawers"] = r["drawers"]
+    r3 = api.inner_drawers({"job": jd, "index": 0, "inner": True, "count": 3})
+    check("a count change puts every height back on the spacing: 21, 810, 1600",
+          [x["z"] for x in r3["drawers"]], [1600, 810, 21])
+    back = api.inner_drawers({"job": jd, "index": 0, "inner": False})
+    check("  and outer again: off the inner list, the faces as they were",
+          [(x.get("inner", False), "z" in x, x["face_height"]) for x in back["drawers"]],
+          [(False, False, 300), (False, False, 250)])
+
+    print("\nthe inner-drawer criticals")
+    check("inner drawers and no door: drawer-inner-no-door",
+          len(issues(job_of(box(runner=H.SEED_ID, doors=0, drawers=inner(2))), "drawer-inner-no-door")), 1)
+    mixed = box(runner=H.SEED_ID, doors=1, drawers=inner(1) + [Drawer(face_height=200, box_height=150)])
+    check("inner and outer on one cabinet: drawer-inner-mixed", len(issues(job_of(mixed), "drawer-inner-mixed")), 1)
+    low = box(runner=H.SEED_ID, doors=1, drawers=inner(1))
+    low.drawers[0].z = 10
+    got = issues(job_of(low), "drawer-inner-range")
+    check("a box starting at 10 — its runner under the bottom panel: drawer-inner-range",
+          (len(got), got and "lowest a box can start is 21" in got[0].message), (1, True))
+    high = box(runner=H.SEED_ID, doors=1, drawers=inner(1))
+    high.drawers[0].z = 600
+    got = issues(job_of(high), "drawer-inner-range")
+    check("  a 150 box at 600 reaches 750, past the top at 704: the same",
+          (len(got), got and "750" in got[0].message and "704" in got[0].message), (1, True))
+    check("  and the two defaults raise none of it",
+          [i.check for i in validate(j, generate_job(j)) if i.check.startswith("drawer-inner")], [])
+
+
 def main():
     catalogue()
     legacy_holds()
     checks_and_api()
     drawer_setting()
+    inner_drawers()
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + "; ".join(FAILS))

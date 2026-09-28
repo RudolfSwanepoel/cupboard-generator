@@ -149,6 +149,27 @@ into `output/ui_check_drawers/`).
    box (90 in a 110 face at 667) now reads 688-778, into the band under its
    Top Front / Top Rear at 764 — a new `support-drawer-foul` CRITICAL. Before,
    the box stood on its face bottom (757) and cleared it. Nothing else moved.
+4. **Inner drawers** (`Drawer.inner`, `Drawer.z`, both written only on an
+   inner drawer). Behind the door; the face is the size of the box's carcass
+   — the box's outside width (opening − 27) × the box height — a code-20 line
+   off its face board (note `inner`), grain up the height, edged like any face.
+   **Ruled by Rudolf on the three things the geometry did not settle:** the
+   face front sits "the same as the recess for shelves" — on the shelves'
+   line, flush with the carcass front edges, so the box and the runner start a
+   face thickness back; heights are **typed per drawer** (`z`, the box bottom
+   above the carcass underside), and **equally spaced from the bottom** — the
+   lowest on a runner standing on the bottom panel (21), the rest at the foot
+   of equal slots of the inside height (`room.inner_drawer_z`) — regenerated
+   whenever the count changes (`/api/inner-drawers`); a cabinet's drawers are
+   **all inner or all outer**; and an inner drawer's runner is picked **over
+   the depth less the face** (545 deep: outer 500, inner 450). Inner drawers
+   take no part in the face stack: `Cabinet.outer_drawers` is what
+   `front_stack_check`, `solid_parts` (the plan faces, the door above them)
+   and the elevation read. Three criticals: `drawer-inner-no-door`,
+   `drawer-inner-mixed`, `drawer-inner-range` (runner under the bottom panel,
+   or box into the top). Editor: Drawers -> **Drawer type** Outer | Inner; for
+   inner, **Number of drawers** and a Height per row, with the engine's face
+   size and box top beside it. Pinned in `check_runners.py` `inner_drawers()`.
 
 **UI restructure, Session 2 — Fresh look, first round (28 September 2026,
 the same brief, "styling only").** One `<style>` block in `app/index.html`
@@ -291,6 +312,7 @@ dirty. Nothing else about either changed.
 | Drawer front deduct 59 | `Standard.drawer_front_deduct` | derived: 2 × the runner's `side_clearance` + two box sides (`Standard.drawer_front_length`) |
 | A support's per-edge tickboxes (Front / Rear / Left / Right, Inner / Outer) | Supports section | **Long edges** and **Short edges** 0 / 1 / 2 in the same row; which edge a count means is `support_edges_for_counts` |
 | "Cut from" / "Edging" / "Colour" on a support row | Supports section | **Support Material / Edging Material / Edging Colour**, same controls |
+| Face-stack rules (H − 3 fill, elevation faces, plan faces, door above the stack) | read `drawer_list` | read `Cabinet.outer_drawers` — inner drawers are behind the door |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**

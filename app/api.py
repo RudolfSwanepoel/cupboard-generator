@@ -25,7 +25,7 @@ from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
 from cabinetgen.engine import generate_job, mitre_door_width, panel_of
 from cabinetgen.export_plaza import (effective_price, estimate_cost, summarise,
                                      write_csvs)
-from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
+from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES, Drawer,
                               MATERIALS, NO_COLOUR, PANEL_CODE,
                               PANEL_ORIENTATIONS, PanelSpec, Placement,
                               SUPPORT_EDGES, SUPPORT_DEFAULT_EDGES,
@@ -40,6 +40,7 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
 from cabinetgen.render import pictures_drawn, plan_svg, wall_elevation_svg
 from cabinetgen import scene as SCENE
 from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, drawer_rise,
+                             drawer_layout, inner_drawer_z,
                              attach_offsets, attach_snap_points, attached_panels, attached_placement,
                              cabinet_by_number, host_of, new_attached_panel,
                              arm_shelf_length, arm_shelf_max_depth,
@@ -287,12 +288,19 @@ def _runner_info(job, cab, std):
             "height": rec.height, "side_clearance": rec.side_clearance,
             "length": None, "behind": None, "travel": None, "box_width": None}
     if cab.drawer_list and not cab.is_panel:
-        length = std.pick_runner(cab.depth, rec.lengths)
-        info["length"] = length
-        if length is not None:
-            info["behind"] = cab.depth - length
-            info["travel"] = rec.travel(length)
         info["box_width"] = std.drawer_box_width(cab.width, rec.side_clearance)
+        try:
+            lay = drawer_layout(cab, std, job.materials)
+        except ValueError:
+            lay = []
+        # the lowest drawer's box, as room.drawer_layout places it — an inner
+        # drawer's starts a face thickness back, so what is left behind differs
+        u = min(lay, key=lambda v: v["box"][4]) if lay else None
+        if u and u["box"][3] > u["box"][2]:
+            length = int(u["box"][3] - u["box"][2])
+            info["length"] = length
+            info["behind"] = int(round(geometry(cab, std, job.materials).depth - u["box"][3]))
+            info["travel"] = u["travel"]
     return info
 
 
@@ -322,6 +330,14 @@ def _geometry_info(job, cab, std):
             # length it picks, what is left behind, how far it pulls out. The
             # editor shows these and works out none of them.
             "runner": _runner_info(job, cab, std),
+            # where each drawer's face and box stand (room.drawer_layout): the
+            # editor reads an inner drawer's face size and box top off it
+            "drawer_layout": [{"n": u["n"], "inner": u["inner"], "face": list(u["face"]),
+                               "face_w": round(u["face_x"][1] - u["face_x"][0], 1),
+                               "box": [round(v, 1) for v in u["box"]],
+                               "travel": u["travel"]}
+                              for u in drawer_layout(cab, std, job.materials)],
+            "inner_drawers": bool(cab.inner_drawers),
             "doors_on": bool(cab.door_count),
             "door_count": cab.door_count,
             # Which board each leaf is cut from, resolved, and which of those was
@@ -2038,6 +2054,57 @@ def support_new(payload):
     return {"ok": True, "rows": rows}
 
 
+def inner_drawers(payload):
+    """Make cabinet `index`'s drawers inner or outer (28 September 2026).
+
+    `inner` true: `count` inner drawers (default: as many as it has, at least
+    one), keeping each existing drawer's box height, base and boards, and
+    EVERY height regenerated equally spaced from the bottom
+    (`room.inner_drawer_z`) — ruled by Rudolf: whenever the count changes the
+    heights go back to the auto spacing, then each can be typed on its own.
+    `inner` false: every drawer back on the face stack, its face height kept
+    (the tickbox bargain) and its inner height dropped. The browser writes the
+    list and works out no height."""
+    job, cab = _cabinet_of(payload)
+    make_inner = bool(payload.get("inner"))
+    ds = [replace(d) for d in cab.drawers]
+    if not make_inner:
+        for d in ds:
+            d.inner, d.z = False, None
+        return {"ok": True, "drawers": [_drawer_dict(d) for d in ds]}
+    try:
+        count = int(payload.get("count") if payload.get("count") is not None else max(len(ds), 1))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "the number of drawers is a whole number"}
+    if count < 0:
+        return {"ok": False, "error": "the number of drawers cannot be negative"}
+    while len(ds) < count:
+        proto = ds[-1] if ds else Drawer(face_height=STANDARD.box_height_default,
+                                         box_height=STANDARD.box_height_default)
+        ds.append(replace(proto))
+    ds = ds[:count]
+    for d in ds:
+        d.inner = True
+        d.mode = "fixed"
+        if not d.face_height:
+            d.face_height = d.box_height
+    cab.drawers = ds
+    cab.has_drawers = True if ds else cab.has_drawers
+    job.bind_runners()
+    heights = inner_drawer_z(cab, STANDARD, job.materials, count)
+    for d, z in zip(reversed(ds), heights):          # the last in the list lowest
+        d.z = z
+    return {"ok": True, "drawers": [_drawer_dict(d) for d in ds]}
+
+
+def _drawer_dict(d):
+    out = asdict(d)
+    if not d.inner:
+        out.pop("inner", None)
+        out.pop("z", None)
+    return out
+
+
 def support_edges(payload):
     """The canonical edges for a count of long edges and ends
     (`support_edges_for_counts`, 28 September 2026). The editor asks for
@@ -2186,6 +2253,7 @@ ROUTES = {
     "/api/support-new": support_new,
     "/api/support-reenter": support_reenter,
     "/api/support-edges": support_edges,
+    "/api/inner-drawers": inner_drawers,
     "/api/compute": compute,
     "/api/drawers": drawer_stack,
     "/api/drawer-solve": drawer_solve,

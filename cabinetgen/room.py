@@ -1381,7 +1381,9 @@ def solid_parts(cab, std: Standard = STANDARD, materials: dict = None) -> List[P
 
     gap = std.door_single_gap
     at = 0.0
-    stack = cab.drawer_list
+    # the face stack only: an inner drawer is behind the door, and its face is
+    # drawn in 3D with its box (`interior_parts`), never on the front
+    stack = cab.outer_drawers
     for i in range(len(stack) - 1, -1, -1):             # the bottom face is the last
         d = stack[i]
         board = cab.face_board_of(d)
@@ -1595,6 +1597,28 @@ def drawer_rise(cab, std: Standard = STANDARD) -> int:
     return std.board_t + int(round(cab.runner_or_legacy.lift))
 
 
+def inner_drawer_z(cab, std: Standard = STANDARD, materials: dict = None,
+                   count: Optional[int] = None) -> List[int]:
+    """Where `count` inner drawers stand by default — each box's bottom above
+    the carcass underside, bottom drawer first (ruled by Rudolf, 28 September
+    2026): the lowest box on a runner standing on the bottom panel
+    (`drawer_rise`, 21), and the rest EQUALLY SPACED up the carcass — the inside
+    height between the bottom panel and the top (H - 2t, off `geometry`) split
+    into `count` equal slots, one box starting at the foot of each. Whole
+    millimetres; typed per drawer afterwards, and regenerated whenever the count
+    changes.
+
+    W 600 H 720 (inside 688), two drawers: 21 and 365; four: 21, 193, 365, 537.
+    """
+    mats = MATERIALS if materials is None else materials
+    n = len(cab.inner_drawers) if count is None else int(count)
+    if n <= 0:
+        return []
+    inside = geometry(cab, std, mats).height - 2 * std.board_t
+    rise = drawer_rise(cab, std)
+    return [rise + int(round(k * inside / n)) for k in range(n)]
+
+
 def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List[dict]:
     """Where every drawer's face, box and runners stand — THE one place a box is
     placed (28 September 2026, sketch `drawer-setting-sketch-v2.svg`, confirmed
@@ -1629,6 +1653,16 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
     Gelmar, 560 deep): drawer 3 (the lowest) face 0-233, box z 21-171, box x
     29.5-570.5, y 0-500, rails z 16-61; drawer 2 face 235-475, box z 256-406.
     Pinned in check_runners.py. Nothing here is a cut size.
+
+    An INNER drawer (`Drawer.inner`) is behind the door and outside the face
+    stack: its box bottom is its own `z` (or `inner_drawer_z`'s default), its
+    face is the box's size — the box's outside width, the box's height —
+    with its front on the shelves' line, flush with the carcass front edges,
+    so the box and the runner start a face thickness back (`face_y`). Its
+    runner length is picked over the depth less that thickness, as the engine
+    cuts it. `face_x` / `face_y` say where each face stands across and in
+    depth: an outer face spans the width less `door_single_gap` and stands
+    proud of the carcass front (negative y).
     """
     stack = cab.drawer_list
     if cab.is_panel or not stack:
@@ -1639,27 +1673,46 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
     W = max(xs) - min(xs)
     t = std.board_t
     rr = cab.runner_or_legacy
-    length = g.runner or 0
     clear = rr.side_clearance
     offset = drawer_rise(cab, std)
     rail_t = rr.rail_thickness
+    rails = [(t, t + rail_t), (W - t - rail_t, W - t)]
+    gap = std.door_single_gap
     out = []
+
+    def one(i, d, fz0, fz1, bz0, y0, length, face_x, face_y):
+        bh = int(d.box_height or 0)
+        return {"n": i + 1, "index": i, "inner": bool(d.inner),
+                "face": (fz0, fz1), "face_x": face_x, "face_y": face_y,
+                "face_board": cab.face_board_of(d),
+                "box": (t + clear, W - t - clear, y0, y0 + length, bz0, bz0 + bh),
+                "rails": rails,
+                "rail": (y0, y0 + length, bz0 - rr.lift, bz0 - rr.lift + rr.height),
+                "inner_y0": y0 + rr.setback,
+                "travel": rr.travel(length) if length else 0,
+                "base": d.base, "box_board": cab.box_board_of(d)}
+
+    # the face stack, exactly as it always was
     at = 0
+    outer_len = std.pick_runner(cab.depth, rr.lengths) or 0
     for i in range(len(stack) - 1, -1, -1):          # the bottom face is the last
         d = stack[i]
-        fh, bh = int(d.face_height or 0), int(d.box_height or 0)
-        bz0 = at + offset
-        out.append({
-            "n": i + 1, "index": i, "inner": False,
-            "face": (at, at + fh),
-            "box": (t + clear, W - t - clear, 0, length, bz0, bz0 + bh),
-            "rails": [(t, t + rail_t), (W - t - rail_t, W - t)],
-            "rail": (0, length, bz0 - rr.lift, bz0 - rr.lift + rr.height),
-            "inner_y0": rr.setback,
-            "travel": rr.travel(length) if length else 0,
-            "base": d.base,
-        })
+        if d.inner:
+            continue
+        fh = int(d.face_height or 0)
+        ft = _front_t(mats, cab.face_board_of(d), std)
+        out.append(one(i, d, at, at + fh, at + offset, 0, outer_len,
+                       (gap / 2, W - gap / 2), (-ft, 0)))
         at += fh + std.stack_gap
+    # behind the door: each at its own height, its face the box's size
+    inner = [(i, d) for i, d in enumerate(stack) if d.inner]
+    auto = inner_drawer_z(cab, std, mats, len(inner))
+    for k, (i, d) in enumerate(reversed(inner)):     # the last in the list lowest
+        ft = _front_t(mats, cab.face_board_of(d), std)
+        z = int(d.z) if d.z is not None else auto[k]
+        length = std.pick_runner(cab.depth - ft, rr.lengths) or 0
+        out.append(one(i, d, z, z + int(d.box_height or 0), z, ft, length,
+                       (t + clear, W - t - clear), (0, ft)))
     return sorted(out, key=lambda u: u["n"])
 
 

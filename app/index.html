@@ -452,6 +452,8 @@
   #drawerbox col.c-base{width:66px}
   #drawerbox col.c-mat{width:auto}
   #drawerbox col.c-rm{width:30px}
+  #drawerbox col.c-z{width:62px}
+  #drawerbox col.c-read{width:64px}
   #elevation{position:relative}
   #elevation svg{user-select:none;-webkit-user-select:none}
   #elevation svg .ecabg{cursor:grab}
@@ -1951,6 +1953,8 @@ $("editor").addEventListener("input", (e) => {
   else if (dk === "box_board" || dk === "face_board") d[dk] = e.target.value || null;
   else if (dk === "share") d.share = parseFloat(e.target.value) || 0;
   else d[dk] = parseInt(e.target.value, 10) || 0;
+  // an inner drawer is outside the face stack: nothing to solve, only compute
+  if (d.inner) { schedule(); return; }
   solveStack();
 });
 
@@ -2088,7 +2092,11 @@ $("editor").addEventListener("click", (e) => {
   }
   const rm = e.target.closest("[data-drm]");
   if (rm) {
-    S.job.cabinets[S.sel].drawers.splice(+rm.dataset.drm, 1);
+    const c = S.job.cabinets[S.sel];
+    const wasInner = c.drawers.length && c.drawers.every((d) => d.inner);
+    c.drawers.splice(+rm.dataset.drm, 1);
+    // the count changed: inner heights go back to the auto spacing (ruled)
+    if (wasInner) { setInner(c, true, c.drawers.length); return; }
     renderDrawers();
     return;
   }
@@ -2620,10 +2628,38 @@ function refreshSwing() {
    proportion to their share numbers — and every one of those numbers is
    drawers.divide's, fetched, not worked out here.                           */
 
+// Inner or outer: the whole cabinet's drawers, one or the other (ruled 28
+// September 2026). The server writes the list — for inner, every height back
+// on the equal spacing from the bottom (`room.inner_drawer_z`) — and the
+// browser works out no height.
+async function setInner(c, inner, count) {
+  const idx = S.job.cabinets.indexOf(c);
+  const r = await post("/api/inner-drawers", {job: S.job, index: idx, inner: inner,
+                                              count: count});
+  if (!r || !r.ok) { toast((r && r.error) || "no reply", true); renderDrawers(); return; }
+  c.drawers = r.drawers;
+  if (inner && !((c.doors || 0) > 0 && c.has_doors !== false))
+    toast("Inner drawers sit behind a door — tick Has doors on this cabinet.", true);
+  renderDrawers();
+  schedule();
+}
+
+$("editor").addEventListener("change", (e) => {
+  const c = S.sel !== null && S.job.cabinets[S.sel];
+  if (!c) return;
+  if (e.target.dataset.dtype !== undefined) {
+    setInner(c, e.target.value === "inner", Math.max(c.drawers.length, 1));
+  } else if (e.target.dataset.dcount !== undefined) {
+    const n = Math.max(parseInt(e.target.value, 10) || 0, 0);
+    if (n !== c.drawers.length) setInner(c, true, n);
+  }
+});
+
 function renderDrawers() {
   const box = slot($("drawerbox"));
   if (!box) return;
   const c = S.job.cabinets[S.sel];
+  if (c.drawers.length && c.drawers.every((d) => d.inner)) { renderInnerDrawers(box, c); return; }
   const std = S.def.standard || {};
   const keys = (S.res && S.res.boards) || [];
   // What a drawer follows when it names no board of its own: the box the
@@ -2665,7 +2701,7 @@ function renderDrawers() {
     </tr>`;
   }).join("");
 
-  box.innerHTML = `<table class="rows">
+  box.innerHTML = `${drawerTypeHTML(c)}<table class="rows">
     <colgroup><col class="c-n"><col class="c-mode"><col class="c-val"><col class="c-mm">
       <col class="c-box"><col class="c-base"><col class="c-mat"><col class="c-mat">
       <col class="c-rm"></colgroup>
@@ -2752,6 +2788,72 @@ async function changeRunner(c, to, sel) {
   c.runner = to;
   renderDrawers();
   schedule();
+}
+
+function drawerTypeHTML(c) {
+  const inner = c.drawers.length > 0 && c.drawers.every((d) => d.inner);
+  const mixed = c.drawers.some((d) => d.inner) && !inner;
+  return `<div class="f"><label>Drawer type</label>
+      <select data-dtype="1" title="faces on the front, or drawers behind the door">
+        <option value="outer"${inner ? "" : " selected"}>Outer — faces on the front</option>
+        <option value="inner"${inner ? " selected" : ""}>Inner — behind the door</option>
+      </select>
+      ${mixed ? `<span class="note over">inner and outer drawers are mixed on this
+        cabinet — pick one; the export is blocked until then</span>` : ""}</div>`;
+}
+
+// Inner drawers: a count, and per drawer the height its box starts at — typed
+// and adjustable one by one, and put back on the equal spacing from the bottom
+// whenever the count changes (ruled by Rudolf, 28 September 2026). The face is
+// the box's own size; the readout is the engine's (room.drawer_layout).
+function renderInnerDrawers(box, c) {
+  const keys = (S.res && S.res.boards) || [];
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const lay = {};
+  ((g && g.drawer_layout) || []).forEach((u) => { lay[u.n] = u; });
+  const boxDefault = c.drawer_carcass_board || c.carcass_board || "";
+  const faceDefault = c.drawer_face_board || c.exterior_board || "";
+  const boardCell = (i, dk, v, follows, what) => `<td><select data-d="${i}"
+      data-dk="${dk}" title="${esc(what)} — blank follows Structure (${esc(follows || "—")})">
+      <option value=""${v ? "" : " selected"}>(${esc(follows || "—")})</option>
+      ${keys.filter((k) => !boardIsThin(k)).map((k) =>
+        `<option value="${esc(k)}"${k === v ? " selected" : ""}>${esc(k)}</option>`).join("")}</select></td>`;
+  const rows = c.drawers.map((d, i) => {
+    const u = lay[i + 1];
+    return `<tr>
+      <td class="n">${i + 1}</td>
+      <td><input type="number" step="1" data-d="${i}" data-dk="z" value="${d.z === null || d.z === undefined ? "" : d.z}"
+           title="where this box's bottom stands above the carcass underside"></td>
+      <td><input type="number" step="1" data-d="${i}" data-dk="box_height" value="${d.box_height}"></td>
+      <td><select data-d="${i}" data-dk="base">${(S.def.bases || []).map((b) =>
+        `<option${b === d.base ? " selected" : ""}>${esc(b)}</option>`).join("")}</select></td>
+      ${boardCell(i, "box_board", d.box_board || "", boxDefault, "what this drawer's box is cut from")}
+      ${boardCell(i, "face_board", d.face_board || "", faceDefault, "what this drawer's face is cut from")}
+      <td class="note mono" data-innerread="${i}" title="the face (width × height) and the box top, off the engine">${
+        u ? `${u.face_w}×${u.face[1] - u.face[0]}<br>top ${u.box[5]}` : "…"}</td>
+      <td><button data-drm="${i}" title="Remove this drawer">x</button></td>
+    </tr>`;
+  }).join("");
+  box.innerHTML = `${drawerTypeHTML(c)}
+    <div class="f"><label>Number of drawers</label>
+      <input type="number" step="1" min="0" data-dcount="1" value="${c.drawers.length}"
+             title="changing it puts every height back on the equal spacing"></div>
+    <table class="rows">
+    <colgroup><col class="c-n"><col class="c-z"><col class="c-box"><col class="c-base">
+      <col class="c-mat"><col class="c-mat"><col class="c-read"><col class="c-rm"></colgroup>
+    <thead><tr><th class="n">#</th><th title="box bottom above the carcass underside">Height</th>
+      <th title="box side height — the face is the same height">Box h</th><th>Base</th>
+      <th title="box material">Box mat.</th><th title="face material">Face mat.</th>
+      <th title="the face, width × height, and the box top">Face</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    ${runnerHTML(c)}
+    <p class="hint">Inner drawers sit behind the door. Each face is the size of its box's
+      carcass — the box's outside width and its height — so the sides are hidden, and its
+      front is on the shelves' line, flush with the carcass front. <b>Height</b> is where
+      each box starts above the carcass underside: changing the number of drawers spaces
+      them equally from the bottom again (the lowest on a runner standing on the bottom
+      panel); then each can be moved on its own. Listed top to bottom.</p>
+    ${edgingHTML(c, "drawer")}`;
+  refreshEdging();
 }
 
 let solveSeq = 0;

@@ -263,7 +263,58 @@ def stage_runners(pw):
     browser.close()
 
 
-STAGES = {"supports": stage_supports, "catalogue": stage_catalogue, "runners": stage_runners}
+def stage_drawers(pw):
+    print("\nPart 4 — inner drawers: the type, the count, a height typed on its own")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    load_job(page, "Test")
+    select(page, 1)                                    # tall, a pair of doors, no drawers
+    page.wait_for_selector('#editor [data-tick="has_drawers"]', timeout=5000)
+    page.check('#editor [data-tick="has_drawers"]')
+    page.wait_for_selector("#drawerbox select[data-dtype]", timeout=5000)
+    page.select_option("#drawerbox select[data-dtype]", "inner")
+    page.wait_for_function("() => S.job.cabinets[S.sel].drawers.length === 1 && S.job.cabinets[S.sel].drawers[0].inner", timeout=10000)
+    computed(page)
+    check("Inner with no drawers yet: one, on the bottom (21)",
+          page.evaluate("() => S.job.cabinets[S.sel].drawers.map((d) => d.z)"), [21])
+    page.fill("#drawerbox input[data-dcount]", "3")
+    page.dispatch_event("#drawerbox input[data-dcount]", "change")
+    page.wait_for_function("() => S.job.cabinets[S.sel].drawers.length === 3", timeout=10000)
+    computed(page)
+    check("three: equally spaced from the bottom (inside 2368 / 3)",
+          page.evaluate("() => S.job.cabinets[S.sel].drawers.map((d) => d.z)"), [1600, 810, 21])
+    page.fill('#drawerbox input[data-d="0"][data-dk="z"]', "1500")
+    page.dispatch_event('#drawerbox input[data-d="0"][data-dk="z"]', "change")
+    computed(page)
+    check("drawer 1 typed to 1500 on its own; the others stay",
+          page.evaluate("() => S.job.cabinets[S.sel].drawers.map((d) => d.z)"), [1500, 810, 21])
+    faces = page.evaluate("() => S.res.panels.filter((p) => p.cabinet === 1 && p.role === 'Drawer Face').map((p) => [p.length, p.width, p.qty])")
+    check("the cut list: one inner face line, the box's size (150 x 541)", faces, [[150, 541, 3]])
+    read = text(page, '#drawerbox [data-innerread="0"]')
+    check("the row reads the engine's face and box top", read.strip(), "541×150top 1650")
+    shot(page, "inner_drawers", "#drawerbox")
+    page.fill("#drawerbox input[data-dcount]", "2")
+    page.dispatch_event("#drawerbox input[data-dcount]", "change")
+    page.wait_for_function("() => S.job.cabinets[S.sel].drawers.length === 2", timeout=10000)
+    computed(page)
+    check("a count change puts the typed height back on the spacing",
+          page.evaluate("() => S.job.cabinets[S.sel].drawers.map((d) => d.z)"), [1205, 21])
+    check("no inner-drawer critical on it (it has doors)",
+          page.evaluate("() => S.res.issues.filter((i) => i.where === '1' && /drawer-inner/.test(i.check)).length"), 0)
+    page.select_option("#drawerbox select[data-dtype]", "outer")
+    page.wait_for_function("() => !S.job.cabinets[S.sel].drawers.some((d) => d.inner)", timeout=10000)
+    computed(page)
+    check("back to Outer: the face stack table, no inner height left",
+          page.evaluate("() => [!!document.querySelector('#drawerbox [data-dk=\"mode\"]'), S.job.cabinets[S.sel].drawers.some((d) => 'z' in d && d.z !== null)]"),
+          [True, False])
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+STAGES = {"supports": stage_supports, "catalogue": stage_catalogue, "runners": stage_runners,
+          "drawers": stage_drawers}
 
 with sync_playwright() as pw:
     for key, fn in STAGES.items():

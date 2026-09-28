@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import List
 
 from .model import (BLIND_CODE, MATERIALS, PANEL_CODE, Cabinet, Job, Panel,
+                    material_thickness,
                     grain_of, resolve_board, tape_for)
 from .room import (arm_shelf_depth, arm_shelf_length, blind_door_width,
                    blind_panel_height, gaps, mitre_blank, mitre_legs,
@@ -331,32 +332,62 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
         def face_of(d):
             return R(cab.face_board_of(d))
 
-        # group identical drawers so the cut list stays short — the board is part
-        # of what makes two drawers identical
-        for key in _dedupe([(d.box_height, d.base, box_of(d)) for d in stack]):
-            box_h, base_mat, box_board = key
-            group = [d for d in stack if (d.box_height, d.base, box_of(d)) == key]
+        # An INNER drawer's box starts a face thickness behind the carcass front
+        # (its face is on the shelves' line), so its runner is picked over the
+        # depth less that — ruled 28 September 2026 — and still leaves
+        # runner_clearance behind it.
+        def length_of(d):
+            if not d.inner:
+                return runner
+            face_t = material_thickness(mats, face_of(d)) or std.board_t
+            got = std.pick_runner(cab.depth - face_t, rr.lengths)
+            if got is None:
+                raise ValueError(
+                    f"cabinet {n}: no runner fits an inner drawer {cab.depth} mm deep "
+                    f"less its face (need {(rr.shortest or 0) + std.runner_clearance} mm "
+                    f"behind the face for the shortest {rr.name or 'runner'}, {rr.shortest})")
+            return got
+
+        # group identical drawers so the cut list stays short — the board, and
+        # the runner length the box is cut to, are part of what makes two
+        # drawers identical
+        for key in _dedupe([(d.box_height, d.base, box_of(d), length_of(d)) for d in stack]):
+            box_h, base_mat, box_board, length = key
+            group = [d for d in stack
+                     if (d.box_height, d.base, box_of(d), length_of(d)) == key]
             count = len(group)
             row_tape = cab.drawer_box_tape_of(mats, group[0])
             box_grain = grain_of(mats, box_board)
-            P.append(Panel(n, "18", "Drawer Side", box_board, runner, box_h, 2 * count,
+            P.append(Panel(n, "18", "Drawer Side", box_board, length, box_h, 2 * count,
                            edge_l=1, edge_material=row_tape, grain=box_grain))
             P.append(Panel(n, "19", "Drawer Front", box_board, front_len, box_h, 2 * count,
                            edge_l=1, edge_material=row_tape, grain=box_grain))
-            bl, bwid = std.drawer_base(front_len, runner, base_mat)
+            bl, bwid = std.drawer_base(front_len, length, base_mat)
             # a grooved base is the same thin sheet as the back; a housed one is
             # 16 mm, cut from the drawer box's own board
             base_board = back if base_mat == "board" else box_board
             P.append(Panel(n, "17", "Drawer Base", base_board, bl, bwid, count,
                            grain=grain_of(mats, base_board)))
 
-        for key in _dedupe([(d.face_height, face_of(d)) for d in stack]):
+        outer = [d for d in stack if not d.inner]
+        for key in _dedupe([(d.face_height, face_of(d)) for d in outer]):
             face_h, face_board = key
-            count = sum(1 for d in stack if (d.face_height, face_of(d)) == key)
+            count = sum(1 for d in outer if (d.face_height, face_of(d)) == key)
             P.append(Panel(n, "20", "Drawer Face", face_board,
                            face_h, cab.width - std.door_single_gap, count,
                            edge_l=2, edge_w=2, edge_material=face_tape,
                            grain=grain_of(mats, face_board)))
+        # An inner drawer's face is the size of its box's carcass, so the box
+        # sides are hidden: the box's outside width, and the box's height. Grain
+        # up the height, as every drawer face (hard rule 7).
+        inner = [d for d in stack if d.inner]
+        box_w = std.drawer_box_width(cab.width, rr.side_clearance)
+        for key in _dedupe([(d.box_height, face_of(d)) for d in inner]):
+            face_h, face_board = key
+            count = sum(1 for d in inner if (d.box_height, face_of(d)) == key)
+            P.append(Panel(n, "20", "Drawer Face", face_board, face_h, box_w, count,
+                           edge_l=2, edge_w=2, edge_material=face_tape,
+                           grain=grain_of(mats, face_board), note="inner"))
 
     # ---- doors -------------------------------------------------------------
     # cab.door_count, never cab.doors: with "Has doors" unticked the count stays
@@ -553,7 +584,9 @@ def generate_job(job: Job) -> List[Panel]:
 
 def front_stack_check(cab: Cabinet, std: Standard = STANDARD):
     """Door + drawer faces + 2 mm gaps must fill H - 3. Returns (expected, actual, gap)."""
-    stack = cab.drawer_list
+    # the face stack only: an inner drawer is behind the door and takes no part
+    # in the H - 3 fill (28 September 2026)
+    stack = cab.outer_drawers
     faces = sum(d.face_height for d in stack)
     door = 0
     if cab.door_count:

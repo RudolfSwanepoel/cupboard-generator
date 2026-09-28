@@ -46,7 +46,10 @@ def cabinet_to_dict(c: Cabinet) -> dict:
     for name in LATE_CABINET_FIELDS:
         if d.get(name) == defaults[name]:
             d.pop(name, None)
-    d["drawers"] = [asdict(x) for x in c.drawers]
+    # `inner` and `z` only on an inner drawer (28 September 2026), so every
+    # drawer written before inner drawers round-trips byte for byte.
+    d["drawers"] = [{k: v for k, v in asdict(x).items()
+                     if x.inner or k not in ("inner", "z")} for x in c.drawers]
     # `board` and `kind` are written only when a row actually names them, so a
     # job saved before the control round-trips byte for byte and is still read
     # from `edge` — the same discipline as every other field added here.

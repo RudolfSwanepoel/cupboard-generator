@@ -1691,7 +1691,8 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
     mats = materials or {}
     fills = fills or _FLAT
     body = board_look(mats, c.carcass_board)
-    stack = c.drawer_list
+    # the face stack: an inner drawer is behind the door and not on the front
+    stack = c.outer_drawers
     leaves = c.door_count
     door_h = 0
     if leaves:

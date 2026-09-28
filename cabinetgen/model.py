@@ -262,6 +262,20 @@ class Drawer:
     # board — which is how every job written before these reads.
     box_board: Optional[str] = None
     face_board: Optional[str] = None
+    # An INNER drawer (28 September 2026): it sits behind the cabinet's door,
+    # and its face is the size of the box's own carcass so the box sides are
+    # hidden — face width = the box's outside width (opening - 2 x the runner
+    # clearance), face height = box height, still a code-20 line off its face
+    # board. The face front is on the shelves' line, flush with the carcass
+    # front edges (ruled by Rudolf: "the same as the recess for shelves"), so
+    # the box starts a face thickness behind it. No face-stack arithmetic
+    # applies: `z` is where its box bottom stands above the carcass underside,
+    # typed per drawer, generated equally spaced from the bottom
+    # (`room.inner_drawer_z`) whenever the count changes, and None reads that
+    # default. A cabinet's drawers are all inner or all outer (ruled). Both
+    # fields are written to the job file only on an inner drawer.
+    inner: bool = False
+    z: Optional[int] = None
 
 
 @dataclass
@@ -944,6 +958,18 @@ class Cabinet:
         """The drawers that are actually built. Unticking keeps `drawers` in the
         job file untouched — nothing here empties it."""
         return [] if self.has_drawers is False else list(self.drawers)
+
+    @property
+    def outer_drawers(self) -> List[Drawer]:
+        """The built drawers whose faces are on the front — the face stack.
+        Every face-stack rule (the H - 3 fill, the elevation, the plan faces,
+        the door above them) reads this, never `drawer_list`."""
+        return [d for d in self.drawer_list if not d.inner]
+
+    @property
+    def inner_drawers(self) -> List[Drawer]:
+        """The built drawers behind the door (`Drawer.inner`)."""
+        return [d for d in self.drawer_list if d.inner]
 
     @property
     def support_list(self) -> List[Support]:

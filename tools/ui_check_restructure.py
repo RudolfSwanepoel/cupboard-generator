@@ -652,6 +652,16 @@ def stage_export(pw):
     page.fill("#jobname", name)
     page.dispatch_event("#jobname", "input")
     computed(page)
+    # This stage tests the export, not Test.json's design: live data that
+    # carries a drawer critical (since the drawer setting of 28 September 2026,
+    # cabinet 4's top box fouls its Top Front) would disable Export. Take the
+    # drawers off any cabinet a drawer critical names, in memory only.
+    page.evaluate("""() => {
+      const bad = new Set((S.res.issues || []).filter((i) => i.level === 'critical' &&
+        /^(drawer-|support-drawer-foul)/.test(i.check || '')).map((i) => i.where));
+      S.job.cabinets.forEach((c) => { if (bad.has(String(c.number))) c.has_drawers = false; });
+    }""")
+    page.evaluate("async () => { await compute(); }")
     page.wait_for_function("() => !document.getElementById('export').disabled", timeout=15000)
     page.click("#export")
     page.wait_for_selector("#exportdlg[open]", timeout=5000)

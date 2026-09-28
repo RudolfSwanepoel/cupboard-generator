@@ -159,6 +159,7 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     out += _grain_on_boards(job, panels)
     out += _zero_quantities(panels)
     out += _drawer_boxes(job.cabinets)
+    out += _inner_drawers(job)
     out += _panels(job)
     out += _project_boards(job)
     out += tape_issues
@@ -379,6 +380,8 @@ def _drawer_boxes(cabinets):
         if c.is_panel:
             continue
         for i, d in enumerate(c.drawer_list, start=1):
+            if d.inner:
+                continue                   # its face IS its box: see _inner_drawers
             if d.face_height <= 0:
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"drawer {i}: face height is {d.face_height} — the fixed "
@@ -389,6 +392,55 @@ def _drawer_boxes(cabinets):
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"drawer {i}: box {d.box_height} is not shorter than "
                                  f"its face {d.face_height}", check="drawer-box-height"))
+    return out
+
+
+def _inner_drawers(job: Job):
+    """Inner drawers — behind the door, faces the size of their boxes (28
+    September 2026). What only they can get wrong:
+
+    * CRITICAL `drawer-inner-no-door`: inner drawers on a cabinet with no door —
+      there is nothing for them to sit behind;
+    * CRITICAL `drawer-inner-mixed`: inner and outer drawers on one cabinet —
+      ruled all one or the other (Rudolf: "it's either all internal or
+      external"); two carcasses one over the other is how both are built;
+    * CRITICAL `drawer-inner-range`: an inner drawer whose runner would stand
+      below the bottom panel, or whose box would rise into the top — its typed
+      height puts it outside the carcass it hangs in.
+    """
+    from .room import drawer_layout, drawer_rise, geometry
+    out = []
+    for c in job.cabinets:
+        if c.is_panel or not c.inner_drawers:
+            continue
+        if not c.door_count:
+            out.append(Issue(CRITICAL, str(c.number),
+                             f"{len(c.inner_drawers)} inner drawer"
+                             f"{'s' if len(c.inner_drawers) > 1 else ''} but no door to sit "
+                             f"behind — tick Has doors, or make them outer drawers",
+                             check="drawer-inner-no-door"))
+        if c.outer_drawers:
+            out.append(Issue(CRITICAL, str(c.number),
+                             "inner and outer drawers on one cabinet — a cabinet's drawers "
+                             "are all inner or all outer; build two carcasses one over "
+                             "the other for both", check="drawer-inner-mixed"))
+        t = job.std.board_t
+        lowest = drawer_rise(c, job.std)
+        top = geometry(c, job.std, job.materials).height - t
+        for u in drawer_layout(c, job.std, job.materials):
+            if not u["inner"]:
+                continue
+            z0, z1 = u["box"][4], u["box"][5]
+            if z0 < lowest:
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"inner drawer {u['n']} starts at {z0} — its runner would "
+                                 f"stand below the bottom panel; the lowest a box can start "
+                                 f"is {lowest}", check="drawer-inner-range"))
+            elif z1 > top:
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"inner drawer {u['n']} box reaches {z1}, into the top at "
+                                 f"{top} — lower it or make the box shallower",
+                                 check="drawer-inner-range"))
     return out
 
 
