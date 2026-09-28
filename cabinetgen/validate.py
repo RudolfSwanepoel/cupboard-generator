@@ -752,9 +752,9 @@ def _support_layout(job: Job):
                 need = front[0]["y1"] + (rear[0]["y1"] - rear[0]["y0"]) + (
                     std.back_cavity + std.back_t if c.back != "none" else 0)
                 out.append(Issue(CRITICAL, str(c.number),
-                                 f"the Front and Top Rear supports overlap in depth — "
+                                 f"the Top Front and Top Rear supports overlap in depth — "
                                  f"the Top Rear starts {rear[0]['y0']} from the front and "
-                                 f"the Front ends at {front[0]['y1']}. The carcass needs "
+                                 f"the Top Front ends at {front[0]['y1']}. The carcass needs "
                                  f"D >= {need} for both; drop one, or deepen it",
                                  check="support-depth-overlap"))
         need, have = back_supports_fit(c, std, job.materials)

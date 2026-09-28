@@ -27,8 +27,10 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES,
                               MATERIALS, NO_COLOUR, PANEL_CODE,
                               PANEL_ORIENTATIONS, PanelSpec, Placement,
                               SUPPORT_EDGES, SUPPORT_DEFAULT_EDGES,
-                              SUPPORT_EDGE_NAMES, SUPPORT_TYPE_LABEL,
+                              SUPPORT_EDGE_NAMES, SUPPORT_LONG_EDGES,
+                              SUPPORT_TYPE_LABEL,
                               SUPPORT_TYPES, support_edges_of,
+                              support_edges_canonical, support_edges_for_counts,
                               grain_of, hinge_side, is_thin, material_board,
                               material_colour, material_has_edging,
                               material_offers, material_price,
@@ -198,6 +200,7 @@ def defaults(payload):
         "support_types": list(SUPPORT_TYPES),
         "support_type_label": dict(SUPPORT_TYPE_LABEL),
         "support_edge_names": list(SUPPORT_EDGE_NAMES),
+        "support_long_edges": list(SUPPORT_LONG_EDGES),
         "support_default_edges": list(SUPPORT_DEFAULT_EDGES),
         "bases": ["board", "melamine"],
         # the house board records, for a job that has not named its own
@@ -339,6 +342,10 @@ def _geometry_info(job, cab, std):
                           "type": r.type, "edges": r.edges,
                           "eff_edges": support_edges_of(r) if r.type else ["front"],
                           "edge_counts": list(cab.support_row_edge_counts(r)),
+                          # a stored edge set that is not the canonical one for
+                          # its counts is kept and drawn as stored; the editor
+                          # says so under the row
+                          "edges_canonical": (support_edges_canonical(r) if r.type else True),
                           # what the row resolves to, so the editor shows the
                           # engine's answer rather than working one out
                           "eff_cut_board": cab.support_row_cut_board(r),
@@ -1796,6 +1803,21 @@ def support_new(payload):
     return {"ok": True, "rows": rows}
 
 
+def support_edges(payload):
+    """The canonical edges for a count of long edges and ends
+    (`support_edges_for_counts`, 28 September 2026). The editor asks for
+    counts, as Panel design does, and writes the list this hands back into
+    `Support.edges` — which edge a count means is decided here, never in the
+    browser."""
+    try:
+        long, short = int(payload.get("long") or 0), int(payload.get("short") or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "long and short are whole numbers"}
+    if not (0 <= long <= 2 and 0 <= short <= 2):
+        return {"ok": False, "error": "long and short are 0, 1 or 2"}
+    return {"ok": True, "edges": support_edges_for_counts(long, short)}
+
+
 def support_reenter(payload):
     """The legacy rows rewritten as typed rows (`Cabinet.reentered_supports`):
     each keeps its own qty, cut board and edging, so the cut list and the cost
@@ -1928,6 +1950,7 @@ ROUTES = {
     "/api/duplicate": duplicate,
     "/api/support-new": support_new,
     "/api/support-reenter": support_reenter,
+    "/api/support-edges": support_edges,
     "/api/compute": compute,
     "/api/drawers": drawer_stack,
     "/api/drawer-solve": drawer_solve,

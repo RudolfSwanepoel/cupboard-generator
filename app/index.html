@@ -1341,9 +1341,10 @@ const SECTIONS = [
 
   {key: "supports", name: "Supports", slot: "supportbox", when: notPanel,
    hint: "A support is a cross rail spanning the internal width, tying the two " +
-         "sides together. Three kinds: a Front and a Top Rear across the top of a " +
-         "base unit, and Back supports upright behind the backing. Each says what " +
-         "it is cut from, what its edging is, and which edges get it.",
+         "sides together. Three kinds: a Top Front and a Top Rear across the top of a " +
+         "base unit, and Back supports upright behind the backing. Each says its " +
+         "Support Material, its Edging Material and Colour, and how many long and " +
+         "short edges are banded.",
    fields: []},
 
   // Panels fixed to this cabinet (28 September 2026): listed here, made here,
@@ -1852,15 +1853,16 @@ $("editor").addEventListener("input", (e) => {
       // a Front or a Top Rear is one or none
       row.qty = e.target.checked ? 1 : 0;
       renderSupports();
-    } else if (sk.startsWith("edge:")) {
-      // which edges of this rail are banded, edge by edge. The list is written
-      // in full so the file says exactly what was ticked.
-      const names = S.def.support_edge_names || ["front", "rear", "left", "right"];
-      const have = new Set(Array.isArray(row.edges) ? row.edges
-                           : (S.def.support_default_edges || ["front"]));
-      if (e.target.checked) have.add(sk.slice(5)); else have.delete(sk.slice(5));
-      row.edges = names.filter((n) => have.has(n));
-      refreshSupports();
+    } else if (sk === "long" || sk === "short") {
+      // how many long edges and ends are banded, as Panel design asks it. WHICH
+      // edges a count means is the server's rule (/api/support-edges); the
+      // list it hands back is what is stored, so a row that was not canonical
+      // for its counts becomes canonical here — the note under it said so.
+      const have = supportCounts(row);
+      const want = {long: have[0], short: have[1]};
+      want[sk] = +e.target.value || 0;
+      supportEdgesFor(row, want.long, want.short);
+      return;
     } else if (sk === "cut_board") {
       // What the rail is cut from. If the edging colour was only following the
       // cut board, it follows it here too; a colour chosen outright stays.
@@ -2731,8 +2733,13 @@ const SUPPORT_TYPE_HINT = {
 const SUPPORT_EDGE_LABEL = {
   front: {front: "Front edge", rear: "Rear edge", left: "Left end", right: "Right end"},
   top_rear: {front: "Front edge", rear: "Rear edge", left: "Left end", right: "Right end"},
-  back: {front: "Inner edge (down on Back 1, up on the rest)", rear: "Outer edge",
-         left: "Left end", right: "Right end"},
+  back: {front: "Inner edge", rear: "Outer edge", left: "Left end", right: "Right end"},
+};
+// What one long edge means on each type — the server's rule, said in words.
+const SUPPORT_LONG_HINT = {
+  front: "1 is the front edge",
+  top_rear: "1 is the front edge",
+  back: "1 faces into the cabinet: down on Back 1, up on the rest",
 };
 
 function supportsTyped(c) {
@@ -2758,6 +2765,24 @@ function typedSupportRows(c) {
   return rows;
 }
 
+// The long edges and ends a row's STORED edges band, read off the list as it
+// stands — which edge a count means is not decided here.
+function supportCounts(row) {
+  const longs = S.def.support_long_edges || ["front", "rear"];
+  const have = Array.isArray(row.edges) ? row.edges : (S.def.support_default_edges || ["front"]);
+  const l = have.filter((n) => longs.indexOf(n) >= 0).length;
+  return [l, have.length - l];
+}
+
+// A count changed: the server says which edges that is, and the row stores them.
+async function supportEdgesFor(row, long, short) {
+  const r = await post("/api/support-edges", {long: long, short: short});
+  if (!r || !r.ok) { if (r) toast(r.error, true); return; }
+  row.edges = r.edges;
+  renderSupports();
+  schedule();
+}
+
 // + Back support: a row of its own with the engine's defaults (27 September
 // 2026) — cut from the carcass, that board's own edging kind, no edge ticked.
 async function addBackSupport() {
@@ -2778,7 +2803,7 @@ function renderSupports() {
   const keys = (S.res && S.res.boards) || [];
   const allKinds = S.def.edging_kinds || ["pvc", "1mm", "2mm"];
   const pre = S.def.edging_prefix || {};
-  const typeLabel = S.def.support_type_label || {front: "Front", top_rear: "Top Rear", back: "Back"};
+  const typeLabel = S.def.support_type_label || {front: "Top Front", top_rear: "Top Rear", back: "Back"};
 
   // A row is edged in a board and one of the kinds THAT board offers on the
   // Boards tab — there is no edging name stated here. What the rail is CUT
@@ -2837,7 +2862,7 @@ function renderSupports() {
     box.innerHTML = `<table class="rows asquoted">
       <colgroup><col style="width:16px"><col style="width:104px"><col style="width:74px">
         <col style="width:104px"><col style="width:38px"><col style="width:150px"></colgroup>
-      <thead><tr><th class="n">#</th><th>Cut from</th><th>Edging</th><th>Colour</th>
+      <thead><tr><th class="n">#</th><th>Support Material</th><th>Edging Material</th><th>Edging Colour</th>
         <th>Qty</th><th>Ordered as</th></tr></thead><tbody>${body ||
         `<tr><td colspan="6" class="note">No supports.</td></tr>`}</tbody></table>
       <div class="dtot"><span>total <b>${total}</b> support${total === 1 ? "" : "s"}, as quoted</span>
@@ -2846,7 +2871,7 @@ function renderSupports() {
       ${drawnAs ? `<p class="drawn">Drawn in 3D as ${esc(drawnAs)} — the legacy placing rule.
         The cut list is exactly what it always was.</p>` : ""}
       ${offered.length ? `<div class="presets"><button id="supretype"
-          title="Rewrite these rows as Front / Top Rear / Back. The cut list follows the new form from then on.">
+          title="Rewrite these rows as Top Front / Top Rear / Back. The cut list follows the new form from then on.">
           Re-enter as ${offered.map((t) => typeLabel[t]).join(" / ")}</button></div>` : ""}
       <p class="hint">These rows were written before supports had a type. They are cut and
         edged exactly as this job was quoted, and nothing here changes them. Re-enter them
@@ -2860,7 +2885,6 @@ function renderSupports() {
   // 2026, replacing one Back block with one edging for all of them).
   const rows = typedSupportRows(c);
   const offered = (g && g.support_types_offered) || (S.def.support_types || []);
-  const edgeNames = S.def.support_edge_names || ["front", "rear", "left", "right"];
   const drawn = (g && g.support_layout) || [];
   let backAt = 0;                       // Back n counts across the rows, by qty
   const blocks = rows.map((row) => {
@@ -2902,16 +2926,29 @@ function renderSupports() {
           : `y ${mine[0].y0}–${mine[0].y1}, z ${mine[0].z0}–${mine[0].z1}`) +
         " (from the front face and the underside of the sides)"
       : "";
+    const counts = supportCounts(row);
+    const countSel = (which, v) => `<select data-sup="${i}" data-sk="${which}"
+        ${r.eff_kind ? "" : "disabled"} title="how many ${which === "long" ? "long edges" : "ends"} are banded">${
+      [0, 1, 2].map((n) => `<option value="${n}"${n === v ? " selected" : ""}>${n}</option>`).join("")}</select>`;
+    // a stored edge set that is not the canonical one for its counts is kept
+    // and drawn as stored (the engine says which), until a count is changed
+    const stale = e.edges_canonical === false &&
+      JSON.stringify(e.edges || null) === JSON.stringify(row.edges === undefined ? null : row.edges);
+    const odd = stale
+      ? `<p class="drawn">Stored as ${esc(r.eff_edges.map((n) =>
+          (SUPPORT_EDGE_LABEL[row.type] || {})[n] || n).join(" + ").toLowerCase())} — kept and
+          drawn as stored; changing a count sets the standard edges for it.</p>` : "";
     const detail = on && !off ? `<div class="grid">
-        <div class="f"><label>Cut from</label>${cutSel(r, i)}</div>
-        <div class="f"><label>Edging</label>${kindSel(r, i)}</div>
-        <div class="f"><label>Colour</label>${colourSel(r, i)}</div>
+        <div class="f"><label>Support Material</label>${cutSel(r, i)}</div>
+        <div class="f"><label>Edging Material</label>${kindSel(r, i)}</div>
+        <div class="f"><label>Edging Colour</label>${colourSel(r, i)}</div>
         <div class="f"><label>Ordered as</label><span class="note" data-suprow="${i}"></span></div>
+        <div class="f"><label>Long edges banded</label>${countSel("long", counts[0])}
+          <span class="note">${esc(SUPPORT_LONG_HINT[row.type] || "")}</span></div>
+        <div class="f"><label>Short edges banded</label>${countSel("short", counts[1])}
+          <span class="note">1 is the left end</span></div>
       </div>
-      <div class="edges">${edgeNames.map((n) => `<label title="banded on this edge">
-        <input type="checkbox" data-sup="${i}" data-sk="edge:${n}"
-          ${r.eff_edges.indexOf(n) >= 0 ? "checked" : ""} ${r.eff_kind ? "" : "disabled"}>${
-          esc((SUPPORT_EDGE_LABEL[row.type] || {})[n] || n)}</label>`).join("")}</div>
+      ${odd}
       ${at ? `<p class="drawn">Drawn at ${esc(at)}.</p>` : ""}` : "";
     const offNote = off
       ? `<p class="off">Not on this carcass — it has a top panel and takes Back supports
@@ -2936,10 +2973,11 @@ function renderSupports() {
     <div class="presets"><button id="supadd" type="button" ${backOff ? "disabled" : ""}
       title="one more Back support, with its own edging">+ Back support</button></div>
     <div class="dtot"><span>total <b>${total}</b> support${total === 1 ? "" : "s"}</span></div>
-    <p class="hint">Each support says what it is <b>cut from</b> and, separately, what its
-      edging is — a kind the colour board offers on the <b>Boards</b> tab — and which
-      of its edges get it. A new Back support starts in its cut board's own edging with
-      no edge ticked, so it is unedged until one is. Tape is drawn inside the finished
+    <p class="hint">Each support says its <b>Support Material</b> — what it is cut from —
+      and, separately, its <b>Edging Material</b> (a kind the colour board offers on the
+      <b>Boards</b> tab), its <b>Edging Colour</b>, and how many long and short edges get
+      it. A new Back support starts in its cut board's own edging with no edges banded,
+      so it is unedged until one is. Tape is drawn inside the finished
       size and moves nothing. Nothing here states an edging name.</p>`;
   refreshSupports();
 }
@@ -2961,13 +2999,15 @@ function refreshSupports() {
     const kind = r.eff_kind || "";
     const wanted = kind && eff && !boardOffers(eff, kind);
     const counts = r.edge_counts || [];
-    const where = r.name && r.type && counts.length
-      ? ` on ${counts[0]} long edge${counts[0] === 1 ? "" : "s"}` +
-        (counts[1] ? ` and ${counts[1]} end${counts[1] === 1 ? "" : "s"}` : "")
-      : "";
+    // the same words as a panel's line: "PVC WHITE on 1 long + 1 short edges"
+    const banded = [];
+    if (counts[0]) banded.push(`${counts[0]} long`);
+    if (counts[1]) banded.push(`${counts[1]} short`);
+    const where = r.name && r.type && banded.length
+      ? ` on ${banded.join(" + ")} edge${counts[0] + counts[1] === 1 ? "" : "s"}` : "";
     const none = r.type && counts.length && !counts[0] && !counts[1];
     td.textContent = none
-      ? `not edged — no edge ticked${r.name ? ` (${r.name} when one is)` : ""}`
+      ? `not edged — no edges banded${r.name ? ` (${r.name} when one is)` : ""}`
       : r.name
       ? r.name + where + (r.legacy ? "  (as quoted)" : "")
       : wanted ? `${pre[kind] || kind} not offered by ${eff}`

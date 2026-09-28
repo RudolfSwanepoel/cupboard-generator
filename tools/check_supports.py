@@ -45,8 +45,9 @@ from app import api                                                      # noqa:
 from cabinetgen import scene as SC                                       # noqa: E402
 from cabinetgen.engine import SUPPORT_W, generate_cabinet, generate_job  # noqa: E402
 from cabinetgen.export_plaza import estimate_cost, summarise               # noqa: E402
-from cabinetgen.model import (MATERIALS, Cabinet, Drawer, Job, Support,  # noqa: E402
-                              support_types_for)
+from cabinetgen.model import (MATERIALS, SUPPORT_TYPE_LABEL, Cabinet,  # noqa: E402
+                              Drawer, Job, Support, support_edges_canonical,
+                              support_edges_for_counts, support_types_for)
 from cabinetgen.render import plan_svg, wall_elevation_svg               # noqa: E402
 from cabinetgen.room import (EXAMPLE_MITRE, back_supports_fit,           # noqa: E402
                              interior_parts, shelf_layout, solid_parts,
@@ -277,7 +278,7 @@ def main():
     rows[0].edges = ["front", "rear", "left", "right"]
     c = box(support_rows=rows)
     parts = dict((p.label, (p, t)) for p, t in interior_parts(c, std, MATERIALS))
-    p, t = parts["Front"]
+    p, t = parts["Top Front"]
     check("the Front rail in the cabinet frame: x 16-584, y 460-560 (the front is at D), z 704-720",
           (p.outline, p.z0, p.z1), ([(16, 460), (584, 460), (584, 560), (16, 560)], 704, 720))
     check("its front edge is the y1 face (the room side), the rear y0", sorted(x.side for x in t), ["x0", "x1", "y0", "y1"])
@@ -294,7 +295,7 @@ def main():
     unedged = box(support_rows=typed(1, 0, 1))
     up = dict((p.label, p) for p, _ in interior_parts(unedged, std, MATERIALS))
     check("edged or not, the rail is the same size in the same place",
-          (up["Front"].outline, up["Front"].z0, up["Front"].z1), (p.outline, p.z0, p.z1))
+          (up["Top Front"].outline, up["Top Front"].z0, up["Top Front"].z1), (p.outline, p.z0, p.z1))
 
     print("\nthe 3D scene: a part per rail and per shelf, tied to its line; nothing else moves")
     job = load(job_file("Test"))
@@ -391,11 +392,69 @@ def main():
     check("/api/support-reenter says what it made", r["types"], ["Back \u00d7 4", "Back", "Back"])
     check("  and the job on disk is untouched", json.loads(open(LEGACY, encoding="utf-8").read()) == json.loads(json.dumps(job_to_dict(job))), True)
 
+    counts_not_ticks()
+
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + "; ".join(FAILS))
         sys.exit(1)
     print("ALL OK")
+
+
+def counts_not_ticks():
+    """Part 1 of the drawers / runners / supports brief (28 September 2026): the
+    words, and edges asked as two counts. The stored form is unchanged."""
+    print("\nsupports: Top Front, and edges as long / short counts")
+    check("the type 'front' is read as Top Front", SUPPORT_TYPE_LABEL["front"], "Top Front")
+    check("  and its stored value is still 'front'", Support(type="front").type, "front")
+    labels = {p.label for p, _ in interior_parts(box(support_rows=typed(1, 1, 2)), STANDARD, MATERIALS)
+              if p.role == "support"}
+    check("the 3D labels", sorted(labels), ["Back 1", "Back 2", "Top Front", "Top Rear"])
+    check("long 0 short 0: nothing", support_edges_for_counts(0, 0), [])
+    check("long 1: the front long edge (Top Front / Top Rear front; a Back's inner edge)",
+          support_edges_for_counts(1, 0), ["front"])
+    check("long 2: both long edges", support_edges_for_counts(2, 0), ["front", "rear"])
+    check("short 1: the left end", support_edges_for_counts(0, 1), ["left"])
+    check("short 2: both ends", support_edges_for_counts(0, 2), ["left", "right"])
+    check("long 2 short 2: all four", support_edges_for_counts(2, 2), ["front", "rear", "left", "right"])
+    check("/api/support-edges hands back the same list", api.support_edges({"long": 1, "short": 1})["edges"], ["front", "left"])
+    check("  and refuses 3", api.support_edges({"long": 3, "short": 0})["ok"], False)
+    # Back 1's long x1 is its bottom edge, every other Back's its top: 'front'
+    # on a Back is the edge facing into the cabinet, placed by support_layout
+    c = box(support_rows=[Support(type="back", qty=1, kind="pvc", board="MEL", edges=support_edges_for_counts(1, 0)),
+                          Support(type="back", qty=1, kind="pvc", board="MEL", edges=support_edges_for_counts(1, 0))])
+    faces = {p.label: [t.side for t in tt] for p, tt in interior_parts(c, STANDARD, MATERIALS) if p.role == "support"}
+    check("Back 1 long x1 bands its bottom (z0), Back 2 its top (z1)", (faces["Back 1"], faces["Back 2"]), (["z0"], ["z1"]))
+
+    print("\na non-canonical stored set is kept, and drawn, as stored")
+    odd = Support(type="front", qty=1, kind="pvc", board="MEL", edges=["rear"])
+    check("rear edge alone is not canonical for long 1", support_edges_canonical(odd), False)
+    check("  the default (None) is", support_edges_canonical(Support(type="front", qty=1)), True)
+    check("  an unordered canonical set is", support_edges_canonical(Support(type="back", edges=["left", "front"])), True)
+    check("  right end alone is not (short 1 is the left)", support_edges_canonical(Support(type="back", edges=["right"])), False)
+    c = box(support_rows=[odd])
+    faces = {p.label: [t.side for t in tt] for p, tt in interior_parts(c, STANDARD, MATERIALS) if p.role == "support"}
+    check("  drawn on its rear face (y0), as stored", faces["Top Front"], ["y0"])
+    j = job_of(c)
+    comp = api.compute({"job": job_to_dict(j)})
+    row = comp["geometry"]["1"]["supports"][0]
+    check("  the editor is told it is not canonical", (row["edges_canonical"], row["edges"], row["edge_counts"]), (False, ["rear"], [1, 0]))
+
+    print("\nthe cut list, tape metres and cost read the counts, not which edge")
+    def line(r):
+        P = [p for p in generate_job(job_of(box(support_rows=[r]))) if p.role == "Support"]
+        return [(p.length, p.width, p.qty, p.edge_l, p.edge_w, p.edge_material) for p in P]
+    def total(r):
+        j = job_of(box(support_rows=[r]))
+        return estimate_cost(j, summarise(j, generate_job(j)))["total_incl_vat"]
+    for want in ((1, 0), (2, 0), (0, 1), (1, 2), (2, 2)):
+        a = Support(type="front", qty=1, kind="pvc", board="MEL", edges=support_edges_for_counts(*want))
+        # the same counts, a different (non-canonical) choice of edges
+        other = (["rear"] if want[0] == 1 else ["front", "rear"][:want[0]]) + (["right"] if want[1] == 1 else ["left", "right"][:want[1]])
+        b = Support(type="front", qty=1, kind="pvc", board="MEL", edges=other)
+        check(f"  long {want[0]} short {want[1]}: the same line either way", line(a), line(b))
+        check(f"    and the same cost", total(a), total(b))
+        check(f"    recorded as edge_l {want[0]}, edge_w {want[1]}", line(a)[0][3:5], want)
 
 
 if __name__ == "__main__":

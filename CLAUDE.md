@@ -70,6 +70,31 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
+**Drawers, runners and supports (28 September 2026, brief
+`Claude outputs/drawers-runners-supports-brief-2026-09-28.md`, agreed with
+Rudolf; sketch `drawer-setting-sketch-v2.svg`).** Built in order, Parts 1 to 6,
+each committed with the benchmark unchanged (272 / 59 / 30, 92 pot holes,
+18 / 9 / 6, R28,363.50) and every `check_*.py` green. Exercised in the running
+app with `tools/ui_check_drawers.py` (Playwright, stages per part, screenshots
+into `output/ui_check_drawers/`).
+
+1. **Supports: wording and edge counts** (UI only, no cut-list change). Support
+   rows read **Support Material / Edging Material / Edging Colour**; the stored
+   type `front` is shown as **Top Front** everywhere a person reads it
+   (`SUPPORT_TYPE_LABEL`, the 3D label, messages) — the stored value and every
+   check id unchanged. The four per-edge tickboxes are gone: **Long edges
+   0/1/2** and **Short edges 0/1/2**, as Panel design asks. Which edge a count
+   means is `model.support_edges_for_counts`, behind `/api/support-edges` (long
+   1 = the row's `front` edge — a Top Front's / Top Rear's front, Back 1's
+   bottom, every other Back's top; long 2 both; short 1 the left end, short 2
+   both). `Support.edges` is still what is stored. A stored set that is not
+   canonical for its counts (`support_edges_canonical`, e.g. Test.json cabinet
+   6's Back, rear edge only) is kept and drawn as stored, and a note under the
+   row says so until a count is changed. Ordered as reads as a panel's line
+   ("PVC WHITE on 1 long + 1 short edges"). Pinned in `check_supports.py`
+   `counts_not_ticks()`: the same counts cut the same line and cost whichever
+   edges they name.
+
 **UI restructure, Session 2 — Fresh look, first round (28 September 2026,
 the same brief, "styling only").** One `<style>` block in `app/index.html`
 changed and nothing else: no markup moved (one inline `style` attribute on the

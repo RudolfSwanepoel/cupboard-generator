@@ -310,7 +310,10 @@ SUPPORT_EDGES = ("none", "front", "white")
 # panel to tie the sides at the top; a tall or wall unit has a top and takes
 # Back supports only. A mitre and an ell take none (RULES W13).
 SUPPORT_TYPES = ("front", "top_rear", "back")
-SUPPORT_TYPE_LABEL = {"front": "Front", "top_rear": "Top Rear", "back": "Back"}
+# What a person reads. The stored type 'front' is shown as "Top Front" (28
+# September 2026) — it is the flat rail at the TOP front, beside the Top Rear.
+# The stored value and every check id stay as they were.
+SUPPORT_TYPE_LABEL = {"front": "Top Front", "top_rear": "Top Rear", "back": "Back"}
 # The four edges of a support, in the row's own terms: the two long edges and
 # the two ends. On a flat rail 'front' faces the room and 'rear' the wall; on an
 # upright Back support 'front' is the long edge facing INTO the cabinet (down on
@@ -325,6 +328,38 @@ def support_edges_of(row: "Support") -> List[str]:
     if row.edges is None:
         return list(SUPPORT_DEFAULT_EDGES)
     return [e for e in row.edges if e in SUPPORT_EDGE_NAMES]
+
+
+def support_edges_for_counts(long: int, short: int) -> List[str]:
+    """The canonical edges for a count of long edges and ends — the same two
+    numbers Panel design asks for (28 September 2026). The rule, decided here
+    and nowhere else:
+
+        long 1   the row's 'front' long edge: the room-facing edge of a Top
+                 Front or Top Rear, and on a Back the edge facing INTO the
+                 cabinet — down on Back 1, up on every other Back (which is
+                 what 'front' already means on a Back)
+        long 2   both long edges
+        short 1  the left end
+        short 2  both ends
+
+    >>> support_edges_for_counts(1, 0)
+    ['front']
+    >>> support_edges_for_counts(2, 1)
+    ['front', 'rear', 'left']
+    """
+    long = max(0, min(2, int(long or 0)))
+    short = max(0, min(2, int(short or 0)))
+    return list(SUPPORT_LONG_EDGES[:long]) + ["left", "right"][:short]
+
+
+def support_edges_canonical(row: "Support") -> bool:
+    """Whether a typed row's stored edges are the canonical set for its own
+    counts. One that is not (a rear edge alone, say) is KEPT and drawn as
+    stored until a count is changed; the editor says so under the row."""
+    got = support_edges_of(row)
+    longs = sum(1 for e in got if e in SUPPORT_LONG_EDGES)
+    return sorted(got) == sorted(support_edges_for_counts(longs, len(got) - longs))
 
 
 def default_support_kind(materials: dict, board: str) -> str:

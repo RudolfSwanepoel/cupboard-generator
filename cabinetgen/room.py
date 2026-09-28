@@ -1662,7 +1662,7 @@ def interior_parts(cab, std: Standard = STANDARD, materials: dict = None) -> Lis
     cabinet's frame, each with the edges it is banded on — for the 3D view.
 
     `(part, tapes)` per rail and per shelf. A support is `Part` role 'support',
-    labelled 'Front', 'Top Rear' or 'Back n', in the board its row is cut from;
+    labelled 'Top Front', 'Top Rear' or 'Back n', in the board its row is cut from;
     its tapes are the row's chosen edges in the row's edging board, only when
     the row resolves to an edging at all. A shelf is role 'shelf' in the carcass
     board, its front edge in the carcass edging (the exterior board's colour),
@@ -1683,7 +1683,7 @@ def interior_parts(cab, std: Standard = STANDARD, materials: dict = None) -> Lis
     out = []
     for u in lay:
         row = u["row"]
-        label = {"front": "Front", "top_rear": "Top Rear"}.get(u["type"], f"Back {u['n']}")
+        label = {"front": "Top Front", "top_rear": "Top Rear"}.get(u["type"], f"Back {u['n']}")
         part = _box("support", cab.support_row_cut_board(row), t, W - t,
                     D - u["y1"], D - u["y0"], u["z0"], u["z1"], "x", label)
         tapes = []
