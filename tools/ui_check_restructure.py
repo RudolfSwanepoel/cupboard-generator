@@ -107,8 +107,19 @@ def load_job(page, name):
 
 
 def computed(page):
-    time.sleep(0.35)
+    """Settle the last edit: run the compute it scheduled now and await it, so
+    what is read next answers the job as it stands. It used to be a fixed
+    sleep raced against the 180 ms debounce plus the compute, and read the
+    previous compute's answer now and then (the race CLAUDE.md recorded on 28
+    September 2026)."""
+    time.sleep(0.05)
+    # the compute redraws the drawing on show without awaiting it; redraw it
+    # here and await that, so a locator cannot catch the SVG being replaced
+    page.evaluate("async () => { clearTimeout(computeTimer); computeTimer = null; await compute(); "
+                  "if (S.tab === 'room' && S.roomSub === 'elev') await renderElevation(); "
+                  "else if (S.tab === 'room') await renderPlan(); }")
     page.wait_for_function("() => S.res && S.res.ok !== undefined", timeout=15000)
+    time.sleep(0.1)
 
 
 def tab(page, name):
@@ -328,6 +339,9 @@ def stage_elev(pw):
     g = page.locator('#elevation .ecabg[data-cab="3"] .ecab').first.bounding_box()
     page.mouse.click(g["x"] + g["width"] / 2, g["y"] + g["height"] * 0.8)
     page.wait_for_function("() => S.sel !== null && S.job.cabinets[S.sel].number === 3", timeout=5000)
+    # the editor paints after the selection lands: wait for it, not the first frame
+    page.wait_for_function("() => ((document.querySelector('#roomdock #editor h2') || {}).textContent || '')"
+                           ".includes('Cabinet 3')", timeout=5000)
     check_true("a click selects cabinet 3 and the docked editor shows it",
                "Cabinet 3" in page.locator("#roomdock #editor h2").first.text_content())
     computed(page)

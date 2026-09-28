@@ -170,6 +170,23 @@ into `output/ui_check_drawers/`).
    or box into the top). Editor: Drawers -> **Drawer type** Outer | Inner; for
    inner, **Number of drawers** and a Height per row, with the engine's face
    size and box top beside it. Pinned in `check_runners.py` `inner_drawers()`.
+5. **The drawer checks**, all CRITICAL, all off `room.drawer_layout`
+   (`validate._drawer_setting`), pinned in `check_runners.py`
+   `drawer_checks()` with worked numbers: **`drawer-box-face`** — a box's top
+   above its OWN face's top, every box (**ruled strict by Rudolf**, not only
+   the top one): with the 21 rise a face must be at least box + 21 (face 170,
+   box 150: 171 > 170, "the face needs to be at least 171, or the box 149");
+   the old `drawer-box-height` (box not shorter than its face) keeps its id and
+   is not repeated. **`drawer-box-clash`** — a box into the box above; with
+   every outer box hung the same 21 off its face that can only follow one of
+   the two above, so in practice it is inner drawers at typed heights (21 and
+   160, boxes 150: 171 into 160). **`drawer-runner-height`** — a box lower than
+   its runner (44 on a 45 runner). **`runner-depth`** keeps its id and names
+   the record's shortest length. The support-foul critical reads the same
+   layout (Part 3). **Snapshot moved, as ruled:** Test.json cabinet 4's
+   drawers 1-3 (faces 110 / 165 / 220 over boxes 90 / 150 / 200) now reach 1, 6
+   and 1 mm above their faces — three `drawer-box-face` criticals. The October
+   job raises none of them.
 
 **UI restructure, Session 2 — Fresh look, first round (28 September 2026,
 the same brief, "styling only").** One `<style>` block in `app/index.html`
@@ -222,7 +239,11 @@ tab and sub-tab are in `Claude outputs/ui-session2-screenshots/`. What it is:
 **Not done, by the brief:** mockups (Rudolf asked for it built directly); the
 per-cabinet exploded view.
 
-**Seen and left alone — a race in the UI scripts' own waits, not in the app.**
+**Seen and left alone — a race in the UI scripts' own waits, not in the app.
+FIXED since, in the drawers brief (Part 5):** both scripts' `computed()` now
+clear the debounce and await `compute()` (and, in `ui_check_restructure.py`,
+the drawing on show), which is the fix described below; three full runs of
+each passed. The original note:
 `ui_check_restructure.py`'s `computed()` is a fixed 0.35 s sleep and
 `ui_check_attached.py`'s a 0.45 s one, each raced against the compute a drop
 starts (`compute()` straight after `/api/attach-move`, no debounce). Read too

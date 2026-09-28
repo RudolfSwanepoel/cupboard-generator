@@ -160,6 +160,7 @@ def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     out += _zero_quantities(panels)
     out += _drawer_boxes(job.cabinets)
     out += _inner_drawers(job)
+    out += _drawer_setting(job)
     out += _panels(job)
     out += _project_boards(job)
     out += tape_issues
@@ -395,6 +396,75 @@ def _drawer_boxes(cabinets):
     return out
 
 
+def _drawer_setting(job: Job):
+    """The drawer checks off the drawer setting (Part 5 of the drawers /
+    runners / supports brief, 28 September 2026). Every position is
+    `room.drawer_layout`'s — the one place a box is placed — so these, the
+    support-foul critical and the 3D cannot disagree. All CRITICAL:
+
+    * `drawer-box-face`: a box taller than its face allows — its top above its
+      own face's top (ruled strict by Rudolf: every box, not only the top one).
+      A box hangs `drawer_rise` (21) above its face bottom, so a face must be
+      at least box + 21. Where the old `drawer-box-height` (box not shorter
+      than its face) already names the drawer, this does not repeat it.
+    * `drawer-box-clash`: a box whose top is above the bottom of the box
+      above it. With every outer box hung the same 21 off its face, an outer
+      box can only reach the box above by first being taller than its face,
+      which the two checks above already name — so in practice this is inner
+      drawers at typed heights, and it is not repeated where they have spoken.
+    * `drawer-runner-height`: a box lower than its runner's `height` (45) —
+      the inner member cannot be fixed to a drawer side it overhangs. (No
+      length on the record fitting the depth is `runner-depth`, which keeps
+      its id.)
+
+    An inner drawer's face IS its box, so the first cannot arise on one.
+    """
+    from .room import drawer_layout
+    out = []
+    for c in job.cabinets:
+        if c.is_panel or not c.drawer_list:
+            continue
+        try:
+            lay = drawer_layout(c, job.std, job.materials)
+        except ValueError:
+            continue                       # no runner fits: runner-depth says so
+        rr = c.runner_or_legacy
+        by_n = {u["n"]: u for u in lay}
+        # the box above each box: the next one up the carcass
+        order = sorted(lay, key=lambda u: u["box"][4])
+        above = {order[k]["n"]: order[k + 1] for k in range(len(order) - 1)}
+        drawers = c.drawer_list
+        for n, u in sorted(by_n.items()):
+            d = drawers[u["index"]]
+            top, face_top = u["box"][5], u["face"][1]
+            nxt = above.get(n)
+            into = nxt is not None and top > nxt["box"][4]
+            said = False
+            if not u["inner"] and top > face_top and d.box_height < d.face_height:
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"drawer {n}: its box stands {u['box'][4] - u['face'][0]} above "
+                                 f"its face bottom and reaches {top}, {top - face_top} above the "
+                                 f"face top at {face_top}"
+                                 f" — the face needs to be at least "
+                                   f"{d.box_height + u['box'][4] - u['face'][0]}, or the box "
+                                   f"{face_top - u['box'][4]}",
+                                 check="drawer-box-face"))
+                said = True
+            elif not u["inner"] and d.box_height >= d.face_height:
+                said = True               # drawer-box-height has named it
+            if into and not said:
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"drawer {n}: its box reaches {top}, into drawer "
+                                 f"{nxt['n']}'s box above, which starts at {nxt['box'][4]}",
+                                 check="drawer-box-clash"))
+            if d.box_height < rr.height:
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"drawer {n}: box {d.box_height} is lower than its "
+                                 f"{rr.height:g} mm runner ({rr.name or 'runner'}) — the "
+                                 f"runner cannot be fixed to it", check="drawer-runner-height"))
+    return out
+
+
 def _inner_drawers(job: Job):
     """Inner drawers — behind the door, faces the size of their boxes (28
     September 2026). What only they can get wrong:
@@ -426,8 +496,12 @@ def _inner_drawers(job: Job):
                              "the other for both", check="drawer-inner-mixed"))
         t = job.std.board_t
         lowest = drawer_rise(c, job.std)
-        top = geometry(c, job.std, job.materials).height - t
-        for u in drawer_layout(c, job.std, job.materials):
+        try:
+            top = geometry(c, job.std, job.materials).height - t
+            lay = drawer_layout(c, job.std, job.materials)
+        except ValueError:
+            continue                       # no runner fits: runner-depth says so
+        for u in lay:
             if not u["inner"]:
                 continue
             z0, z1 = u["box"][4], u["box"][5]

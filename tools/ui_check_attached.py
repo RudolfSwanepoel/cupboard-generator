@@ -56,9 +56,13 @@ def load_job(page, name):
 
 
 def computed(page):
-    """Wait for the compute the last edit scheduled to have landed."""
-    page.wait_for_function("() => typeof computing === 'undefined' || !computing", timeout=15000)
-    time.sleep(0.45)
+    """Settle the last edit: run the compute it scheduled now and await it, so
+    what is read next answers the job as it stands. It used to be a fixed
+    sleep raced against the 180 ms debounce plus the compute, and read the
+    previous compute's answer now and then (the race CLAUDE.md recorded on 28
+    September 2026)."""
+    time.sleep(0.05)
+    page.evaluate("async () => { clearTimeout(computeTimer); computeTimer = null; await compute(); }")
     page.wait_for_function("() => S.res && S.res.ok !== undefined", timeout=15000)
 
 
