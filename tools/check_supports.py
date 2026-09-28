@@ -102,6 +102,9 @@ def crits(job, check_id):
     return [i for i in validate(job, generate_job(job)) if i.check == check_id and i.level == CRITICAL]
 
 
+LEGACY = os.path.join(ROOT, "tools", "fixtures", "Test_legacy_supports.json")
+
+
 def main():
     std = STANDARD
     print("the worked numbers — base W600 H720 D560, back 'four' (Wi 568, backing face 541)")
@@ -218,8 +221,17 @@ def main():
         again = json.dumps(job_to_dict(job), indent=2, ensure_ascii=False)
         same = json.loads(raw) == json.loads(again)
         check(f"{name}: round-trips with no new keys", same, True)
-        typed_cabs = [c.number for c in job.cabinets if c.supports_typed]
-        check(f"{name}: no cabinet was silently typed", typed_cabs, [])
+    # "Nothing types a legacy row on its own" is pinned on a FROZEN copy of
+    # Test.json (tools/fixtures/Test_legacy_supports.json, the file as it was
+    # before Rudolf re-entered cabinets 2 and 7 on 28 September 2026), not on
+    # the live job: re-entering IS the operator typing them, and a check that
+    # reads live workshop data to pin a fact about the past breaks the day the
+    # workshop uses the app (the same lesson as Test_Build_pre_library.json).
+    legacy = load(LEGACY)
+    check("the frozen Test: no cabinet was silently typed",
+          [c.number for c in legacy.cabinets if c.supports_typed], [])
+    check("the frozen Test: round-trips with no new keys",
+          json.loads(open(LEGACY, encoding="utf-8").read()) == json.loads(json.dumps(job_to_dict(legacy))), True)
     row = Support(edge="front", qty=2)
     d = cabinet_to_dict(box(support_rows=[row]))
     check("a legacy row writes neither type nor edges", sorted(d["support_rows"][0]), ["edge", "qty"])
@@ -305,7 +317,7 @@ def main():
     check("nor the plan", plan_svg(tj) == plan_svg(job), True)
 
     print("\nthe API says which types a cabinet takes and where each rail is drawn")
-    r = api.compute({"job": job_to_dict(job)})
+    r = api.compute({"job": job_to_dict(load(LEGACY))})
     g = next(v for k, v in r["geometry"].items() if v["support_types_offered"] == ["front", "top_rear", "back"])
     check("a base offers all three", g["support_types_offered"], ["front", "top_rear", "back"])
     check("legacy rows are reported as not typed", g["supports_typed"], False)
@@ -345,7 +357,7 @@ def main():
     check("/api/support-new hands back four such rows", [(x["type"], x["qty"], x["kind"], x["edges"]) for x in r["rows"]], [("back", 1, "pvc", [])] * 4)
 
     print("\nRe-enter keeps each legacy row's own edging: the cut list and the cost do not move")
-    job = load(os.path.join(ROOT, "jobs", "Test.json"))
+    job = load(LEGACY)          # the frozen copy: the live Test.json has since been re-entered
     def lines(j):
         return [(p.cabinet, p.label, p.material, p.length, p.width, p.qty, p.edge_l, p.edge_w, p.edge_material)
                 for p in generate_job(j) if p.role == "Support"]
@@ -376,7 +388,7 @@ def main():
           [(r.type, r.qty, r.kind, r.board) for r in tall.reentered_supports(MATERIALS)], [("back", 1, "pvc", "BROOKHILL"), ("back", 2, "", "MEL")])
     r = api.support_reenter({"job": job_to_dict(job), "index": [c.number for c in job.cabinets].index(6)})
     check("/api/support-reenter says what it made", r["types"], ["Back \u00d7 4", "Back", "Back"])
-    check("  and the job on disk is untouched", json.loads(open(os.path.join(ROOT, "jobs", "Test.json"), encoding="utf-8").read()) == json.loads(json.dumps(job_to_dict(job))), True)
+    check("  and the job on disk is untouched", json.loads(open(LEGACY, encoding="utf-8").read()) == json.loads(json.dumps(job_to_dict(job))), True)
 
     print()
     if FAILS:

@@ -891,7 +891,7 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
         look = board_look(job, spec.board)
         crash = c.number in bad_panels
         stroke = CRIT if crash else INK
-        out.append(f'<g class="ecabg epanel" data-cab="{c.number}">')
+        out.append(f'<g class="ecabg epanel" data-cab="{c.number}"{_host_attr(c)}>')
         vert = _panel_grain_vertical(spec)
         out.append(f'<rect class="epan" data-cab="{c.number}" x="{px:.1f}" y="{py:.1f}" '
                    f'width="{pw:.1f}" height="{ph:.1f}" fill="{fills.of(look, vert)}" '
@@ -1479,10 +1479,17 @@ def _plan_panel(job, rm, cab, p, T, std, faint=False, bad=False):
     pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in fp)
     colour = board_look(job, cab.panel_spec.board)["colour"]
     op = ' opacity="0.30"' if faint else ""
-    return [f'<polygon class="pan" data-panel="{cab.number}" points="{pts}" '
+    return [f'<polygon class="pan" data-panel="{cab.number}"{_host_attr(cab)} points="{pts}" '
             f'fill="{"#f6e0e3" if bad else colour}" fill-opacity="0.9" '
             f'stroke="{CRIT if bad else INK}" pointer-events="none" '
             f'stroke-width="{WEIGHT["clash"] if bad else WEIGHT["panel"]}"{op}/>']
+
+
+def _host_attr(cab) -> str:
+    """`data-host="N"` on an attached panel's drawn shapes, so a drag of cabinet
+    N carries them with it on screen; nothing on a standalone panel, so every
+    drawing of one is byte for byte what it was."""
+    return f' data-host="{cab.attached_to}"' if cab.is_attached else ""
 
 
 def _plan_panel_hit(job, rm, cab, p, T, std, scale):
@@ -1505,7 +1512,7 @@ def _plan_panel_hit(job, rm, cab, p, T, std, scale):
            for x, y in ((x0, y0), (x0 + w, y0), (x0 + w, y0 + d), (x0, y0 + d))]
     thin = min(g.width, g.depth) * scale < PANEL_GRAB
     return ([f'<polygon class="cab panhit" data-cab="{cab.number}" '
-             f'data-panel="{cab.number}" data-layer="panels" '
+             f'data-panel="{cab.number}" data-layer="panels"{_host_attr(cab)} '
              f'points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in pts)}" '
              f'fill="none" stroke="none" pointer-events="all"/>'], thin)
 

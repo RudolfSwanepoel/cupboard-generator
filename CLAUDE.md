@@ -34,14 +34,16 @@ python tools/check_pictures.py
 python tools/check_accept.py
 python tools/check_scene.py
 python tools/check_supports.py
+python tools/check_attached.py
 python tools/snapshot.py --compare baseline.json
 ```
 
 And, with the app running (`python run_app.py --no-window --port 8766`) and
 Playwright installed, `python tools/ui_check_3d.py` drives the 3D view with a
-real mouse in headless Chromium. It is optional — Playwright is the only
-third-party package anywhere near this app, and only that script needs it —
-and it says so and exits 0 when it is not installed.
+real mouse in headless Chromium, and `python tools/ui_check_attached.py` the
+attached-panel editor, drags and dialogs. Both are optional — Playwright is the
+only third-party package anywhere near this app, and only those two scripts
+need it — and each says so and exits 0 when it is not installed.
 
 Regenerates the October 2025 wardrobe from cabinet definitions and diffs it
 against the cut list that was really sent to Plazaboard. Current state:
@@ -63,6 +65,52 @@ line, and `regen_check` says so rather than failing. Every other figure in this
 list comes out of the engine and is checked on any machine.
 
 ## Status
+
+**Attached panels, and a new cabinet's supports by its kind (28 September 2026,
+spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**
+Benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50);
+every `check_*.py` green — twenty now, `check_attached.py` added; `snapshot.py
+--compare` against the tree before this work identical, and every job on disk
+round-trips byte for byte. Exercised in the running app with Playwright
+(`tools/ui_check_attached.py`): + Panel on this cabinet, the offsets, the plan
+and elevation drawing it, a real drag of its cabinet carrying it, Detach and
+Attach, Duplicate, delete with No and with Yes, the 3D handles, and the support
+defaults following the kind. See **Attached panels** below. The short form:
+
+1. **A panel can be FIXED TO a cabinet** — `PanelSpec.attached_to` and three
+   offsets (`at_x`, `at_y`, `at_z`) in the supports spec's carcass frame. Its
+   place is DERIVED: `room.attached_placement` applies the cabinet's placement
+   to the offsets, and `placement_for` hands that back, so every drawing, snap
+   and check that reads a placed panel reads it unchanged. No placement record
+   is stored for it; `api.drag` refuses it (move the cabinet, or type the
+   offsets). Standalone panels are exactly what they were.
+2. **It counts as part of the cabinet** in the run's gap (level with the
+   carcass), in `overlaps` (a CRITICAL against another cabinet), in `clashes`
+   (a door or drawer sweeping into it) and in `above_ceiling`; **not in
+   tip-up**, which still reads `placed()` alone. Cutting into its OWN carcass
+   is a WARNING (`attached-into-carcass`). Attached to nothing the job has is a
+   WARNING (`attached-host`) and it stands nowhere.
+3. **Made, attached, detached, duplicated and deleted through the server**:
+   `/api/panel-new-attached` (an end panel off the cabinet's geometry),
+   `/api/panel-attach` (offsets worked out so it does not move),
+   `/api/panel-detach` (one panel, or every panel on a cabinet — the "No" of
+   "Also delete its N attached panels?"), `/api/duplicate` (a cabinet's copy
+   brings copies of its panels, new numbers in the one series). The browser
+   works out no offset and no number.
+4. **A new cabinet's support rows follow its kind** (`Cabinet.default_supports`,
+   `/api/support-defaults`): base Front + Top Rear + 2 Backs, wall 3 Backs,
+   tall 4, a blind corner by its kind, a mitre or an ell none — and they follow
+   a kind change only while they are still those untouched defaults. Existing
+   cabinets and legacy rows are untouched.
+5. **`check_supports.py` no longer reads the live `Test.json` to pin "nothing
+   types a legacy row on its own"**: Rudolf re-entered cabinets 2 and 7 on 28
+   September (commit 0fda4a9), which is the operator typing them, and the three
+   checks that read the live file broke. They read the frozen
+   `tools/fixtures/Test_legacy_supports.json` now — the same lesson as
+   `Test_Build_pre_library.json`.
+
+**Not built, by the spec's scope:** the drag in the single-cabinet 3D view
+(B4) and the UI restructure.
 
 **Every Back support carries its OWN edging (ruled 27 September 2026, later the
 same day, replacing the spec's single Back edging).** A Back is a row of its
@@ -483,6 +531,92 @@ baseline from the same `Test.json`. Regenerate it when Test.json settles; a
 stale baseline that is known to be stale is safer than one refreshed over a
 difference nobody looked at.
 
+## Attached panels
+
+**A panel fixed to a cabinet** (spec of 28 September 2026). A Panel item in
+every respect — Kind = Panel, its own number in the one series, its own code-08
+line, board, size, orientation and edging exactly as a standalone panel — that
+carries `PanelSpec.attached_to`, a cabinet number, and three offsets.
+
+**The offsets are in the supports spec's carcass frame**, typed in Panel design
+and nowhere else: `at_x` across the width from the cabinet's left side, `at_y`
+from the FRONT face of the sides towards the back, `at_z` up from the underside
+of the sides, each to the panel's own near corner (left, front, bottom).
+Negative values are ordinary: an end panel stands at x = −t, and one finishing
+flush with the doors at y = −(door thickness). The drawing frame has y OUT from
+the wall, so the two meet at `y_cab = D − y_spec`, D the carcass depth off
+`geometry` — in `room.attached_placement`, the one place the world position is
+worked out:
+
+    x = cabinet x + at_x
+    y = D − at_y − (the panel's extent out from the wall)     (Placement.y is its BACK)
+    z = the cabinet's underside on its legs (carcass_z) + at_z
+
+**Its place is derived, never stored.** `room.placement_for` hands the derived
+`Placement` back for an attached panel, so `placed_panels`, the plan, the wall
+elevation, the scene, `_on_wall`, the snaps and `panel_clashes` all read it
+without a line changing. `store` writes no placement record for it (a stale one
+left in a file is never read), and `api.drag` refuses it — its cabinet is what
+moves. A cabinet's own attached panels are excluded from its snap targets with
+it (`_on_wall(exclude=…)`), so it cannot snap to a panel that moves with it.
+While the cabinet is not placed, neither is the panel.
+
+**Where the browser shows it.** Panel design: an Attached block — the cabinet,
+Show cabinet, Detach, the three offsets, and the engine's readout of where that
+puts it (`placed_at`). A standalone panel gets a dropdown and Attach instead.
+A cabinet's editor: an **Attached panels** section listing them, with
+**+ Panel on this cabinet** (`room.new_attached_panel`: an end panel, side-on,
+in the exterior board, `depth + exposed_extra` deep, carcass high, against the
+left side, brought forward by the extra — a starting point off `Standard`, not
+a rule). The Placements table shows it "with N", not editable. The cabinet
+table says `panel · on N`; the 3D item list `panel on N`. The plan and the
+elevation put `data-host="N"` on its shapes, so a drag of cabinet N carries
+them in the preview and the drop's compute places them; in 3D the cabinet's
+handle drag moves their groups too, and an attached panel gets no handles of
+its own. A press on one in the plan or the elevation selects it and says how
+it is moved.
+
+**Room checks (spec B6).** It counts as part of its cabinet's geometry:
+
+- `gaps` — the run's extent along the wall is `room.attached_extent`, the
+  carcass plus any attached panel LEVEL with it, so an end panel closes the
+  gap to the corner by its thickness; a bulkhead attached above is not in the
+  run. A standalone panel still closes nothing.
+- `overlaps` — an attached panel standing in another cabinet is the same
+  CRITICAL as the carcass standing there (`overlap`, the message names the
+  panel and its cabinet); `panel_clashes` does not repeat it.
+- `clashes` — a door or drawer of ANY cabinet, its own included, sweeping into
+  it is a clash "panel N on cabinet M". Touching is clear, as everywhere.
+- `above_ceiling` — up past the ceiling is the same critical as a carcass.
+- **`tip_problems` and `tip_inputs` do not read it**: attached panels are
+  fitted on site after the carcass is stood up. `placed()` is still cabinets
+  only, and that is what tip-up reads.
+- Cutting INTO its own carcass — overlapping, not touching — is a WARNING
+  (`attached-into-carcass`, `room.attached_carcass_overlaps`), never a critical.
+- `attached_to` naming nothing the job has (a deleted cabinet, a panel, itself)
+  is a WARNING (`attached-host`); the panel cuts as it is and stands nowhere.
+
+**Attach, detach, delete, duplicate — all decided on the server.**
+`/api/panel-attach` works the offsets out from where the panel stands
+(`room.attach_offsets`: the exact inverse on the cabinet's wall; from another
+wall its box's near corner is carried across in world coordinates; unplaced,
+`default_offsets` — beside the left side, flush and level) and the browser
+drops its placement record. `/api/panel-detach` hands back the derived
+placement as the record to store; with `host` it detaches every panel on a
+cabinet, which is the "No" of the delete question. "Yes" removes them with the
+cabinet. `/api/duplicate` copies a cabinet AND its attached panels, each with
+the next free number, the panels attached to the copy at the same offsets;
+duplicating an attached panel copies it onto the same cabinet. Numbers never
+change through any of it (hard rule 2).
+
+**Job file.** `attached_to` and the three offsets are written only on an
+attached panel (`store.ATTACH_FIELDS`), so every standalone panel and every job
+on disk writes back byte for byte. `tools/check_attached.py` holds all of the
+above, and `tools/ui_check_attached.py` drives the UI.
+
+**Not built:** the drag in the single-cabinet 3D view (spec B4 — arrives with
+the UI restructure); `PanelSpec.anchor` is still reserved and unread.
+
 ## The 3D view
 
 **A drawing, and nothing else** (Part F, 23 September 2026). `cabinetgen/scene.py`
@@ -828,7 +962,11 @@ tools/check_scene.py       the 3D scene: ids, parts vs geometry, to_world, carca
                            sides, cut-list lines, Run order, read-only, no reader of it
 tools/check_supports.py    typed supports: the worked positions, what each cuts, the three
                            criticals, legacy rows unchanged, tape inside the size, the scene
+tools/check_attached.py    attached panels: derived place, attach/detach round trip, moves with
+                           the cabinet, the room checks in and tip-up out, delete, duplicate,
+                           the job file; and a new cabinet's supports by kind
 tools/ui_check_3d.py       the 3D view in the running app, with a real mouse (Playwright)
+tools/ui_check_attached.py attached panels in the running app (Playwright)
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
@@ -1651,8 +1789,10 @@ which is also why cabinet 6 is 570 deep rather than 500. `check_panels.py` and
 `check_edging`'s support-row comparison skips panels, because a panel keeps its
 support rows in the file and the engine cuts none of them.
 
-**Not built, and not asked for: `PanelSpec.anchor`.** A panel still stays where it
-is put and does not follow a cabinet. (Dragging one in the plan is built — above.)
+**`PanelSpec.anchor` is still reserved and unread.** A STANDALONE panel stays where
+it is put. A panel that follows a cabinet is an ATTACHED panel (28 September
+2026) — `attached_to` and three offsets, see **Attached panels** — not this
+field. (Dragging a standalone panel in the plan is built — above.)
 
 ## Zoom
 

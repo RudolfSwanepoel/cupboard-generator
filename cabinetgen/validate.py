@@ -13,6 +13,7 @@ from .model import (PANEL_ORIENTATIONS, TAPE_PREFIX, WHITE_TOKEN, Cabinet, Job,
                     Panel, grain_of, is_thin, material_board, material_offers,
                     material_thickness, material_token, tape_for)
 from .room import (above_ceiling, arm_shelf_depth, arm_shelf_max_depth,
+                   attached_carcass_overlaps, cabinet_by_number, host_of,
                    blind_door_width, blind_opening, blocked_openings,
                    cab_corner_outline, corner_shadow,
                    clashes as room_clashes, closure_error, corner_offset,
@@ -410,6 +411,18 @@ def _panels(job: Job):
                              f"that kind on {colour or 'the board'} in the Boards tab, or "
                              f"choose another edging",
                              EDGING_REF, check="panel-edging"))
+        # An attached panel names a cabinet. One that names nothing the job has
+        # — a deleted cabinet, another panel, itself — is cut exactly as it is
+        # and simply stands nowhere, so it is a warning that says what to do.
+        if spec.attached_to is not None and host_of(job, c) is None:
+            named = cabinet_by_number(job, spec.attached_to)
+            why = ("which is a panel — a panel hangs off a cabinet, not off another panel"
+                   if named is not None and named.is_panel and named.number != c.number
+                   else "which the job does not have")
+            out.append(Issue(WARNING, where,
+                             f"panel is attached to cabinet {spec.attached_to}, {why} — "
+                             f"detach it in Panel design, or attach it to another cabinet",
+                             check="attached-host"))
     return out
 
 
@@ -1054,10 +1067,33 @@ def _placement_clashes(job: Job, std):
     """
     out = []
     by_number = {c.number: c for c in job.cabinets}
+
+    def name(n):
+        c = by_number.get(n)
+        return (f"panel {n} (attached to cabinet {c.attached_to})"
+                if c is not None and c.is_attached else f"cabinet {n}")
+
     for o in room_overlaps(job):
+        a, b = by_number.get(o.a), by_number.get(o.b)
+        if (a is not None and a.is_panel) or (b is not None and b.is_panel):
+            # an attached panel is part of its cabinet's geometry (spec B6), so
+            # this is the same critical as the carcass standing there
+            out.append(Issue(CRITICAL, f"{o.a}/{o.b}",
+                             f"{name(o.a)} and {name(o.b)} overlap by {o.mm} mm on "
+                             f"wall {o.wall}", check="overlap"))
+            continue
         out.append(Issue(CRITICAL, f"{o.a}/{o.b}",
                          f"cabinets {o.a} and {o.b} overlap by {o.mm} mm on "
                          f"wall {o.wall}", check="overlap"))
+    # An attached panel cutting INTO its own carcass — overlapping it, not
+    # merely touching — is a warning, never a critical (spec B6): the panel is
+    # cut and costed wherever it stands, and how far it laps the carcass is the
+    # fitter's business. It is said so the offsets get looked at.
+    for n, host in attached_carcass_overlaps(job, std):
+        out.append(Issue(WARNING, str(n),
+                         f"panel {n} cuts into the carcass of cabinet {host}, which it is "
+                         f"attached to — check its offsets in Panel design",
+                         check="attached-into-carcass"))
     for c in room_clashes(job, std):
         thing = "door swing" if c.kind == "door" else "drawer pull-out"
         cab = by_number.get(c.cabinet)
@@ -1191,9 +1227,13 @@ def _room_heights(job: Job, std):
     across a window is sometimes exactly what was meant.
     """
     out = []
+    by_number = {c.number: c for c in job.cabinets}
     for number, top, ceiling in above_ceiling(job, std):
+        c = by_number.get(number)
+        what = (f"top of panel {number}, attached to cabinet {c.attached_to}, is"
+                if c is not None and c.is_attached else "top of the carcass is")
         out.append(Issue(CRITICAL, str(number),
-                         f"top of the carcass is at {top} mm, above the "
+                         f"{what} at {top} mm, above the "
                          f"{ceiling} mm ceiling", check="above-ceiling"))
     # Built flat and tipped up in one piece: a ceiling it clears standing but not
     # on the way up is an installation failure, so it blocks the same way.

@@ -35,6 +35,11 @@ LATE_CABINET_FIELDS = (
 )
 
 
+# The panel-record fields that say a panel is attached to a cabinet, and where.
+# Written only when it is (`attached_to` set); see cabinet_to_dict.
+ATTACH_FIELDS = ("attached_to", "at_x", "at_y", "at_z")
+
+
 def cabinet_to_dict(c: Cabinet) -> dict:
     d = asdict(c)
     defaults = {f.name: f.default for f in fields(Cabinet)}
@@ -54,12 +59,17 @@ def cabinet_to_dict(c: Cabinet) -> dict:
     d["bespoke"] = [panel_to_dict(x) for x in c.bespoke]
     # Only written when this item actually is a panel, and `anchor` only when it
     # is set — so a job with no panels is byte-identical to one written before
-    # they existed. The same discipline as `room` and `placements` above.
+    # they existed. The same discipline as `room` and `placements` above. The
+    # attachment (`attached_to` and the three offsets, 28 September 2026) is
+    # written only on an attached panel, so a standalone one is byte-identical
+    # to one written before panels could be attached.
     if c.panel is None:
         d.pop("panel", None)
     else:
+        attached = c.panel.attached_to is not None
         d["panel"] = {k: v for k, v in asdict(c.panel).items()
-                      if k != "anchor" or v is not None}
+                      if (k != "anchor" or v is not None)
+                      and (k not in ATTACH_FIELDS or attached)}
     return d
 
 

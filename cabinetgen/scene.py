@@ -359,6 +359,10 @@ def build(job: Job) -> dict:
             entry = {"number": cab.number, "kind": cab.kind, "panel": cab.is_panel,
                      "corner": cab.corner_kind, "template": cab.template,
                      "placed": cab.number in frames, "wall": None,
+                     # an attached panel stands where its cabinet puts it and is
+                     # moved by moving the cabinet: the browser offers it no
+                     # handles of its own and moves it with the cabinet's drag
+                     "attached": cab.attached_to,
                      "layer": "panels" if cab.is_panel else layer_of(cab, placement_for(job, cab.number)),
                      "dims": _dims(g), "parts": [], "hash": ""}
             if cab.number in frames:
@@ -383,6 +387,7 @@ def build(job: Job) -> dict:
             entry = {"number": cab.number, "kind": cab.kind, "panel": cab.is_panel,
                      "corner": cab.corner_kind, "template": cab.template,
                      "placed": cab.number in at, "wall": None,
+                     "attached": cab.attached_to,
                      "layer": "panels" if cab.is_panel else layer_of(cab),
                      "dims": _dims(g), "parts": [], "hash": ""}
             if cab.number in at:

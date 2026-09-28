@@ -485,7 +485,8 @@ def stage_f4(pw):
     time.sleep(0.3)
     check("cabinet 7 is the selection", page.evaluate("() => S.job.cabinets[S.sel].number"), 7)
     check("and nothing is isolated by a click", page.evaluate("() => S.isolate"), None)
-    check("the dock shows cabinet 7", page.locator("#v3ddock #editor h2").first.text_content().strip(), "Cabinet 7")
+    # the heading carries the editor's Save button since 27 September 2026
+    check("the dock shows cabinet 7", page.locator("#v3ddock #editor h2").first.text_content().strip().replace("Save", "").strip(), "Cabinet 7")
     check("the part card names the part's cut-list line",
           page.locator("#v3dview .v3dcard").inner_text().find(part["line"]) >= 0, True)
     check("the 3D list marks it", page.locator("#v3dlist .row.sel").get_attribute("data-n"), "7")
@@ -511,7 +512,7 @@ def stage_f4(pw):
           page.evaluate("() => [document.getElementById('editor').parentElement.id, document.getElementById('editor').dataset.mark]"), ["roomdock", "one"])
     page.click('nav [data-tab="view3d"]')
     check("3D: the same element again", page.evaluate("() => [document.getElementById('editor').parentElement.id, document.getElementById('editor').dataset.mark]"), ["v3ddock", "one"])
-    check("it still shows cabinet 7", page.locator("#v3ddock #editor h2").first.text_content().strip(), "Cabinet 7")
+    check("it still shows cabinet 7", page.locator("#v3ddock #editor h2").first.text_content().strip().replace("Save", "").strip(), "Cabinet 7")
     check("one editor: one h2", page.locator("#editor h2").count(), 1)
     page.click("#v3ddock .docktog")
     check("the dock collapses to a strip", page.evaluate("() => document.getElementById('v3ddock').classList.contains('closed')"), True)
@@ -906,7 +907,9 @@ def stage_extras(pw):
     wait_scene(page)
     sc = scene_of(page)
     it2 = next(it for it in sc["items"] if it["number"] == 2)
-    roles = sorted(q["role"] for q in it2["parts"])
+    # supports and shelves are drawn since 27 September 2026 (room.interior_parts);
+    # the carcass, the flush panel and the one door are what this pins
+    roles = sorted(q["role"] for q in it2["parts"] if q["role"] not in ("support", "shelf"))
     check("a blind corner draws its sides, bottom, back, the flush panel and ONE door",
           roles, ["back", "blind", "bottom", "door", "side", "side"])
     blind = next(q for q in it2["parts"] if q["role"] == "blind")

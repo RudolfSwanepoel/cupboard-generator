@@ -437,6 +437,25 @@ class PanelSpec:
     # the day that changes, and is written to the job file only when set.
     anchor: Optional[str] = None
 
+    # ---- attached panels (28 September 2026) -------------------------------
+    # A panel FIXED TO a cabinet: `attached_to` is that cabinet's number, and
+    # the three offsets place the panel in the cabinet's own frame — the
+    # supports spec's: x across the width from the cabinet's left side, y from
+    # the FRONT face of the sides (0) towards the back, z up from the underside
+    # of the sides — each to the panel's own near corner (its left, front and
+    # bottom). Negative values are ordinary: an end panel stands at x = -t, and
+    # one finishing flush with the doors at y = -(door thickness). The world
+    # position is the cabinet's placement applied to these (`room.
+    # attached_placement`), so the panel moves, snaps and changes wall with the
+    # cabinet. None means a standalone panel, exactly as every panel was before
+    # this existed; the four are written to the job file only when attached.
+    # Everything else about the panel — board, size, orientation, edging, code
+    # 08, its number — is exactly as a standalone panel's.
+    attached_to: Optional[int] = None
+    at_x: int = 0
+    at_y: int = 0
+    at_z: int = 0
+
 
 @dataclass
 class Cabinet:
@@ -670,6 +689,18 @@ class Cabinet:
         """The panel record, or an empty one. A panel with nothing typed into it
         yet is a zero-sized panel the validator names, not a crash."""
         return self.panel or PanelSpec()
+
+    @property
+    def attached_to(self) -> Optional[int]:
+        """The cabinet this panel is fixed to, or None: a standalone panel, or
+        not a panel at all. Read off the panel record and nowhere else."""
+        if not self.is_panel or self.panel is None or self.panel.attached_to is None:
+            return None
+        return int(self.panel.attached_to)
+
+    @property
+    def is_attached(self) -> bool:
+        return self.attached_to is not None
 
     @property
     def corner_on(self) -> bool:
@@ -913,6 +944,31 @@ class Cabinet:
         return Support(edge="none", qty=1, type=type, cut_board=board, board=board,
                        kind=default_support_kind(materials, board),
                        edges=[] if type == "back" else list(SUPPORT_DEFAULT_EDGES))
+
+    def default_supports(self, materials: dict) -> List[Support]:
+        """The support rows a NEW cabinet of this kind starts with (ruled 28
+        September 2026, replacing the four Back rows of 27 September):
+
+            base          Front 1, Top Rear 1, Back 2
+            wall (upper)  Back 3
+            tall          Back 4
+            blind corner  by its kind, as above
+            mitre / ell   none
+
+        One row per support, each `new_support`'s defaults — cut from the
+        carcass, in that board's own edging kind, a Back with no edge ticked.
+        Only ever applied to a cabinet being made or one whose rows are still
+        these untouched defaults; an existing cabinet and a legacy row are
+        never rewritten by it.
+        """
+        offered = self.support_types_offered
+        if not offered:
+            return []
+        if "front" in offered:
+            types = ["front", "top_rear", "back", "back"]
+        else:
+            types = ["back"] * (3 if self.kind == "upper" else 4)
+        return [self.new_support(materials, t) for t in types]
 
     def reentered_supports(self, materials: dict) -> List[Support]:
         """The legacy rows rewritten as typed rows — Rudolf's explicit act.

@@ -584,9 +584,9 @@ function blankCabinet(number) {
   return {
     number: number, width: 600, height: 2400, depth: 500,
     kind: "tall", back: "four", template: "standard",
-    // Typed from the start (27 September 2026): four Back supports, each with
-    // its own edging, filled in by /api/support-new once the boards are chosen
-    // — cut from the carcass, in that board's own edging, no edge ticked.
+    // Typed from the start (27 September 2026), the rows for its kind (28
+    // September 2026), filled in by /api/support-defaults once the boards are
+    // chosen — cut from the carcass, in that board's own edging.
     support_rows: [],
     supports: 0, edged_supports: 0, white_supports: 0,
     shelves: 0, fixed_shelves: 0, shelf_width: null,
@@ -839,7 +839,8 @@ function renderList() {
       <td class="n">${c.number}</td>
       <td class="n">${dim("width")}</td><td class="n">${dim("height")}</td><td class="n">${dim("depth")}</td>
       <td>${esc(c.kind)}${g && g.corner && g.corner.kind ? " \u00b7 " + esc(g.corner.kind)
-        + " " + (g.corner.hand === "L" ? "L" : "R") : ""}</td>
+        + " " + (g.corner.hand === "L" ? "L" : "R") : ""}${
+        attachedTo(c) !== null ? " \u00b7 on " + attachedTo(c) : ""}</td>
       <td>${esc(frontsText(c))}</td>
       <td class="n">${shelves || ""}</td>
       <td>${c.template === "none" ? "bespoke" : ""}</td>
@@ -864,14 +865,15 @@ function renderList() {
 // a copy has none and is put where it goes. That is what a bulkhead wants —
 // four panels of the same description in four different places — and it is
 // what the cabinet table's Dup has always done.
+// Since 28 September 2026 the copy is the engine's (`/api/duplicate`): a
+// cabinet's attached panels are copied with it, each with the next free number
+// and the same offsets, fixed to the copy.
 async function dupCabinet(i) {
   const src = S.job.cabinets[i];
   if (!src) return;
-  const copy = JSON.parse(JSON.stringify(src));
-  const r = await post("/api/next-number", {job: S.job});
-  copy.number = r.number;
-  (copy.bespoke || []).forEach((p) => { p.cabinet = copy.number; });
-  S.job.cabinets.splice(i + 1, 0, copy);
+  const r = await post("/api/duplicate", {job: S.job, index: i});
+  if (!r.ok) { toast(r.error, true); return; }
+  S.job.cabinets.splice(i + 1, 0, ...r.cabinets);
   selectCabinet(i + 1);
   schedule(); renderList();
 }
@@ -885,7 +887,29 @@ $("cabtable").addEventListener("click", async (e) => {
   const del = e.target.closest("[data-del]");
   if (del) {
     const i = +del.dataset.del;
+    const victim = S.job.cabinets[i];
+    // Its attached panels (28 September 2026): deleted with it, or left
+    // standing where they are as standalone panels, numbers unchanged. The
+    // question is only asked when there are any.
+    const hung = victim && victim.kind !== "panel" ? attachedOf(victim.number) : [];
+    let alsoGone = [];
+    if (hung.length) {
+      const also = window.confirm(
+        `Cabinet ${victim.number} has ${hung.length} attached panel${hung.length === 1 ? "" : "s"} ` +
+        `(${hung.map((x) => x.number).join(", ")}).\n\nAlso delete ` +
+        `${hung.length === 1 ? "it" : "them"}?\n\nOK deletes the panel${hung.length === 1 ? "" : "s"} too. ` +
+        `Cancel keeps ${hung.length === 1 ? "it" : "them"} as standalone panel${hung.length === 1 ? "" : "s"}, ` +
+        `standing exactly where ${hung.length === 1 ? "it stands" : "they stand"} now, numbers unchanged.`);
+      if (also) alsoGone = hung.map((x) => x.number);
+      else if (!(await detachPanels({host: victim.number}))) return;
+    }
     const gone = S.job.cabinets.splice(i, 1)[0];
+    if (alsoGone.length) {
+      S.job.cabinets = S.job.cabinets.filter((x) => alsoGone.indexOf(x.number) < 0);
+      S.job.placements = places().filter((p) => alsoGone.indexOf(p.cabinet) < 0);
+      if (S.isolate !== null && alsoGone.indexOf(S.isolate) >= 0) S.isolate = null;
+      S.sel = null;
+    }
     // Everything in the job that names the cabinet by number goes with it. A
     // placement left behind is a critical ("placement for a cabinet that does
     // not exist") that the Room tab cannot clear, since its table lists only
@@ -934,12 +958,14 @@ $("add").addEventListener("click", async () => {
   fresh.carcass_board = pool[0];
   fresh.exterior_board = pool[pool.length - 1];
   fresh.has_doors = false;      // tick it on when this cabinet actually has doors
-  // Four Back supports, each its own row: the engine's defaults, not the
-  // browser's — the carcass board's own edging kind, nothing ticked.
-  const sr = await post("/api/support-new",
-                        {job: Object.assign({}, S.job, {cabinets: [fresh]}), index: 0,
-                         type: "back", count: 4});
+  // The support rows for its kind (28 September 2026): the engine's defaults,
+  // not the browser's — base Front + Top Rear + 2 Backs, wall 3 Backs, tall 4,
+  // each cut from the carcass in that board's own edging. They follow the
+  // kind while untouched (`redefaultSupports`).
+  const sr = await post("/api/support-defaults",
+                        {job: Object.assign({}, S.job, {cabinets: [fresh]}), index: 0});
   fresh.support_rows = (sr && sr.rows) || [];
+  noteFreshRows(fresh);
   S.job.cabinets.push(fresh);
   // P3: a new cabinet isolates itself. It has no placement yet, so there is
   // nothing to draw until a wall is picked for it in the Room tab — and the
@@ -1093,6 +1119,14 @@ const SECTIONS = [
          "sides together. Three kinds: a Front and a Top Rear across the top of a " +
          "base unit, and Back supports upright behind the backing. Each says what " +
          "it is cut from, what its edging is, and which edges get it.",
+   fields: []},
+
+  // Panels fixed to this cabinet (28 September 2026): listed here, made here,
+  // and edited on the panel itself, where every panel's design lives.
+  {key: "attached", name: "Attached panels", slot: "attachedbox", when: notPanel,
+   hint: "Panels fixed to this cabinet — an end panel, a plinth end, a top. Each " +
+         "is a Panel item with its own number and its own cut-list line, placed by " +
+         "offsets in this cabinet's frame, and it moves with the cabinet.",
    fields: []},
 ];
 
@@ -1446,6 +1480,7 @@ function renderEditor() {
   renderDoors();
   renderDrawers();
   renderSupports();
+  renderAttached();
   renderPanel();
   refreshGeometryReadout();
   refreshSwing();
@@ -1476,7 +1511,7 @@ $("editor").addEventListener("input", (e) => {
   if (pk !== undefined) {
     const p = panelOf(c);
     const v = e.target.value;
-    if (pk === "a" || pk === "b" || pk === "edge_long" || pk === "edge_short") {
+    if (["a", "b", "edge_long", "edge_short", "at_x", "at_y", "at_z"].indexOf(pk) >= 0) {
       p[pk] = parseInt(v, 10) || 0;
     } else {
       p[pk] = v;
@@ -1563,6 +1598,7 @@ $("editor").addEventListener("input", (e) => {
     else if (t === "opt") c[k] = raw === "" ? null : parseInt(raw, 10);
     else c[k] = raw === "" ? 0 : parseInt(raw, 10);
     cornerFollowUp(c, k);
+    if (k === "kind" || k === "corner_style") redefaultSupports(c);
     // A board decides materials and edging, and the door count decides how many
     // leaf rows there are. Both used to force the whole editor to be rebuilt;
     // the compute that follows repaints every section off the reply, which is
@@ -1726,6 +1762,31 @@ $("editor").addEventListener("click", (e) => {
   // placement - a panel is put where it is put, so a copy is not.
   if (e.target.closest("#paneldup")) {
     dupCabinet(S.sel);
+    return;
+  }
+  if (e.target.id === "padd") { addAttachedPanel(); return; }
+  if (e.target.id === "pattachgo") {
+    const sel = $("pattach");
+    const to = sel && parseInt(sel.value, 10);
+    if (!to) { toast("Pick the cabinet to attach this panel to.", true); return; }
+    attachPanel(S.sel, to);
+    return;
+  }
+  if (e.target.id === "pdetach") {
+    const c = S.job.cabinets[S.sel];
+    detachPanels({cabinet: c.number}).then((ok) => { if (ok) { schedule(); renderList(); } });
+    return;
+  }
+  if (e.target.id === "phost") {
+    const host = attachedTo(S.job.cabinets[S.sel]);
+    const i = S.job.cabinets.findIndex((x) => x.number === host);
+    if (i >= 0) { selectCabinet(i); renderList(); refreshPlan(); }
+    return;
+  }
+  const sp = e.target.closest("[data-showpanel]");
+  if (sp) {
+    const i = S.job.cabinets.findIndex((x) => x.number === +sp.dataset.showpanel);
+    if (i >= 0) { selectCabinet(i, {isolate: false}); renderList(); }
     return;
   }
   if (e.target.closest("[data-clearedge]")) {
@@ -2853,7 +2914,17 @@ function edgingHTML(c, which, opts) {
 // something to write into before that lands.
 function blankPanel() {
   return {board: "", orientation: "upright", a: 0, b: 0, grain_along: "b",
-          edge_kind: "", edge_board: "", edge_long: 0, edge_short: 0};
+          edge_kind: "", edge_board: "", edge_long: 0, edge_short: 0,
+          attached_to: null, at_x: 0, at_y: 0, at_z: 0};
+}
+
+// Whether a panel is fixed to a cabinet (28 September 2026), and to which.
+function attachedTo(c) {
+  const n = c && c.panel && c.panel.attached_to;
+  return (n === null || n === undefined || n === "") ? null : +n;
+}
+function attachedOf(number) {
+  return S.job.cabinets.filter((x) => x.kind === "panel" && attachedTo(x) === number);
 }
 
 function panelOf(c) {
@@ -3015,11 +3086,153 @@ function renderPanel() {
       ${grainHTML}
     </div>
     ${edgeHTML}
+    ${attachHTML(c, p, info)}
     <p class="hint">Cut list line: <span class="mono" data-panelline="1">${preview}</span></p>
     <div class="presets"><button id="paneldup">Duplicate this panel</button></div>
     <p class="hint">A bulkhead is several panels — a front, an underside and an end
       cap each side. <b>Duplicate</b> gives the next free number and copies everything
       but the placement, so the set can be typed once and adjusted.</p>`;
+}
+
+/* ---------- attached panels (28 September 2026) ---------------------------
+   A panel fixed to a cabinet: it carries the cabinet's number and three
+   offsets in the cabinet's own frame, typed here and nowhere else. Where that
+   puts it in the room is the engine's answer, read back (`placed_at`); the
+   browser works out no position, and attaching or detaching goes through the
+   server so the panel does not move when the link changes.              */
+function attachHTML(c, p, info) {
+  const host = attachedTo(c);
+  const cabs = S.job.cabinets.filter((x) => x.kind !== "panel");
+  if (host === null) {
+    if (!cabs.length) return "";
+    return `<div class="tape"><label>Attached to</label>
+      <div class="leaf">
+        <span class="note">standalone — it stands where it is put</span>
+        <select id="pattach" title="the cabinet to fix this panel to">
+          <option value="">— attach to cabinet —</option>
+          ${cabs.map((x) => `<option value="${x.number}">${x.number}${x.note ? " · " + esc(x.note) : ""}</option>`).join("")}
+        </select>
+        <button id="pattachgo">Attach</button>
+      </div>
+      <span class="note">Attaching keeps its number and, if it is placed, where it stands:
+        its offsets are worked out from there. From then on it moves with the cabinet.</span>
+    </div>`;
+  }
+  const ok = !info || info.host_ok !== false;
+  const at = info && info.placed_at;
+  const where = !ok
+    ? `<span class="note" style="color:var(--crit)">cabinet ${host} is not in this job — detach
+         the panel, or attach it to another cabinet</span>`
+    : at ? `<span class="note">stands on wall ${esc(at.wall)} at x ${at.x}, ${at.y} mm off the
+         wall, underside at ${at.z} mm — the engine's answer, and it moves with cabinet ${host}</span>`
+         : `<span class="note">cabinet ${host} is not placed yet, so neither is this panel</span>`;
+  const f = (k, label, note) => `<div class="f"><label>${label}</label>
+      <input type="number" step="1" data-pk="${k}" value="${+p[k] || 0}"><span class="note">${note}</span></div>`;
+  return `<div class="tape"><label>Attached to</label>
+    <div class="leaf">
+      <b>cabinet ${host}</b>
+      <button id="phost" title="select the cabinet">Show cabinet</button>
+      <button id="pdetach" title="make it a standalone panel, standing where it stands">Detach</button>
+    </div>
+    <div class="grid">
+      ${f("at_x", "X across", "from the cabinet's left side to the panel's left; negative is beside it")}
+      ${f("at_y", "Y from the front", "from the front face of the sides towards the back; negative stands proud")}
+      ${f("at_z", "Z up", "from the underside of the sides to the panel's underside")}
+    </div>
+    ${where}
+  </div>`;
+}
+
+// The list on a cabinet of the panels fixed to it, and the button that adds one.
+function renderAttached() {
+  const box = slot($("attachedbox"));
+  if (!box) return;
+  const c = S.job.cabinets[S.sel];
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const list = (g && g.attached) || attachedOf(c.number).map((x) => ({
+    number: x.number, orientation: (x.panel || {}).orientation, board: (x.panel || {}).board,
+    a: (x.panel || {}).a, b: (x.panel || {}).b, at_x: (x.panel || {}).at_x,
+    at_y: (x.panel || {}).at_y, at_z: (x.panel || {}).at_z, label: ""}));
+  const orients = S.def.panel_orientations || [];
+  const oname = (k) => ((orients.find((o) => o.key === k) || {}).name || k || "");
+  const rows = list.map((q) => `<tr>
+      <td class="n">${q.number}</td><td>${esc(q.label || "")}</td>
+      <td>${esc(q.board || "—")}</td><td>${esc(oname(q.orientation))}</td>
+      <td class="n">${q.a} × ${q.b}</td>
+      <td class="n">${q.at_x} / ${q.at_y} / ${q.at_z}</td>
+      <td><button data-showpanel="${q.number}">Edit</button></td>
+    </tr>`).join("");
+  box.innerHTML = `${list.length ? `<table class="rows"><thead><tr>
+      <th class="n">#</th><th>Line</th><th>Board</th><th>Orientation</th>
+      <th class="n">Size</th><th class="n">X / Y / Z</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table>`
+    : `<p class="off">No panels are fixed to this cabinet.</p>`}
+    <div class="presets"><button id="padd">+ Panel on this cabinet</button></div>
+    <p class="hint">An end panel to start with — side-on, in the exterior board,
+      the carcass depth plus the exposed-end allowance, against the left side. Its
+      board, size, orientation, edging and offsets are edited on the panel itself.
+      Each is its own numbered line on the cut list.</p>`;
+}
+
+async function addAttachedPanel() {
+  const r = await post("/api/panel-new-attached", {job: S.job, index: S.sel});
+  if (!r.ok) { toast(r.error, true); return; }
+  S.job.cabinets.push(r.cabinet);
+  placesSig = null;
+  selectCabinet(S.job.cabinets.length - 1, {isolate: false});
+  schedule(); renderList();
+}
+
+// Attaching and detaching are the server's: the offsets that keep the panel
+// where it stands, or the placement that does, come back and are written in.
+async function attachPanel(i, to) {
+  const c = S.job.cabinets[i];
+  const r = await post("/api/panel-attach", {job: S.job, cabinet: c.number, to: to});
+  if (!r.ok) { toast(r.error, true); return; }
+  c.panel = r.panel;
+  S.job.placements = places().filter((p) => p.cabinet !== c.number);
+  placesSig = null;
+  schedule(); renderList();
+}
+
+async function detachPanels(payload) {
+  const r = await post("/api/panel-detach", Object.assign({job: S.job}, payload));
+  if (!r.ok) { toast(r.error, true); return false; }
+  r.panels.forEach((q) => {
+    const c = S.job.cabinets.find((x) => x.number === q.number);
+    if (c) c.panel = q.panel;
+  });
+  const keep = places().filter((p) => !r.placements.some((q) => q.cabinet === p.cabinet));
+  S.job.placements = keep.concat(r.placements.map((q) => Object.assign({y: 0}, q)));
+  placesSig = null;
+  return true;
+}
+
+// The support rows a new cabinet starts with are the engine's, per kind
+// (28 September 2026). They follow the kind while they are still untouched:
+// a cabinet made as tall and then made base gets the base defaults, but a
+// row anyone has edited, and every stored cabinet, is left exactly alone.
+// The rows as they count: the qty-0 Front and Top Rear rows the Supports block
+// makes up to have something to write into (`typedSupportRows`) cut nothing
+// and are not an edit, so they are left out of the signature.
+function rowsSig(c) {
+  return JSON.stringify((c.support_rows || []).filter((r) => r.type === "back" || (r.qty || 0) > 0));
+}
+function noteFreshRows(c) {
+  if (!S.freshRows) S.freshRows = new Map();
+  S.freshRows.set(c.number, rowsSig(c));
+}
+async function redefaultSupports(c) {
+  if (!S.freshRows || S.freshRows.get(c.number) !== rowsSig(c)) return;
+  const i = S.job.cabinets.indexOf(c);
+  if (i < 0) return;
+  const r = await post("/api/support-defaults", {job: S.job, index: i});
+  if (!r.ok || S.job.cabinets[i] !== c) return;
+  if (S.freshRows.get(c.number) !== rowsSig(c)) return;   // edited meanwhile
+  c.support_rows = r.rows;
+  noteFreshRows(c);
+  renderSupports();
+  schedule();
 }
 
 /* ---------- Structure ------------------------------------------------------
@@ -4003,7 +4216,7 @@ $("elevation").addEventListener("pointerdown", async (e) => {
     return;
   }
   const p = places().find((x) => x.cabinet === number);
-  if (!p) return;
+  if (!p) { attachedPress(number); return; }
 
   // Everything that has to happen on the press happens now, before the snap
   // model is fetched: stop the drawing's text being selected, and listen for
@@ -4011,9 +4224,12 @@ $("elevation").addEventListener("pointerdown", async (e) => {
   // before anything was listening, and the cabinet then stuck to the pointer.
   e.preventDefault();
   const pt = elevPoint(track.svg, e);
+  const hosted = [...document.querySelectorAll(`#elevation .ecabg[data-host="${number}"]`)];
   const d = {model: null, grp: grp, place: p, track: track, press: pt,
              from: {x: p.x, z: p.z}, at: {x: p.x, z: p.z}, moved: false,
-             last: null, released: false};
+             last: null, released: false,
+             // the panels attached to it, and their labels, move with it on screen
+             hosted: hosted.concat(...hosted.map((h) => [...elevTags(h)]))};
   EDRAG = d;
   grp.classList.add("dragging");
   selectCabinet(S.job.cabinets.findIndex((x) => x.number === number), {isolate: false});
@@ -4131,6 +4347,7 @@ function moveElevDrag(d, e) {
   // a thin panel's number is drawn outside its group, over the neighbours
   // (render: `late`), so it is moved alongside rather than left behind
   elevTags(EDRAG.grp).forEach((el) => el.setAttribute("transform", moveBy));
+  (EDRAG.hosted || []).forEach((el) => el.setAttribute("transform", moveBy));
 
   const out = $("elevdrag");
   if (out) {
@@ -4154,6 +4371,19 @@ function endElevDrag() {
   finishElevDrag(d);
 }
 
+// A press on an item with no placement of its own. An ATTACHED panel is the
+// case: it is selected, and told where it is moved from.
+function attachedPress(number) {
+  const i = S.job.cabinets.findIndex((x) => x.number === number);
+  if (i < 0) return;
+  const host = attachedTo(S.job.cabinets[i]);
+  if (i !== S.sel) { selectCabinet(i, {isolate: false}); renderList(); }
+  if (host !== null) {
+    toast(`Panel ${number} is attached to cabinet ${host} and moves with it — drag ` +
+          `cabinet ${host}, or type the panel's offsets in Panel design.`);
+  }
+}
+
 function elevTags(grp) {
   return document.querySelectorAll(
     `#elevation .eplabel[data-cab="${grp.dataset.cab}"]`);
@@ -4167,6 +4397,7 @@ function finishElevDrag(d) {
   d.grp.classList.remove("dragging");
   d.grp.removeAttribute("transform");
   elevTags(d.grp).forEach((el) => el.removeAttribute("transform"));
+  (d.hosted || []).forEach((el) => el.removeAttribute("transform"));
   const out = $("elevdrag");
   if (out) out.style.display = "none";
   if (!d.moved || (d.at.x === d.from.x && d.at.z === d.from.z)) { renderList(); return; }
@@ -4527,7 +4758,7 @@ $("plan").addEventListener("pointerdown", async (e) => {
     return;
   }
   const p = places().find((x) => x.cabinet === number);
-  if (!p) return;
+  if (!p) { attachedPress(number); return; }
 
   // Everything that has to happen on the press happens now, before the snap
   // model is fetched: the wall tracks read off the drawing as it stands, the
@@ -4544,7 +4775,9 @@ $("plan").addEventListener("pointerdown", async (e) => {
   const d = {model: null, poly: poly, shapes: shapes, panel: panel, place: p,
              from: {wall: p.wall, x: p.x, y: p.y || 0}, at: {x: p.x, y: p.y || 0},
              tracks: tracks(), moved: false, last: null, released: false,
-             grab: null, grabY: 0};
+             grab: null, grabY: 0,
+             // the panels attached to it move with it on screen (preview only)
+             hosted: [...document.querySelectorAll(`#plan [data-host="${number}"]`)]};
   // Where along the cabinet it was grabbed, so it does not jump to put its
   // middle under the pointer — the elevation drag's rule, read off the same
   // track the drag projects onto. Null until known; the middle is the fallback.
@@ -4614,10 +4847,12 @@ function moveDrag(d, e) {
   const shift = (x - DRAG.from.x) * best.pr.pxPerMm;
   const unit = Math.hypot(best.t.dx, best.t.dy) || 1;
   if (best.t.wall === DRAG.from.wall) {
-    DRAG.poly.setAttribute("transform",
-      `translate(${best.t.dx / unit * shift} ${best.t.dy / unit * shift})`);
+    const tr = `translate(${best.t.dx / unit * shift} ${best.t.dy / unit * shift})`;
+    DRAG.poly.setAttribute("transform", tr);
+    (DRAG.hosted || []).forEach((el) => el.setAttribute("transform", tr));
   } else {
     DRAG.poly.setAttribute("opacity", "0.35");
+    (DRAG.hosted || []).forEach((el) => el.setAttribute("opacity", "0.35"));
   }
 
   const out = $("dragreadout");
@@ -4699,7 +4934,7 @@ function finishDrag(d) {
   window.removeEventListener("pointermove", onDragMove);
   window.removeEventListener("pointerup", endDrag);
   window.removeEventListener("pointercancel", endDrag);
-  (d.shapes || [d.poly]).forEach((el) => {
+  (d.shapes || [d.poly]).concat(d.hosted || []).forEach((el) => {
     el.classList.remove("dragging");
     el.removeAttribute("transform");
     el.removeAttribute("opacity");
@@ -4757,7 +4992,8 @@ function renderPlaces(force) {
   const sig = !rm ? "none"
     // the kind is in the signature because Y is a panel's field: an item turned
     // into a panel has to get its Y cell, and one turned back has to lose it
-    : S.job.cabinets.map((c) => c.number + (c.kind === "panel" ? "p" : "")).join(",") + "|" +
+    : S.job.cabinets.map((c) => c.number + (c.kind === "panel" ? "p" : "") +
+                                (attachedTo(c) !== null ? "a" + attachedTo(c) : "")).join(",") + "|" +
       places().map((p) => p.cabinet + p.wall).join(",") + "|" +
       rm.walls.map((w) => w.id).join(",");
   if (!force && sig === placesSig) { refreshLayerCells(); return; }
@@ -4776,6 +5012,21 @@ function renderPlaces(force) {
     // its Y is 0 and the cell is not offered — the table cannot put a cabinet
     // off its own wall.
     const pan = c.kind === "panel";
+    const host = attachedTo(c);
+    if (host !== null) {
+      // where its cabinet puts it — the engine's figures, read back, and not
+      // editable here: the offsets are typed in Panel design
+      const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+      const at = g && g.panel && g.panel.placed_at;
+      return `<tr data-cab="${c.number}">
+        <td class="n">${c.number} <span class="note">pnl</span></td>
+        <td><span class="note">with ${host}</span></td>
+        <td><input type="number" value="${at ? at.x : ""}" disabled title="moves with cabinet ${host}"></td>
+        <td><input type="number" value="${at ? at.z : ""}" disabled title="moves with cabinet ${host}"></td>
+        <td><input type="number" value="${at ? at.y : ""}" disabled title="moves with cabinet ${host}"></td>
+        <td class="note">attached to ${host}</td>
+      </tr>`;
+    }
     return `<tr data-cab="${c.number}">
       <td class="n">${c.number}${pan ? ' <span class="note">pnl</span>' : ""}</td>
       <td><select data-p="${c.number}" data-pk="wall">
@@ -4808,7 +5059,9 @@ function renderPlaces(force) {
     <p class="note">
       Y is out from the wall face to the back of an independent PANEL — 0 is
       flush against the wall, and it is what puts a bulkhead underside out over
-      the units below it. A cabinet is against its wall, so it has no Y.</p>
+      the units below it. A cabinet is against its wall, so it has no Y.
+      A panel attached to a cabinet stands where the cabinet puts it: its
+      offsets are typed in Panel design, and it moves with the cabinet.</p>
   </div>`;
 }
 
@@ -5600,6 +5853,7 @@ function adopt(job) {
   S.lapsedNotes = [];
   S.acceptOpen = null;
   S.selRendered = -2;
+  S.freshRows = new Map();   // every stored cabinet's rows are its own
   roomSig = null;
   placesSig = null;
   gapsSig = null;

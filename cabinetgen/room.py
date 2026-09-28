@@ -25,8 +25,8 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from .model import (MATERIALS, Cabinet, Room, Wall, hinge_side,
-                    material_thickness)
+from .model import (MATERIALS, Cabinet, PanelSpec, Placement, Room, Wall, hinge_side,
+                    material_thickness, resolve_board)
 from .standard import STANDARD, Standard
 
 Point = Tuple[float, float]
@@ -801,11 +801,231 @@ def polygons_overlap(a, b) -> bool:
 
 
 def placement_for(job, number: int) -> Optional[object]:
-    """The placement of one cabinet, or None if it has not been placed."""
+    """The placement of one cabinet or panel, or None if it has not been placed.
+
+    An ATTACHED panel (28 September 2026) has no placement record of its own:
+    where it stands is its cabinet's placement applied to its local offsets,
+    worked out by `attached_placement` — so it moves, snaps and changes wall
+    with the cabinet, and a stale record left in `job.placements` is never
+    read for it. Every reader of a panel's position comes through here.
+    """
+    cab = cabinet_by_number(job, number)
+    if cab is not None and cab.is_attached:
+        return attached_placement(job, cab)
     for p in job.placements:
         if p.cabinet == number:
             return p
     return None
+
+
+def cabinet_by_number(job, number) -> Optional[object]:
+    """The cabinet or panel with this number, or None."""
+    for c in job.cabinets:
+        if c.number == number:
+            return c
+    return None
+
+
+# --- attached panels ----------------------------------------------------------
+#
+# A panel FIXED TO a cabinet (spec of 28 September 2026). It is a Panel item in
+# every other respect — its own number, its own cut-list line — and carries
+# `PanelSpec.attached_to` plus three offsets in the supports spec's carcass
+# frame: x across the width from the cabinet's left side, y from the FRONT face
+# of the sides towards the back, z up from the underside of the sides, each to
+# the panel's own near corner. The cabinet frame every drawing uses has y OUT
+# from the wall, so the two meet at y_cab = D - y_spec, D being the carcass
+# depth off `geometry` (never the declared one). This is the one place the two
+# frames meet; nothing else works an attached panel's position out.
+
+def host_of(job, panel) -> Optional[object]:
+    """The cabinet an attached panel is fixed to, or None: a standalone panel,
+    a number the job does not carry, itself, or something that is not a
+    carcass (a panel cannot hang off a panel)."""
+    n = getattr(panel, "attached_to", None)
+    if n is None:
+        return None
+    host = cabinet_by_number(job, n)
+    if host is None or host.is_panel or host.number == panel.number:
+        return None
+    return host
+
+
+def attached_panels(job, host_number: int) -> list:
+    """Every panel attached to this cabinet, in job order."""
+    return [c for c in job.cabinets if c.is_panel and c.attached_to == host_number]
+
+
+def _attach_frame(job, host, std: Standard, materials: dict):
+    """(host placement, D, host underside z) — or None while the host is not
+    placed, when its panels are not placed either."""
+    hp = None
+    for p in job.placements:
+        if p.cabinet == host.number:
+            hp = p
+            break
+    if hp is None:
+        return None
+    g = geometry(host, std, materials)
+    return hp, g.depth, carcass_z(host, hp, std)
+
+
+def attached_placement(job, panel, std: Standard = None, materials: dict = None):
+    """Where an attached panel stands: its cabinet's placement applied to its
+    offsets. None while the cabinet itself is not placed, or names nothing.
+
+        x  = cabinet x + at_x
+        y  = D - at_y - (the panel's extent out from the wall)   (Placement.y is
+             the panel's BACK, out from the wall face)
+        z  = the cabinet's underside (on its legs) + at_z
+
+    A derived record, never stored: `store` writes no placement for an
+    attached panel, and the drop of a drag never lands here (`api.drag`
+    refuses an attached panel — its cabinet is what moves).
+    """
+    std = job.std if std is None else std
+    materials = job.materials if materials is None else materials
+    host = host_of(job, panel)
+    if host is None:
+        return None
+    frame = _attach_frame(job, host, std, materials)
+    if frame is None:
+        return None
+    hp, D, z0 = frame
+    spec = panel.panel_spec
+    pg = panel_geometry(panel, std, materials)
+    return Placement(cabinet=panel.number, wall=hp.wall,
+                     x=int(hp.x + int(spec.at_x or 0)),
+                     z=int(z0 + int(spec.at_z or 0)), flip=False, layer=None,
+                     y=int(D - int(spec.at_y or 0) - pg.depth))
+
+
+def attach_offsets(job, panel, host, std: Standard = None, materials: dict = None):
+    """The offsets that put a panel exactly where it stands now, as it is
+    attached to `host` — so attaching does not move it. (at_x, at_y, at_z).
+
+    On the host's own wall the inverse of `attached_placement` to the
+    millimetre. On another wall the panel's near corner is carried across
+    through world coordinates (its box is read into the host's frame), so it
+    keeps its place and its size; its long axis now runs with the host's wall.
+    An UNPLACED panel, or an unplaced host, gets `default_offsets`.
+    """
+    std = job.std if std is None else std
+    materials = job.materials if materials is None else materials
+    p = None
+    for q in job.placements:
+        if q.cabinet == panel.number:
+            p = q
+            break
+    frame = _attach_frame(job, host, std, materials)
+    if p is None or frame is None or job.room is None:
+        return default_offsets(job, panel, host, std, materials)
+    hp, D, z0 = frame
+    pg = panel_geometry(panel, std, materials)
+    if p.wall == hp.wall:
+        return (int(p.x - hp.x), int(D - int(p.y or 0) - pg.depth), int(p.z - z0))
+    try:
+        hf = _placed_frame(job.room, hp)
+        pts = [_from_plan(hf, q) for q in cabinet_footprint(job.room, p, panel, std, materials)]
+    except ValueError:
+        return default_offsets(job, panel, host, std, materials)
+    x0 = min(x for x, _ in pts)
+    y1 = max(y for _, y in pts)
+    return (int(round(x0)), int(round(D - y1)), int(p.z - z0))
+
+
+def default_offsets(job, panel, host, std: Standard = None, materials: dict = None):
+    """Where a panel that has no place of its own is put on a cabinet: standing
+    against the cabinet's LEFT side, its front flush with the front of the
+    sides, its underside level with theirs — an end panel's place, and a
+    starting point to type over, never a rule."""
+    std = job.std if std is None else std
+    materials = job.materials if materials is None else materials
+    pg = panel_geometry(panel, std, materials)
+    return (-int(pg.width), 0, 0)
+
+
+def new_attached_panel(job, host, number: int, std: Standard = None):
+    """A fresh panel on this cabinet, as "+ Panel on this cabinet" makes it: an
+    end panel, side-on, cut from the cabinet's exterior board, the carcass
+    depth plus `Standard.exposed_extra` deep — the exposed end's own figure,
+    finishing flush with the doors — and the carcass height tall; standing
+    against the left side (`default_offsets`), brought forward by that extra
+    so its back is flush with the back of the sides. Every figure is off
+    `geometry` and `Standard`; the operator types over any of them.
+    """
+    std = job.std if std is None else std
+    g = geometry(host, std, job.materials)
+    board = resolve_board(job.materials, host.exterior_board) \
+        if host.exterior_board in (job.materials or {}) else host.exterior_board
+    spec = PanelSpec(board=board, orientation="end",
+                     a=int(g.depth + std.exposed_extra), b=int(g.height),
+                     grain_along="b", attached_to=host.number)
+    panel = Cabinet(number=number, width=0, height=0, depth=0, kind="panel",
+                    template="standard", supports=0, doors=0,
+                    carcass_board=host.carcass_board, exterior_board=host.exterior_board,
+                    back_board=host.back_board, panel=spec)
+    x, _y, z = default_offsets(job, panel, host, std, job.materials)
+    spec.at_x, spec.at_y, spec.at_z = x, -int(std.exposed_extra), z
+    return panel
+
+
+def attached_box(job, panel, std: Standard = None, materials: dict = None):
+    """An attached panel's world footprint and height span, or None."""
+    std = job.std if std is None else std
+    materials = job.materials if materials is None else materials
+    p = attached_placement(job, panel, std, materials)
+    if p is None or job.room is None:
+        return None
+    g = geometry(panel, std, materials)
+    return cabinet_footprint(job.room, p, panel, std, materials), _z_span(panel, p, g, std)
+
+
+def attached_carcass_overlaps(job, std: Standard = STANDARD) -> list:
+    """(panel, host) for every attached panel that cuts INTO its own cabinet's
+    carcass — overlapping it, not merely touching. A WARNING: the panel is cut
+    and costed wherever it stands, and how far it laps the carcass is the
+    fitter's business; it does not block the export (spec B6)."""
+    rm = job.room
+    if rm is None:
+        return []
+    out = []
+    for cab in job.cabinets:
+        if not cab.is_attached:
+            continue
+        host = host_of(job, cab)
+        box = attached_box(job, cab, std, job.materials)
+        if host is None or box is None:
+            continue
+        hp = placement_for(job, host.number)
+        hg = geometry(host, std, job.materials)
+        hz = _z_span(host, hp, hg, std)
+        fp, zs = box
+        if zs[0] >= hz[1] or hz[0] >= zs[1]:
+            continue
+        if polygons_overlap(fp, cabinet_footprint(rm, hp, host, std, job.materials)):
+            out.append((cab.number, host.number))
+    return out
+
+
+def attached_extent(job, host, hp, hg, std: Standard = STANDARD):
+    """(x0, x1) along the wall that a cabinet and its attached panels take up
+    at carcass height — what a run's gap is measured from. Only a panel level
+    with the carcass counts: a bulkhead attached above a base unit is not in
+    its run. The carcass alone when nothing is attached, so no existing job
+    moves."""
+    x0, x1 = hp.x, hp.x + hg.width
+    hz = _z_span(host, hp, hg, std)
+    for pan in attached_panels(job, host.number):
+        p = attached_placement(job, pan, std, job.materials)
+        if p is None or p.wall != hp.wall:
+            continue
+        g = geometry(pan, std, job.materials)
+        zs = _z_span(pan, p, g, std)
+        if zs[0] >= hz[1] or hz[0] >= zs[1]:
+            continue
+        x0, x1 = min(x0, p.x), max(x1, p.x + g.width)
+    return x0, x1
 
 
 LAYERS = ("base", "wall", "tall")
@@ -1652,9 +1872,24 @@ def overlaps(job, std: Standard = STANDARD) -> List[Overlap]:
         g = geometry(cab, std, job.materials)
         items.append((cab, p, g, lay, cabinet_footprint(rm, p, cab, std, job.materials),
                       _z_span(cab, p, g, std)))
+    # An ATTACHED panel is part of its cabinet's geometry (spec B6): standing
+    # in another cabinet is the same critical as the carcass standing there.
+    # Against its OWN cabinet it is `attached_carcass_overlaps`' warning, and
+    # against another panel `panel_clashes`' — neither is repeated here.
+    for cab, p in placed_panels(job):
+        if not cab.is_attached or p.wall not in wall_ids:
+            continue
+        g = geometry(cab, std, job.materials)
+        items.append((cab, p, g, "panel", cabinet_footprint(rm, p, cab, std, job.materials),
+                      _z_span(cab, p, g, std)))
     out = []
     for i, (a, pa, ga, la, fa, za) in enumerate(items):
-        for b, pb, gb, _lb, fb, zb in items[i + 1:]:
+        for b, pb, gb, lb, fb, zb in items[i + 1:]:
+            if a.is_panel and b.is_panel:
+                continue                           # panel_clashes' warning
+            if a.is_panel and a.attached_to == b.number or \
+                    b.is_panel and b.attached_to == a.number:
+                continue                           # attached_carcass_overlaps' warning
             if za[0] >= zb[1] or zb[0] >= za[1]:
                 continue                           # they pass at different heights
             if not polygons_overlap(fa, fb):
@@ -1665,7 +1900,8 @@ def overlaps(job, std: Standard = STANDARD) -> List[Overlap]:
             else:
                 along = 0          # not one stretch of one wall — nothing to measure "along"
                 wall = f"{pa.wall}/{pb.wall}"
-            out.append(Overlap(a=a.number, b=b.number, wall=wall, layer=run_key(la), mm=along))
+            layer = run_key(lb if a.is_panel else la)
+            out.append(Overlap(a=a.number, b=b.number, wall=wall, layer=layer, mm=along))
     return out
 
 
@@ -1691,7 +1927,10 @@ def _on_wall(job, wall_id: str, std: Standard, exclude: int = None):
         g = geometry(cab, std, mats)
         out.append((cab, p, g, lay, _z_span(cab, p, g, std)))
     for cab, p in placed_panels(job):
-        if p.wall != wall_id or cab.number == exclude:
+        # A cabinet's own attached panels move with it, so they are no more a
+        # thing for it to come to rest against than its own sides are.
+        if p.wall != wall_id or cab.number == exclude or \
+                (exclude is not None and cab.attached_to == exclude):
             continue
         g = geometry(cab, std, mats)
         out.append((cab, p, g, "panel", _z_span(cab, p, g, std)))
@@ -2194,6 +2433,12 @@ def clashes(job, std: Standard = STANDARD) -> List[Clash]:
     out: List[Clash] = []
 
     geoms = {cab.number: geometry(cab, std) for cab, _p, _l in items}
+    attached = []
+    for pan, pp in placed_panels(job):
+        if pan.is_attached and pp.wall in {w.id for w in rm.walls}:
+            pg = geometry(pan, std, job.materials)
+            attached.append((pan, cabinet_footprint(rm, pp, pan, std, job.materials),
+                             _z_span(pan, pp, pg, std)))
     for cab, p, _lay in items:
         z0 = carcass_z(cab, p, std)          # on its legs, if it stands on the floor
         zt = (z0, z0 + geoms[cab.number].height)
@@ -2212,6 +2457,15 @@ def clashes(job, std: Standard = STANDARD) -> List[Clash]:
                     continue                      # they pass at different heights
                 if polygons_overlap(env, cabinet_footprint(rm, op, other, std)):
                     out.append(Clash(cab.number, kind, f"cabinet {other.number}"))
+            # An attached panel is part of its cabinet's geometry (spec B6), its
+            # own cabinet's included: a door sweeping into an end panel that
+            # stands proud of it is a real foul. Touching is clear, as ever.
+            for pan, fp, zs in attached:
+                if zt[0] >= zs[1] or zs[0] >= zt[1]:
+                    continue
+                if polygons_overlap(env, fp):
+                    out.append(Clash(cab.number, kind,
+                                     f"panel {pan.number} on cabinet {pan.attached_to}"))
             for i, w in enumerate(rm.walls):
                 if w.id == p.wall:
                     continue
@@ -2274,7 +2528,11 @@ def panel_clashes(job, std: Standard = STANDARD) -> List[PanelClash]:
 
     out = []
     for i, (cab, p, g, fp, zs) in enumerate(mine):
-        against = list(boxes)
+        # An ATTACHED panel against a carcass is not this list's: its own
+        # cabinet is `attached_carcass_overlaps`' warning and any other
+        # cabinet is `overlaps`' critical (spec B6). Against another panel and
+        # across an opening it is reported here like any panel.
+        against = [] if cab.is_attached else list(boxes)
         for other, _op, _og, ofp, ozs in mine[i + 1:]:
             against.append((f"panel {other.number}", ofp, ozs))
         for what, ofp, ozs in against:
@@ -2674,6 +2932,15 @@ def above_ceiling(job, std: Standard = STANDARD) -> List[Tuple[int, int, int]]:
         top = carcass_z(cab, p, std) + geometry(cab, std).height
         if top > rm.ceiling:
             out.append((cab.number, top, rm.ceiling))
+    # An attached panel is part of its cabinet's geometry (spec B6): one that
+    # runs up past the ceiling cannot be fitted any more than the carcass
+    # could. A standalone panel is not compared — it stays exactly as it was.
+    for cab, p in placed_panels(job):
+        if not cab.is_attached:
+            continue
+        top = carcass_z(cab, p, std) + geometry(cab, std, job.materials).height
+        if top > rm.ceiling:
+            out.append((cab.number, top, rm.ceiling))
     return out
 
 
@@ -2733,32 +3000,35 @@ def gaps(job, std: Standard = STANDARD) -> List[Gap]:
     runs: Dict[Tuple[str, str], list] = {}
     for cab, p, lay in placed(job):
         if p.wall in wall_ids:
-            runs.setdefault((p.wall, run_key(lay)), []).append((p.x, cab, geometry(cab, std)))
+            g = geometry(cab, std)
+            # the cabinet's reach along the wall includes an attached panel
+            # level with its carcass (spec B6: footprint) — an end panel closes
+            # the gap to the wall by its own thickness
+            x0, x1 = attached_extent(job, cab, p, g, std)
+            runs.setdefault((p.wall, run_key(lay)), []).append((x0, cab, g, x1))
     for cab, p, lay in placed(job):
         shadow = corner_shadow(rm, cab, p, std)
         if shadow is None:
             continue
         next_id, at, width, depth = shadow
         runs.setdefault((next_id, run_key(lay)), []).append(
-            (at, cab, _shadow_geometry(cab, width, depth, std)))
+            (at, cab, _shadow_geometry(cab, width, depth, std), at + width))
 
     out: List[Gap] = []
     for (wall_id, lay), items in sorted(runs.items()):
         items.sort(key=lambda t: t[0])
         w = _wall(rm, wall_id)
         before_corner, after_corner = _corner_indices(rm, wall_ids.index(wall_id))
-        geoms = {c.number: g for _, c, g in items}
+        geoms = {c.number: g for _, c, g, _e in items}
 
         edges = []
-        first_x, first_cab, _ = items[0]
+        first_x, first_cab, _, _ = items[0]
         if first_x > 0:
             edges.append((None, first_cab, 0, first_x, _deviation(rm, before_corner)))
-        for (x0, c0, g0), (x1, c1, _g1) in zip(items, items[1:]):
-            end0 = x0 + g0.width
+        for (x0, c0, g0, end0), (x1, c1, _g1, _e1) in zip(items, items[1:]):
             if x1 > end0:
                 edges.append((c0, c1, end0, x1 - end0, 0.0))
-        last_x, last_cab, last_g = items[-1]
-        end = last_x + last_g.width
+        last_x, last_cab, last_g, end = items[-1]
         if w.length > end:
             edges.append((last_cab, None, end, w.length - end,
                           _deviation(rm, after_corner)))

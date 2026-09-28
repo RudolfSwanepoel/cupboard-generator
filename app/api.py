@@ -37,6 +37,8 @@ from cabinetgen.render import (elevation_svg, pictures_drawn, plan_svg,
                                wall_elevation_svg)
 from cabinetgen import scene as SCENE
 from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout,
+                             attach_offsets, attached_panels, attached_placement,
+                             cabinet_by_number, host_of, new_attached_panel,
                              arm_shelf_length, arm_shelf_max_depth,
                              blind_door_width, blind_opening,
                              blind_panel_height, blind_spans, carcass_z,
@@ -49,7 +51,8 @@ from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout,
                              rectangular, runs as room_runs, snap_points,
                              y_snap_points, z_snap_points)
 from cabinetgen.standard import STANDARD
-from cabinetgen.store import (job_from_dict, job_to_dict, load, next_number,
+from cabinetgen.store import (cabinet_from_dict, cabinet_to_dict, job_from_dict,
+                              job_to_dict, load, next_number, placement_to_dict,
                               room_from_dict, room_to_dict, save)
 from cabinetgen.validate import (ACCEPTABLE, ALLOWED_EDGE, BOARD_GUIDELINE,
                                  blocking, fingerprint, lapsed_acceptances,
@@ -242,7 +245,25 @@ def _panel_info(job, cab):
         # own words, so the browser never works the grain rule out for itself
         "length_is": along if p.grain else ("a" if spec.a >= spec.b else "b"),
         "thickness": material_thickness(job.materials, spec.board),
+        # Attached to a cabinet (28 September 2026): the link, the three typed
+        # offsets, whether the link resolves, and where the engine puts the
+        # panel as a result — the derived placement, read back, never worked
+        # out in the browser. None throughout on a standalone panel.
+        "attached_to": spec.attached_to,
+        "at_x": int(spec.at_x or 0), "at_y": int(spec.at_y or 0), "at_z": int(spec.at_z or 0),
+        "host_ok": host_of(job, cab) is not None if spec.attached_to is not None else None,
+        "placed_at": _placed_at(job, cab),
     }
+
+
+def _placed_at(job, cab):
+    """An attached panel's derived placement, for the editor's readout."""
+    if not cab.is_attached:
+        return None
+    p = attached_placement(job, cab)
+    if p is None:
+        return None
+    return {"wall": p.wall, "x": p.x, "y": p.y, "z": p.z}
 
 
 def _geometry_info(job, cab, std):
@@ -348,7 +369,17 @@ def _geometry_info(job, cab, std):
             # An independent panel: what it is, and the line it cuts. Absent on
             # everything else, which is how the editor knows what to show.
             "is_panel": cab.is_panel,
-            "panel": _panel_info(job, cab) if cab.is_panel else None}
+            "panel": _panel_info(job, cab) if cab.is_panel else None,
+            # The panels fixed to this cabinet, in job order (28 September 2026),
+            # each with the line it cuts, so the editor can list them.
+            "attached": [] if cab.is_panel else
+                        [{"number": q.number, "orientation": q.panel_spec.orientation,
+                          "board": q.panel_spec.board,
+                          "a": q.panel_spec.a, "b": q.panel_spec.b,
+                          "at_x": q.panel_spec.at_x, "at_y": q.panel_spec.at_y,
+                          "at_z": q.panel_spec.at_z,
+                          "label": panel_of(q, job.materials).label}
+                         for q in attached_panels(job, cab.number)]}
 
 
 
@@ -1553,6 +1584,13 @@ def drag(payload):
     cab = next((c for c in job.cabinets if c.number == number), None)
     if cab is None or job.room is None:
         return {"ok": False, "error": "no such cabinet, or the job has no room"}
+    if cab.is_attached:
+        # It stands where its cabinet puts it. Moving it is moving the cabinet,
+        # or typing its offsets; a drag of its own has nothing to write to.
+        return {"ok": False, "attached": cab.attached_to,
+                "error": f"panel {number} is attached to cabinet {cab.attached_to} and "
+                         f"moves with it \u2014 drag cabinet {cab.attached_to}, or type the "
+                         f"panel's offsets in Panel design"}
     here = placement_for(job, number)
     # A panel's third extent is its board's thickness, so the boards are read:
     # without them a dragged panel would be measured against the house records.
@@ -1694,8 +1732,123 @@ def support_reenter(payload):
                       for r in rows]}
 
 
+def support_defaults(payload):
+    """The support rows a NEW cabinet starts with, for its kind
+    (`Cabinet.default_supports`, ruled 28 September 2026): base Front + Top
+    Rear + 2 Backs, wall 3 Backs, tall 4, a blind corner by its kind, a mitre
+    or an ell none. Only the browser's "new cabinet" path and a kind change
+    on rows still at these defaults ask; nothing here touches a stored row."""
+    job, cab = _cabinet_of(payload)
+    return {"ok": True, "rows": [asdict(r) for r in cab.default_supports(job.materials)]}
+
+
+# --- attached panels (28 September 2026) ---------------------------------------
+
+def _panel_reply(job, panel):
+    """One panel's record and index, as the browser writes it back."""
+    return {"index": job.cabinets.index(panel), "number": panel.number,
+            "panel": cabinet_to_dict(panel)["panel"]}
+
+
+def panel_new_attached(payload):
+    """A new panel on cabinet `index` — "+ Panel on this cabinet". The engine
+    gives it its number (the next free one, in the same series as everything
+    else), its defaults (`room.new_attached_panel`: an end panel off the
+    cabinet's own geometry) and its place; the browser appends it and works
+    out nothing."""
+    job, host = _cabinet_of(payload)
+    if host.is_panel:
+        return {"ok": False, "error": "a panel cannot be attached to another panel"}
+    panel = new_attached_panel(job, host, next_number(job))
+    return {"ok": True, "cabinet": cabinet_to_dict(panel), "number": panel.number}
+
+
+def panel_attach(payload):
+    """Attach panel `cabinet` to cabinet `to`. Its offsets are worked out from
+    where it stands now (`room.attach_offsets`) so it does not jump, and its own
+    placement record is dropped — from here on its place is derived. The number
+    does not change. Nothing is written; the browser applies the reply."""
+    job = _job(payload)
+    panel = cabinet_by_number(job, int(payload["cabinet"]))
+    host = cabinet_by_number(job, int(payload["to"]))
+    if panel is None or not panel.is_panel:
+        return {"ok": False, "error": "no such panel"}
+    if host is None or host.is_panel or host.number == panel.number:
+        return {"ok": False, "error": "a panel attaches to a cabinet, not to a panel"}
+    had_place = placement_for(job, panel.number) is not None and not panel.is_attached
+    x, y, z = attach_offsets(job, panel, host)
+    spec = panel.panel_spec
+    spec.attached_to, spec.at_x, spec.at_y, spec.at_z = host.number, x, y, z
+    panel.panel = spec
+    return dict(_panel_reply(job, panel), ok=True, to=host.number, kept_place=had_place,
+                placed_at=_placed_at(job, panel))
+
+
+def panel_detach(payload):
+    """Detach one panel (`cabinet`) or every panel on a cabinet (`host`) —
+    the "No" of "Also delete its N attached panels?". Each becomes a standalone
+    panel standing exactly where it stands now: its derived placement is handed
+    back as the record to store, or none if its cabinet was never placed. The
+    numbers do not change."""
+    job = _job(payload)
+    if "host" in payload:
+        panels = attached_panels(job, int(payload["host"]))
+    else:
+        c = cabinet_by_number(job, int(payload["cabinet"]))
+        panels = [c] if c is not None and c.is_attached else []
+    out, places = [], []
+    for panel in panels:
+        here = attached_placement(job, panel)
+        spec = panel.panel_spec
+        spec.attached_to, spec.at_x, spec.at_y, spec.at_z = None, 0, 0, 0
+        panel.panel = spec
+        out.append(_panel_reply(job, panel))
+        if here is not None:
+            places.append(placement_to_dict(here))
+    return {"ok": True, "panels": out, "placements": places}
+
+
+def duplicate(payload):
+    """Copy the item at `index`, and every panel attached to it (spec B8): each
+    gets the next free number in the one series, the copied panels attach to
+    the copied cabinet at the same offsets, and nothing gets a placement — a
+    copy is put where it goes. The browser splices the copies in after the
+    original and works out no number."""
+    job = _job(payload)
+    i = int(payload.get("index") or 0)
+    if not 0 <= i < len(job.cabinets):
+        return {"ok": False, "error": "no such cabinet"}
+    src = job.cabinets[i]
+    copies = []
+
+    def clone(c, number):
+        d = cabinet_to_dict(c)
+        d["number"] = number
+        for q in d.get("bespoke") or []:
+            q["cabinet"] = number
+        fresh = cabinet_from_dict(d)
+        job.cabinets.append(fresh)       # so next_number sees it
+        copies.append(fresh)
+        return fresh
+
+    head = clone(src, next_number(job))
+    if not src.is_panel:
+        for pan in attached_panels(job, src.number):
+            if pan in copies:
+                continue
+            twin = clone(pan, next_number(job))
+            twin.panel.attached_to = head.number
+    return {"ok": True, "index": i + 1,
+            "cabinets": [cabinet_to_dict(c) for c in copies]}
+
+
 ROUTES = {
     "/api/defaults": defaults,
+    "/api/support-defaults": support_defaults,
+    "/api/panel-new-attached": panel_new_attached,
+    "/api/panel-attach": panel_attach,
+    "/api/panel-detach": panel_detach,
+    "/api/duplicate": duplicate,
     "/api/support-new": support_new,
     "/api/support-reenter": support_reenter,
     "/api/compute": compute,

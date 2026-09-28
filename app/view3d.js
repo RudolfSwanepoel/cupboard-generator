@@ -1554,7 +1554,8 @@ function updateList() {
   if (!rows) return;
   rows.innerHTML = V.payload.items.map((it) => {
     const d = it.dims || {};
-    const kind = it.panel ? "panel" : it.kind + (it.corner ? " " + it.corner : "");
+    const kind = it.panel ? (it.attached !== null && it.attached !== undefined ? `panel on ${it.attached}` : "panel")
+                          : it.kind + (it.corner ? " " + it.corner : "");
     const desc = it.placed ? `${d.width}×${d.height}×${d.depth}` : "not placed";
     const cls = ["row", it.number === V.sel ? "sel" : "", it.placed ? "" : "off",
                  V.hidden.has(it.number) ? "hidden3d" : ""].join(" ");
@@ -1792,6 +1793,8 @@ function updateHandles() {
   if (!grp || !room || !grp.visible) { requestRender(); return; }
   const item = grp.userData.item;
   if (!item.placed || !itemShown(item)) { requestRender(); return; }
+  // an attached panel stands where its cabinet puts it: no handles of its own
+  if (item.attached !== null && item.attached !== undefined) { requestRender(); return; }
   const wall = room.walls.find((w) => w.id === item.wall);
   if (!wall) { requestRender(); return; }
   const b = new THREE.Box3().setFromObject(grp);
@@ -1934,10 +1937,25 @@ function moveDrag(d, e) {
   const along = new THREE.Vector3(d.wall.dir[0], d.wall.dir[1], 0).multiplyScalar(dx);
   const out = new THREE.Vector3(d.wall.normal[0], d.wall.normal[1], 0).multiplyScalar(dy);
   d.grp.position.copy(along.add(out).setZ(zNow - zWas));              // room frame, in the root
+  attachedGroups(d.number).forEach((g) => g.position.copy(d.grp.position));   // they move with it
   if (V.handles) V.handles.position.copy(toRender(d.grp.position.x, d.grp.position.y, d.grp.position.z));
   const fig = d.axis === "x" ? `x ${d.at.x}` : d.axis === "y" ? `y ${d.at.y}` : `z ${d.at.z}`;
   status(`${d.item.number}: ${fig} mm${reason ? " · " + reason : ""}`);
   requestRender();
+}
+
+// The groups of the panels attached to a cabinet (28 September 2026): they are
+// carried along in the preview of its drag, and the drop's compute places them.
+function attachedGroups(number) {
+  const out = [];
+  if (!V.payload) return out;
+  V.payload.items.forEach((it) => {
+    if (it.attached === number) {
+      const g = V.groups.get(it.number);
+      if (g) out.push(g);
+    }
+  });
+  return out;
 }
 
 function endMoveDrag() {
@@ -1955,6 +1973,7 @@ function finishMove(d, cancelled) {
   window.removeEventListener("pointercancel", endMoveDrag);
   V.controls.enabled = true;
   d.grp.position.set(0, 0, 0);
+  attachedGroups(d.number).forEach((g) => g.position.set(0, 0, 0));
   if (V.handles) V.handles.position.set(0, 0, 0);
   const changed = d.at.x !== d.from.x || d.at.z !== d.from.z || d.at.y !== d.from.y;
   if (cancelled || !d.moved || !changed) { status(V.hint); requestRender(); return; }
