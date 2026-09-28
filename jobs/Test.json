@@ -480,38 +480,38 @@
       ],
       "drawers": [
         {
-          "face_height": 110,
+          "face_height": 192,
           "box_height": 90,
           "base": "board",
-          "mode": "share",
+          "mode": "fixed",
           "share": 1,
           "box_board": null,
           "face_board": null
         },
         {
-          "face_height": 165,
+          "face_height": 193,
           "box_height": 150,
           "base": "board",
-          "mode": "share",
-          "share": 1.5,
+          "mode": "fixed",
+          "share": 1,
           "box_board": null,
           "face_board": null
         },
         {
-          "face_height": 220,
-          "box_height": 200,
+          "face_height": 193,
+          "box_height": 141,
           "base": "board",
-          "mode": "share",
-          "share": 2,
+          "mode": "fixed",
+          "share": 1,
           "box_board": null,
           "face_board": null
         },
         {
-          "face_height": 276,
-          "box_height": 240,
+          "face_height": 193,
+          "box_height": 136,
           "base": "board",
-          "mode": "share",
-          "share": 2.5,
+          "mode": "fixed",
+          "share": 1,
           "box_board": null,
           "face_board": null
         }
@@ -1204,6 +1204,138 @@
       "face_a": null,
       "face_b": null,
       "corner_unit": null
+    },
+    {
+      "number": 15,
+      "width": 400,
+      "height": 780,
+      "depth": 570,
+      "kind": "base",
+      "back": "none",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "BROOKHILL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 2,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "WHITEMEL",
+          "kind": "pvc",
+          "cut_board": "WHITEMEL",
+          "type": "back",
+          "edges": [
+            "front",
+            "rear"
+          ]
+        }
+      ],
+      "supports": 0,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 0,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 1,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": false,
+      "door_boards": [],
+      "drawers": [
+        {
+          "face_height": 128,
+          "box_height": 84,
+          "base": "board",
+          "mode": "share",
+          "share": 1,
+          "box_board": null,
+          "face_board": null
+        },
+        {
+          "face_height": 192,
+          "box_height": 150,
+          "base": "board",
+          "mode": "share",
+          "share": 1.5,
+          "box_board": null,
+          "face_board": null
+        },
+        {
+          "face_height": 192,
+          "box_height": 150,
+          "base": "board",
+          "mode": "share",
+          "share": 1.5,
+          "box_board": null,
+          "face_board": null
+        },
+        {
+          "face_height": 259,
+          "box_height": 200,
+          "base": "board",
+          "mode": "share",
+          "share": 2,
+          "box_board": null,
+          "face_board": null
+        }
+      ],
+      "has_drawers": true,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "BROOKHILL",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": null,
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null,
+      "runner": "GELMAR45"
     }
   ],
   "loose": [],
@@ -1335,6 +1467,14 @@
       "z": 0,
       "flip": false,
       "layer": null
+    },
+    {
+      "cabinet": 15,
+      "wall": "B",
+      "x": 2248,
+      "z": 0,
+      "flip": false,
+      "layer": null
     }
   ],
   "acceptances": [
@@ -1344,5 +1484,31 @@
       "reason": "leg will be installed after tilt",
       "fingerprint": "height 2400 · depth 1000 · legs 100 · setback 50 · underside 100 · ceiling 2600"
     }
-  ]
+  ],
+  "runners": {
+    "GELMAR45": {
+      "id": "GELMAR45",
+      "name": "Gelmar 45 mm full-extension ball-bearing",
+      "supplier": "Gelmar",
+      "sku": "7011-7017",
+      "price": 0,
+      "type": "side-mount ball-bearing",
+      "height": 45,
+      "side_clearance": 13.5,
+      "rail_thickness": 12.7,
+      "lengths": [
+        300,
+        350,
+        400,
+        450,
+        500,
+        550,
+        600
+      ],
+      "extension": "full",
+      "capacity_kg": 35,
+      "lift": 5,
+      "setback": 2
+    }
+  }
 }
