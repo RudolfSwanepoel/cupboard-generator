@@ -96,14 +96,19 @@ legacy root `out/` and the root `snapshot-3d-step0*.json` files; loose files a
 pre-brief export left at the top of `output/<job>/` are also left where they
 are (only the three folders are retired).
 
-**`check_runners.py` fails 5 on `master` as pushed — live data, not code.**
-Commit f4d87b0 ("New drawer cupboard added to test") changed `jobs/Test.json`
-(cabinet 15 added with drawers, cabinet 4's drawers re-set so its criticals
-cleared, a `runners` key written) and `hardware.json` (Gelmar setback 3 -> 2),
-and the check pins all four against those live files. Identical failures on the
-tree before the output-folders work. The same lesson as
-`Test_Build_pre_library.json`: the fix is a frozen fixture, not a code change —
-awaiting Rudolf's word on whether setback 2 is the new ruling.
+**`check_runners.py` read live data — frozen (28 September 2026).** Commit
+f4d87b0 ("New drawer cupboard added to test") changed `jobs/Test.json` (cabinet
+15 added with drawers, cabinet 4's drawers re-set so its criticals cleared, a
+`runners` key written) and `hardware.json` (Gelmar setback 3 -> 2), and five
+checks pinned those live files. **Ruled by Rudolf: setback 2 is right, and a
+runner record in the library is a changeable setting** — so the catalogue check
+now pins the built-in `hardware.SEED` (still setback 3, as the brief ruled; it
+is only the fallback when the library has lost the record) and asks the live
+`hardware.json` only that the Gelmar record is there. The Test.json checks read
+`tools/fixtures/Test_drawers.json`, Test.json verbatim from the commit before
+f4d87b0 (cabinet 4 at faces 110 / 165 / 220 over boxes 90 / 150 / 200), and so
+does `ui_check_drawers.py --stage offset` (through `load_fixture`, as
+`ui_check_3d.py` does). The fourth time for this lesson.
 
 **Drawers, runners and supports (28 September 2026, brief
 `Claude outputs/drawers-runners-supports-brief-2026-09-28.md`, agreed with
@@ -230,7 +235,8 @@ against its OWN face:
 - The divider drag holds each face to its own box + its own offset
   (`split_pair(..., rise, bottom_rise)`, `/api/drawer-divider` with `above` /
   `below`).
-- Test.json (not edited): cabinet 4 at the default offsets — drawers 1-3
+- Test.json (not edited; frozen since as `tools/fixtures/Test_drawers.json`,
+  which is what the checks read): cabinet 4 at the default offsets — drawers 1-3
   `drawer-box-face` (1, 6 and 1 mm over), the top drawer still
   `support-drawer-foul`. Snapshot: only those three messages' wording moved.
   Pinned in `check_runners.py` `drawer_checks()`; `ui_check_drawers.py
@@ -1444,7 +1450,8 @@ tools/ui_check_restructure.py  the UI restructure in the running app (Playwright
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
                            Test_Build.json, Test_Panels.json (the cut-only panel
                            fixture) and Corner Unit Test.json since 28 September 2026,
-                           beside Test_Build_pre_library.json and Test_legacy_supports.json.
+                           beside Test_Build_pre_library.json and Test_legacy_supports.json;
+                           Test_drawers.json (Test.json before f4d87b0) for check_runners.
 tools/fixture_jobs.py      job_file(name): jobs/ for Test.json, tools/fixtures/ for the
                            rest. Every check and snapshot.py read job files through it.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare

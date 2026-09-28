@@ -4,11 +4,13 @@
 
 The drawers / runners / supports brief of 28 September 2026. Holds:
 
-  * Part 2 — the runner catalogue. `hardware.json` holds the Gelmar seed as
-    ruled (45 high, 13.5 a side, 12.7 rail, 300-600, full, 35 kg, lift 5,
-    setback 3); a job saved before the catalogue names no runner and is cut on
-    the built-in LEGACY record (350 / 450 / 500), so the October job and
-    Test.json cut exactly what they cut; the runner length is the longest on
+  * Part 2 — the runner catalogue. `hardware.json` holds the Gelmar record,
+    and the built-in seed is as ruled (45 high, 13.5 a side, 12.7 rail,
+    300-600, full, 35 kg, lift 5, setback 3) — the library's copy is a setting
+    Rudolf edits, so its values are not pinned; a job saved before the
+    catalogue names no runner and is cut on the built-in LEGACY record
+    (350 / 450 / 500), so the October job and Test.json as it stood then —
+    frozen as tools/fixtures/Test_drawers.json — cut exactly what they cut; the runner length is the longest on
     the record leaving runner_clearance behind; the box width is the opening
     less the clearance each side (Gelmar: 59 on the front, exactly the old
     deduct); selecting copies the record (price captured); the delete guard;
@@ -87,11 +89,14 @@ def catalogue():
     lib = H.load()
     g = H.find(lib, H.SEED_ID)
     check("hardware.json carries the Gelmar seed", g is not None, True)
-    if g:
-        check("  as ruled", (g.height, g.side_clearance, g.rail_thickness, g.lengths, g.extension,
-                             g.capacity_kg, g.lift, g.setback, g.type),
-              (45, 13.5, 12.7, [300, 350, 400, 450, 500, 550, 600], "full", 35, 5, 3,
-               "side-mount ball-bearing"))
+    # The SEED is what the brief ruled; the library's copy is a changeable
+    # setting (Rudolf set its setback to 2, 28 September 2026), so the live
+    # file is asked only that the record is there — never what it holds.
+    s = H.SEED
+    check("  the seed as ruled", (s.height, s.side_clearance, s.rail_thickness, s.lengths, s.extension,
+                                  s.capacity_kg, s.lift, s.setback, s.type),
+          (45, 13.5, 12.7, [300, 350, 400, 450, 500, 550, 600], "full", 35, 5, 3,
+           "side-mount ball-bearing"))
     raw = json.load(open(H.LIBRARY, encoding="utf-8"))
     check("  in a `runners` list, room left beside it for hinges and handles", isinstance(raw.get("runners"), list), True)
     check("the legacy record is 350 / 450 / 500, 13.5 a side, 45 high, lift 5, setback 3",
@@ -133,17 +138,17 @@ def legacy_holds():
     check("  its drawer sides are legacy lengths", all(n in (350, 450, 500) for n in sides), True)
     summary = summarise(OCT, P)
     check("  the benchmark total is R28,363.50", estimate_cost(OCT, summary)["total_incl_vat"], 28363.5)
-    test = load(job_file("Test"))
+    test = load(job_file("Test_drawers"))
     got = lines(test)
-    check("Test.json cabinets 4 and 7 are on legacy", sorted(c.number for c in test.cabinets if c.drawer_list and not c.runner), [4, 7])
+    check("Test_drawers.json cabinets 4 and 7 are on legacy", sorted(c.number for c in test.cabinets if c.drawer_list and not c.runner), [4, 7])
     check("  sides 500 (570 deep), fronts internal width - 59",
           sorted({(c, r, a, b) for c, _, r, a, b, _ in got if r in ("Drawer Side", "Drawer Front")}),
           sorted({(4, "Drawer Front", 400 - 32 - 59, b) for c, _, r, a, b, _ in got if c == 4 and r == "Drawer Front"} |
                  {(4, "Drawer Side", 500, b) for c, _, r, a, b, _ in got if c == 4 and r == "Drawer Side"} |
                  {(7, "Drawer Front", 350 - 32 - 59, b) for c, _, r, a, b, _ in got if c == 7 and r == "Drawer Front"} |
                  {(7, "Drawer Side", 500, b) for c, _, r, a, b, _ in got if c == 7 and r == "Drawer Side"}))
-    raw = json.load(open(job_file("Test"), encoding="utf-8"))
-    check("Test.json round-trips byte for byte (no runner, no runners key)",
+    raw = json.load(open(job_file("Test_drawers"), encoding="utf-8"))
+    check("Test_drawers.json round-trips byte for byte (no runner, no runners key)",
           json.dumps(job_to_dict(job_from_dict(raw)), indent=2, ensure_ascii=False)
           == json.dumps(raw, indent=2, ensure_ascii=False), True)
     check("  it writes no `runners` key", "runners" in job_to_dict(test), False)
@@ -453,10 +458,10 @@ def drawer_checks():
     got = issues(job_of(c), "drawer-box-face")
     check("an upper box raised to 400 in a 545 face: 150 + 400 runs past the top by 5",
           (len(got), got and "5 above the face top at 747" in got[0].message), (1, True))
-    test = load(job_file("Test"))
+    test = load(job_file("Test_drawers"))
     got = sorted((i.where, i.message.split(":")[0]) for i in validate(test, generate_job(test))
                  if i.check == "drawer-box-face")
-    check("Test.json cabinet 4 at default offsets (faces 110 / 165 / 220, boxes 90 / 150 / 200): drawers 1-3",
+    check("Test_drawers.json cabinet 4 at default offsets (faces 110 / 165 / 220, boxes 90 / 150 / 200): drawers 1-3",
           got, [("4", "drawer 1"), ("4", "drawer 2"), ("4", "drawer 3")])
     check("  and its top drawer is still support-foul", sorted(i.where for i in validate(test, generate_job(test))
                                                           if i.check == "support-drawer-foul"), ["4"])
@@ -581,7 +586,7 @@ def scene_3d():
     check("interior_parts carries them (the 3D's list)",
           {"drawer_side", "runner"} <= {q.role for q, _ in interior_parts(c, STANDARD, j.materials)}, True)
     import cabinetgen.room as RM
-    test = load(job_file("Test"))
+    test = load(job_file("Test_drawers"))
     walls = [w.id for w in test.room.walls]
 
     def drawings():
@@ -594,7 +599,7 @@ def scene_3d():
         without = drawings()
     finally:
         RM.drawer_parts = keep
-    check("Test.json: the plan and every wall elevation, Line and Finish, are the same with the "
+    check("Test_drawers.json: the plan and every wall elevation, Line and Finish, are the same with the "
           "boxes and runners taken out", [a == b for a, b in zip(with_boxes, without)], [True] * len(with_boxes))
 
 

@@ -82,6 +82,22 @@ def load_job(page, name):
     computed(page)
 
 
+def load_fixture(page, name):
+    """Open a FROZEN job from tools/fixtures/ exactly as Load would (the same
+    helper as ui_check_3d.py): read on the server side, former ids upgraded,
+    board details refreshed from the library, then handed to `adopt`."""
+    from fixture_jobs import job_file
+    from cabinetgen.store import load, job_to_dict
+    from app import api
+    job = load(job_file(name))
+    api.upgrade_former_ids(job)
+    api.refresh_from_library(job)
+    page.evaluate("(j) => adopt(j)", job_to_dict(job))
+    page.wait_for_function("() => S.job && S.res && S.job.name === %s" % json.dumps(job.name),
+                           timeout=15000)
+    computed(page)
+
+
 def computed(page):
     """Settle the edits: whatever compute the last one scheduled is run now and
     awaited, so what is read next is the answer to the job as it stands — no
@@ -362,7 +378,9 @@ def stage_offset(pw):
     browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
     errors = []
     ctx, page = new_page(browser, errors)
-    load_job(page, "Test")
+    # Test.json as it stood when this was ruled, frozen: the live file's
+    # cabinet 4 has since been re-set by Rudolf (commit f4d87b0).
+    load_fixture(page, "Test_drawers")
     select(page, 4)                          # faces 110 / 165 / 220 / 276, boxes 90 / 150 / 200 / 240
     page.wait_for_selector('#drawerbox input[data-dk="offset"]', timeout=5000)
     check("an Offset cell per drawer, blank = the default 21",
@@ -371,7 +389,7 @@ def stage_offset(pw):
     maxes = page.evaluate("() => [...document.querySelectorAll('#drawerbox [data-maxbox]')].map((x) => x.textContent)")
     check("beside each Box h, the tallest box its face takes: face less 21", maxes, ["≤89", "≤144", "≤199", "≤255"])
     crit = lambda cid: page.evaluate(f"() => S.res.issues.filter((i) => i.where === '4' && i.check === {json.dumps(cid)}).length")
-    check("at the defaults, drawers 1-3 are outside their faces (Test.json not edited)", crit("drawer-box-face"), 3)
+    check("at the defaults, drawers 1-3 are outside their faces (Test_drawers.json)", crit("drawer-box-face"), 3)
     page.fill('#drawerbox input[data-d="1"][data-dk="box_height"]', "144")
     page.dispatch_event('#drawerbox input[data-d="1"][data-dk="box_height"]', "change")
     computed(page)
