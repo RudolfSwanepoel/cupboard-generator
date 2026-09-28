@@ -474,6 +474,21 @@ board; a swap moves every panel; the editors refresh themselves; deleting a
 project moves its files to `jobs/_deleted/`; grain is shown in the swap step
 and on the cut list.
 
+**The checks read frozen fixtures, and only `Test.json` live (28 September
+2026).** Rudolf deleted every project but Test.json in the app (commit 2673ad8
+— the files went to `jobs/_deleted/`, as Delete does), and `check_boards`,
+`check_library`, `check_scene` and `check_panels` died while `check_accept`,
+`check_attached`, `check_edging`, `check_supports` and `snapshot.py` silently
+skipped the jobs they could not find. The same lesson as
+`Test_Build_pre_library.json`, learnt a third time: **a check never reads live
+workshop data.** `Test_Build.json`, `Test_Panels.json` and `Corner Unit
+Test.json` are frozen under `tools/fixtures/` now, taken verbatim from the
+tree before the delete, and every check, `snapshot.py` and `ui_check_3d.py`
+(which loads them through `adopt`, exactly as Load would, since the app's Load
+cannot list them) read them through `tools/fixture_jobs.job_file`. `jobs/`
+holds Test.json and the benchmark; `api.FIXTURE_JOBS` names Test.json alone.
+Benchmark, every check and the snapshot unchanged.
+
 **Part D (independent panels) is complete — D1 to D9, every one passing, and
 exercised in the running app rather than only in Python.** Kind → Panel swaps
 the cupboard sections for Panel design and says what stops being cut first; all
@@ -1080,9 +1095,11 @@ app/view3d.js              the 3D view: a module loaded the first time a 3D view
                            Cabinets tab's single-cabinet one
 app/vendor/three/          three.js 0.186.0 — three.module.js, three.core.js, LICENSE
 app/vendor/camera-controls/  camera-controls 3.1.2 — camera-controls.module.js, LICENSE
-jobs/                      job definitions. wardrobe_oct2025.py is the fixture.
-                           Test_Panels.json is the cut-only panel fixture;
-                           Test.json's cabinet 8 is the PLACED one.
+jobs/                      the live job folder: Test.json (the working file; its
+                           cabinet 8 is the PLACED panel fixture) and
+                           wardrobe_oct2025.py, the benchmark. Nothing else the
+                           checks read lives here — see tools/fixtures/.
+                           _deleted/ is the app's bin.
 tools/regen_check.py       the regression check above
 tools/check_examples.py    verifies the worked examples in docstrings are true
 tools/check_room.py        room geometry: closure, corners, to_world
@@ -1111,6 +1128,11 @@ tools/ui_check_attached.py attached panels in the running app (Playwright)
 tools/ui_check_restructure.py  the UI restructure in the running app (Playwright),
                            with screenshots into output/ui_check_restructure/
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
+                           Test_Build.json, Test_Panels.json (the cut-only panel
+                           fixture) and Corner Unit Test.json since 28 September 2026,
+                           beside Test_Build_pre_library.json and Test_legacy_supports.json.
+tools/fixture_jobs.py      job_file(name): jobs/ for Test.json, tools/fixtures/ for the
+                           rest. Every check and snapshot.py read job files through it.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
 docs/RULES.md             where each rule came from and what it cost to learn
 docs/ROOM-LAYOUT-SPEC.md  the room / plan / 3D build spec and its phasing
@@ -1493,8 +1515,9 @@ Load, the fixture button and closing the window all ask first.
 picking the wrong one has no undo otherwise; a second delete of the same name is
 stamped rather than overwriting the first. The job **open on screen** cannot be
 deleted — that would leave the editor with nowhere to save back to — and
-`Test.json` and `Test_Build.json` say what they are before they go, because
-`regen_check` and half the `check_*` scripts run against them.
+`Test.json` says what it is before it goes, because half the `check_*` scripts
+run against it. Every other job the checks read is frozen under
+`tools/fixtures/`, so deleting a project can no longer break a check.
 
 ### Grain is listed, never judged
 

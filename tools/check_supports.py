@@ -38,6 +38,7 @@ import os
 import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+from fixture_jobs import job_file  # noqa: E402  (jobs/ for Test.json, tools/fixtures/ for the rest)
 sys.path.insert(0, ROOT)
 
 from app import api                                                      # noqa: E402
@@ -213,7 +214,7 @@ def main():
 
     print("\nlegacy rows load, save and cut unchanged")
     for name in ("Test", "Test_Build", "Corner Unit Test", "Test_Panels"):
-        path = os.path.join(ROOT, "jobs", name + ".json")
+        path = job_file(name)
         if not os.path.exists(path):
             continue
         raw = open(path, encoding="utf-8").read()
@@ -296,7 +297,7 @@ def main():
           (up["Front"].outline, up["Front"].z0, up["Front"].z1), (p.outline, p.z0, p.z1))
 
     print("\nthe 3D scene: a part per rail and per shelf, tied to its line; nothing else moves")
-    job = load(os.path.join(ROOT, "jobs", "Test.json"))
+    job = load(job_file("Test"))
     s = SC.build(job)
     inside = [q for it in s["items"] for q in it["parts"] if q["role"] in ("support", "shelf")]
     check("Test.json: supports and shelves are in the scene", len(inside) > 0, True)

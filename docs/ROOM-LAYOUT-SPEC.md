@@ -409,7 +409,7 @@ Touching is clear, so a flush bulkhead raises nothing.
 `room.free_x` puts a newly-placed cabinet or panel clear of what is already on
 that wall instead of at 0 mm, off the same candidates a drag reads.
 
-`jobs/Test_Panels.json` is the cut-only fixture; `tools/check_panels.py` is the
+`tools/fixtures/Test_Panels.json` is the cut-only fixture (in `jobs/` until 28 September 2026); `tools/check_panels.py` is the
 check, and it builds its own placed bulkhead in memory rather than reading a job
 file — a check never reads live workshop data to pin a fact.
 

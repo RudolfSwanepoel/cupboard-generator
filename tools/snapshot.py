@@ -33,6 +33,7 @@ ap.add_argument("--allow", default="", help="comma list of keys allowed to diffe
                 "panels,issues,summary,total,svg")
 args = ap.parse_args()
 sys.path.insert(0, args.repo)
+from fixture_jobs import job_file  # noqa: E402  (jobs/ for Test.json, tools/fixtures/ for the rest)
 
 from cabinetgen.engine import generate_job                       # noqa: E402
 from cabinetgen.validate import validate                         # noqa: E402
@@ -57,7 +58,7 @@ def keyed(panels):
 def take():
     jobs = {"oct2025": OCT}
     for n in ("Test", "Test_Build"):
-        path = os.path.join(args.repo, "jobs", n + ".json")
+        path = job_file(n, args.repo)
         if os.path.exists(path):
             jobs[n] = load(path)
     snap = {}

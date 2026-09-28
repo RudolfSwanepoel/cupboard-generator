@@ -6326,8 +6326,9 @@ $("save").addEventListener("click", async () => {
 // Deleting a saved job. It is moved to jobs/_deleted/, never unlinked: a job is
 // a quote somebody may want back, and "I picked the wrong one" has no undo
 // otherwise. The job on screen cannot be deleted — that would leave the editor
-// showing something with nowhere to save it back to — and the two fixture jobs
-// say what they are before they go, because the checks run against them.
+// showing something with nowhere to save it back to — and Test.json says what
+// it is before it goes, because the checks run against it (every other job the
+// checks read is frozen under tools/fixtures/, out of the app's reach).
 $("jobdel").addEventListener("click", async () => {
   const name = $("joblist").value;
   if (!name) { toast("No saved job selected.", true); return; }

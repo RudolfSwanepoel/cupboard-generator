@@ -33,6 +33,7 @@ import re
 import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+from fixture_jobs import job_file  # noqa: E402  (jobs/ for Test.json, tools/fixtures/ for the rest)
 sys.path.insert(0, ROOT)
 
 from cabinetgen import boards as B                                       # noqa: E402
@@ -298,9 +299,9 @@ def main():
 
     # ---- the whole fixture -------------------------------------------------
     print("\nD9 — the fixture, end to end")
-    path = os.path.join(ROOT, "jobs", "Test_Panels.json")
+    path = job_file("Test_Panels")
     if not os.path.exists(path):
-        check("jobs/Test_Panels.json is there", False, True)
+        check("tools/fixtures/Test_Panels.json is there", False, True)
     else:
         fix = load(path)
         panels = generate_job(fix)
@@ -545,7 +546,7 @@ def main():
     # one written before panels existed.
     print("\nand the two fixed job files round-trip, panel or no panel")
     for name, has_panel in (("Test", True), ("Test_Build", False)):
-        path = os.path.join(ROOT, "jobs", name + ".json")
+        path = job_file(name)
         if not os.path.exists(path):
             check(f"{name}.json is there", False, True)
             continue

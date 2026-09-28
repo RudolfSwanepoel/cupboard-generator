@@ -189,7 +189,8 @@ for rec in _records(lib_raw):
 
 print()
 print("saved jobs draw whatever they carry (reported, never failed)")
-for path in sorted(glob.glob(os.path.join(ROOT, "jobs", "*.json"))):
+for path in sorted(glob.glob(os.path.join(ROOT, "jobs", "*.json"))
+                   + glob.glob(os.path.join(ROOT, "tools", "fixtures", "*.json"))):
     raw = _read(path)
     if raw is None:
         continue

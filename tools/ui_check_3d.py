@@ -25,6 +25,8 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+from fixture_jobs import job_file  # noqa: E402  (jobs/ for Test.json, tools/fixtures/ for the rest)
 
 try:
     from playwright.sync_api import sync_playwright
@@ -58,11 +60,29 @@ def check_true(label, got, detail=""):
 
 def load_job(page, name):
     """Open a saved job by name, through the app's own controls."""
-    page.wait_for_function("() => document.querySelectorAll('#joblist option').length > 1",
-                           timeout=15000)
+    # the option for THIS job, not "more than one": jobs/ holds Test.json alone since 28 September 2026
+    page.wait_for_function("() => [...document.querySelectorAll('#joblist option')].some((o) => o.value === %s)"
+                           % json.dumps(name + ".json"), timeout=15000)
     page.select_option("#joblist", name + ".json")
     page.click("#load")
     page.wait_for_function("() => S.job && S.res && S.job.name === %s" % json.dumps(name),
+                           timeout=15000)
+
+
+def load_fixture(page, name):
+    """Open a FROZEN job from tools/fixtures/ — which the app's own Load cannot
+    list, by design — exactly as Load would: the file read on the server side,
+    its former board ids upgraded and its board details refreshed from the
+    library, then handed to `adopt`, the one path every loaded job goes down.
+    Test_Panels and Corner Unit Test moved here from jobs/ on 28 September 2026."""
+    sys.path.insert(0, ROOT)
+    from cabinetgen.store import load, job_to_dict
+    from app import api
+    job = load(job_file(name))
+    api.upgrade_former_ids(job)
+    api.refresh_from_library(job)
+    page.evaluate("(j) => adopt(j)", job_to_dict(job))
+    page.wait_for_function("() => S.job && S.res && S.job.name === %s" % json.dumps(job.name),
                            timeout=15000)
 
 
@@ -898,7 +918,7 @@ def stage_extras(pw):
 
     # A blind corner, on an in-memory copy of Corner Unit Test (Q2a): cabinet 2
     # becomes a blind unit; nothing is saved.
-    load_job(page, "Corner Unit Test")
+    load_fixture(page, "Corner Unit Test")
     edit_and_wait_or_open = None
     page.evaluate("""() => { const c = S.job.cabinets.find((x) => x.number === 2);
       c.corner_style = 'blind'; c.blind_width = 500; c.width = 1000; c.depth = 560; c.doors = 1;
@@ -932,7 +952,7 @@ def stage_extras(pw):
     check("the blind unit's height in 3D is H on its legs", (b2["min"][2], b2["max"][2]), (100, 890))
 
     # Test_Panels: no room — the Run's layout, cabinets only (Q3a)
-    load_job(page, "Test_Panels")
+    load_fixture(page, "Test_Panels")
     page.click('nav [data-tab="view3d"]')
     page.wait_for_function("() => !S.sceneStale", timeout=20000)
     settle(page)
@@ -1029,9 +1049,11 @@ def stage_room(pw):
     page.evaluate("() => { delete S.job.placements; }")   # as a job file saved without the key arrives
     add_room_and_look("new job")
 
-    # 2. the two files on disk saved without a placements key
-    for name in ("Test_Panels", "untitled"):
-        load_job(page, name)
+    # 2. a file saved without a placements key (Test_Panels has no room; the
+    #    untitled.json this also read has carried a room since 27 September and
+    #    was skipped, and is in jobs/_deleted now)
+    for name in ("Test_Panels",):
+        load_fixture(page, name)
         if page.evaluate("() => !!S.job.room"):
             print(f"      {name} has a room on disk now; skipped")
             continue

@@ -29,6 +29,7 @@ import os
 import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+from fixture_jobs import job_file  # noqa: E402  (jobs/ for Test.json, tools/fixtures/ for the rest)
 sys.path.insert(0, ROOT)
 
 # A job as it was written BEFORE the board library existed: bare-string
@@ -275,7 +276,7 @@ def main() -> int:                                                  # noqa: C901
     # (re-saved under BROOKHILL with GREY cabinets, 18 Sept 2026), so nothing
     # pins its contents. Test_Build.json is the untouched pre-library DECOR job.
     for name, want in (("Test_Build.json", 27),):
-        j = load(os.path.join(ROOT, "jobs", name))
+        j = load(job_file(name))
         check(f"{name} generates the same number of panel lines",
               len(generate_job(j)), want)
         check(f"  and its tapes are unchanged",

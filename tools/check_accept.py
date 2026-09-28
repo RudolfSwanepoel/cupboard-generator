@@ -21,6 +21,7 @@ import os
 import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+from fixture_jobs import job_file  # noqa: E402  (jobs/ for Test.json, tools/fixtures/ for the rest)
 sys.path.insert(0, ROOT)
 
 from app import api                                                         # noqa: E402
@@ -63,7 +64,7 @@ def main():
     print("every critical carries a stable check id")
     jobs = []
     for name in ("Test.json", "Test_Build.json", "Test_Panels.json", "Corner Unit Test.json"):
-        path = os.path.join(ROOT, "jobs", name)
+        path = job_file(name)
         if os.path.exists(path):
             jobs.append(load(path))
     jobs.append(tall_job())
@@ -145,7 +146,7 @@ def main():
     check("one acceptance, one key", len(d["acceptances"]), 1)
     check("and it round-trips", job_to_dict(job_from_dict(json.loads(json.dumps(d)))), d)
     for name in ("Test.json", "Test_Build.json", "Test_Panels.json", "Corner Unit Test.json"):
-        path = os.path.join(ROOT, "jobs", name)
+        path = job_file(name)
         if not os.path.exists(path):
             continue
         with open(path, encoding="utf-8") as fh:

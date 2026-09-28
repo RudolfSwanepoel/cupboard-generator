@@ -47,7 +47,9 @@ def check(label, got, want):
 
 
 def load_job(page, name):
-    page.wait_for_function("() => document.querySelectorAll('#joblist option').length > 1", timeout=15000)
+    # the option for THIS job, not "more than one": jobs/ holds Test.json alone since 28 September 2026
+    page.wait_for_function("() => [...document.querySelectorAll('#joblist option')].some((o) => o.value === %s)"
+                           % json.dumps(name + ".json"), timeout=15000)
     page.select_option("#joblist", name + ".json")
     page.click("#load")
     page.wait_for_function("() => S.job && S.res && S.job.name === %s" % json.dumps(name), timeout=15000)

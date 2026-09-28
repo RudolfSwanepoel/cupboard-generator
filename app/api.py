@@ -1401,10 +1401,12 @@ def job_list(payload):
     return {"ok": True, "jobs": names}
 
 
-# The jobs the checks run against. Deleting one does not break the repo — it is
-# recoverable, and git has it — but it does stop `regen_check` and half the
-# `check_*` scripts until it is put back, so it is said plainly before it happens.
-FIXTURE_JOBS = ("Test.json", "Test_Build.json")
+# The job the checks run against LIVE. Deleting it does not break the repo — it
+# is recoverable, and git has it — but it does stop half the `check_*` scripts
+# until it is put back, so it is said plainly before it happens. Every other
+# job the checks read is frozen under tools/fixtures/ (28 September 2026), where
+# the app cannot reach it, so deleting a project can no longer break a check.
+FIXTURE_JOBS = ("Test.json",)
 
 # Where a deleted job goes. Not unlink: a job is a quote somebody may need back,
 # and "I deleted the wrong one" has no undo otherwise.

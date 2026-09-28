@@ -35,6 +35,7 @@ import sys
 import tempfile
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+from fixture_jobs import job_file  # noqa: E402  (jobs/ for Test.json, tools/fixtures/ for the rest)
 sys.path.insert(0, ROOT)
 
 # A job as it was written BEFORE the board library existed: bare-string
@@ -313,7 +314,7 @@ def main() -> int:                                                  # noqa: C901
     # (re-saved under BROOKHILL with GREY cabinets, 18 Sept 2026), so nothing
     # pins its contents. Test_Build.json is the untouched pre-library DECOR job.
     for name in ("Test_Build.json",):
-        j = load(os.path.join(ROOT, "jobs", name))
+        j = load(job_file(name))
         check(f"{name} migrates every cabinet",
               sorted({c.back_board for c in j.cabinets}), ["BACK"])
         backs = [(x.label, x.material) for x in generate_job(j) if x.code[:2] == "06"]

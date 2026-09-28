@@ -34,6 +34,7 @@ import sys
 import time
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+from fixture_jobs import job_file  # noqa: E402  (jobs/ for Test.json, tools/fixtures/ for the rest)
 sys.path.insert(0, ROOT)
 
 from app import api                                                         # noqa: E402
@@ -66,7 +67,7 @@ def near(a, b, tol=0.6):
 def job_files():
     out = {}
     for n in ("Test", "Test_Build", "Test_Panels", "Corner Unit Test"):
-        p = os.path.join(ROOT, "jobs", n + ".json")
+        p = job_file(n)
         if os.path.exists(p):
             out[n] = load(p)
     out["oct2025"] = OCT

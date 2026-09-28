@@ -30,6 +30,7 @@ import os
 import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+from fixture_jobs import job_file  # noqa: E402  (jobs/ for Test.json, tools/fixtures/ for the rest)
 sys.path.insert(0, ROOT)
 
 from app import api                                                       # noqa: E402
@@ -340,13 +341,13 @@ def main():
     d = cabinet_to_dict(job().cabinets[3])["panel"]
     check("a standalone panel's record carries no attachment keys", [k for k in d if k.startswith("at")], [])
     for name in ("Test", "Test_Panels", "Test_Build", "Corner Unit Test"):
-        path = os.path.join(ROOT, "jobs", name + ".json")
+        path = job_file(name)
         if not os.path.exists(path):
             continue
         on_disk = json.load(open(path, encoding="utf-8"))
         check(f"{name}.json writes back byte for byte", json.dumps(job_to_dict(job_from_dict(on_disk)), indent=2, ensure_ascii=False)
               == json.dumps(on_disk, indent=2, ensure_ascii=False), True)
-    tj = load(os.path.join(ROOT, "jobs", "Test.json"))
+    tj = load(job_file("Test"))
     check("Test.json's placed panel 8 is standalone, exactly as it was",
           (tj.cabinets[7].attached_to, placement_for(tj, 8).x), (None, 814))
     y8 = y_snap_points(tj, 8, "A")

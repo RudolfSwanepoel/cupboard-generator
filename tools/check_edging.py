@@ -41,6 +41,7 @@ import os
 import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+from fixture_jobs import job_file  # noqa: E402  (jobs/ for Test.json, tools/fixtures/ for the rest)
 sys.path.insert(0, ROOT)
 
 from cabinetgen import boards as B                                            # noqa: E402
@@ -333,7 +334,7 @@ def main():
     spec.loader.exec_module(mod)
     jobs = [("oct2025", mod.JOB)]
     for name in ("Test.json", "Test_Build.json"):
-        path = os.path.join(ROOT, "jobs", name)
+        path = job_file(name)
         if os.path.exists(path):
             jobs.append((name, load_job(path)))
     rows_seen, bad = 0, []
