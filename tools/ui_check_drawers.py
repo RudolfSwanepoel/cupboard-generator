@@ -313,8 +313,52 @@ def stage_drawers(pw):
     browser.close()
 
 
+def cab3d_ready(page, number):
+    page.wait_for_function("() => typeof V3C === 'object' && V3C !== null", timeout=30000)
+    page.wait_for_function(f"() => !S.cabSceneStale && cabTimer === null && S.cab3dShown === {number}", timeout=20000)
+    page.wait_for_function("() => V3C.idle()", timeout=10000)
+    time.sleep(0.2)
+
+
+def stage_3d(pw):
+    print("\nPart 6 — drawer boxes and runners in the Cabinets tab's 3D; fronts open slides them out")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    load_job(page, "Test")
+    select(page, 4)                                     # four drawers, legacy runner, 570 deep
+    cab3d_ready(page, 4)
+    ids = ["4:drawer:3", "4:drawer_side:0", "4:drawer_front:0", "4:drawer_back:0", "4:drawer_base:0", "4:runner:0"]
+    info = {i: page.evaluate(f"() => V3C.partInfo({json.dumps(i)})") for i in ids}
+    check("every box part and a runner are drawn", [bool(v and v["visible"]) for v in info.values()], [True] * len(ids))
+    check("  the legend no longer says drawer boxes are not drawn",
+          "drawer boxes" in page.evaluate("() => document.querySelector('#cab3d').textContent"), False)
+    shot(page, "cab3d_drawers_closed", "#cab3d")
+    page.click("#c3dbar button:has-text('Fronts')")
+    page.wait_for_function("() => V3C.state().fronts === true", timeout=5000)
+    page.wait_for_function("() => V3C.idle()", timeout=10000)
+    time.sleep(0.6)
+    moved = {}
+    for i in ids:
+        v = page.evaluate(f"() => V3C.partInfo({json.dumps(i)})")
+        rest, now = v["rest"]
+        moved[i] = round(sum((a - b) ** 2 for a, b in zip(now, rest)) ** 0.5)
+    check("Fronts: the face and the whole box slide out together, the runner's travel (500)",
+          [moved[i] for i in ids[:5]], [500] * 5)
+    check("  the runner stays where it is", moved["4:runner:0"], 0)
+    shot(page, "cab3d_drawers_open", "#cab3d")
+    page.click("#c3dbar button:has-text('Runners')")
+    page.wait_for_function("() => V3C.state().runners === false", timeout=5000)
+    check("the Runners toggle hides the runners, and only them",
+          (page.evaluate("() => V3C.partInfo('4:runner:0').visible"),
+           page.evaluate("() => V3C.partInfo('4:drawer_side:0').visible")), (False, True))
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 STAGES = {"supports": stage_supports, "catalogue": stage_catalogue, "runners": stage_runners,
-          "drawers": stage_drawers}
+          "drawers": stage_drawers, "3d": stage_3d}
 
 with sync_playwright() as pw:
     for key, fn in STAGES.items():

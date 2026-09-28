@@ -50,6 +50,7 @@ const PAPER = {
   ink: "#191c1a",
   muted: "#767e78",
   fallback: "#d9d6cf",  // a look the server did not send (model.NO_COLOUR); never a board
+  runner: 0x8d9398,      // a drawer runner: hardware, not a board — plain grey
   white: 0xffffff,       // lights
   ground: 0x8f8f86,      // hemisphere light, from below
   cubeGround: 0x999999,
@@ -102,6 +103,7 @@ const V = {
   isolate: null,       // one item number, or null
   hidden: new Set(),   // numbers hidden in 3D (the item list's eye)
   frontsOpen: false,
+  runners: true,       // drawer runners drawn (the Runners toggle)
   clearances: false,
   sel: null,           // selected cabinet number
   hover: null,         // {number, id}
@@ -368,6 +370,11 @@ function textureFor(board, rot) {
 // is turned onto the part's `grain` vector: 0 or 90 degrees, as the elevation
 // does it, never an angle worked out here from a photograph.
 function materialsFor(part) {
+  if (part.role === "runner") {
+    // hardware: one grey, no board, no picture (Part 6, 28 September 2026)
+    const m = new THREE.MeshStandardMaterial({color: PAPER.runner, roughness: 0.45, metalness: 0.3});
+    return [m, m.clone()];
+  }
   const look = V.payload.looks[part.board] || {colour: PAPER.fallback, grain: false, picture: ""};
   const base = {color: hex(look.colour), roughness: 0.82, metalness: 0.0};
   const cap = new THREE.MeshStandardMaterial(base);
@@ -439,8 +446,19 @@ function buildPart(part) {
   // a door rotates about its hinge, a drawer face slides out: keep the rest
   // position so an animation can come back to it
   mesh.userData.rest = {position: mesh.position.clone(), quaternion: mesh.quaternion.clone()};
+  if (part.role === "runner") mesh.visible = V.runners;
   applyDisplay(mesh);
   return mesh;
+}
+
+// The Runners toggle: runner blocks shown or not, every cabinet at once.
+function applyRunners() {
+  for (const grp of V.groups.values()) {
+    for (const m of grp.children) {
+      if (m.userData.part && m.userData.part.role === "runner") m.visible = V.runners;
+    }
+  }
+  requestRender();
 }
 
 function disposeObject(obj) {
@@ -892,6 +910,7 @@ function updateLegend() {
   const inView = new Set();
   for (const grp of V.groups.values()) grp.children.forEach((m) => inView.add(m.userData.part.board));
   if (V.roomParts) V.roomParts.children.forEach((m) => inView.add(m.userData.part.board));
+  inView.delete("");                    // a runner: hardware, no board to key
   const rows = [...inView].sort().map((b) => {
     const look = V.payload.looks[b] || {};
     const sw = look.picture
@@ -1332,9 +1351,13 @@ function describe(number, part) {
 function roleName(part) {
   const names = {side: "Side", top: "Top", bottom: "Bottom", door: "Door leaf", drawer: "Drawer face",
                  blind: "Blind panel", panel: "Panel", back: "Backing", carcass: "Carcass (footprint only)",
-                 plinth: "Plinth board", filler: "Filler", support: "Support", shelf: "Shelf"};
+                 plinth: "Plinth board", filler: "Filler", support: "Support", shelf: "Shelf",
+                 drawer_side: "Drawer side", drawer_front: "Drawer front", drawer_back: "Drawer back",
+                 drawer_base: "Drawer base", runner: "Runner"};
   const n = names[part.role] || part.role;
+  if (part.role === "drawer" && part.label === "inner") return `Inner drawer face ${part.index + 1}`;
   if (part.role === "door" || part.role === "drawer") return `${n} ${part.index + 1}`;
+  if (/^drawer_|^runner$/.test(part.role)) return `${n}, drawer ${part.index + 1}`;
   if (part.role === "support" && part.label) return `${n} — ${part.label}`;
   if (part.role === "shelf") return part.label === "fixed" ? `${n} (fixed)` : n;
   return n;
@@ -1416,6 +1439,8 @@ function buildBar() {
                                onclick: () => { if (V.hooks.toggleLayer) V.hooks.toggleLayer(k); }});
   }
   B.fronts = h("button", {text: "Fronts", title: "O: open / close every door and drawer", onclick: () => toggleFronts()});
+  B.runners = h("button", {text: "Runners", title: "show or hide the drawer runners (simple blocks)",
+                           onclick: () => { V.runners = !V.runners; applyRunners(); updateBar(); }});
   B.clear = h("button", {text: "Clearances", title: "C: door swings and drawer pull-outs", onclick: () => toggleClearances()});
   B.walls = h("button", {text: "Walls: auto ▾", title: "which walls are drawn"});
   B.ceiling = h("button", {text: "Ceiling", title: "draw the ceiling", onclick: () => { V.ceiling = !V.ceiling; applyWalls(); updateBar(); }});
@@ -1428,11 +1453,11 @@ function buildBar() {
   if (OPTS.single) {
     // the one cabinet alone: nothing to layer, isolate, wall off or clear
     B.layers = {};
-    bar.append(B.views, B.proj, B.display, B.fit, sep(), B.fronts, B.labels, sep(), B.help);
+    bar.append(B.views, B.proj, B.display, B.fit, sep(), B.fronts, B.runners, B.labels, sep(), B.help);
   } else {
     bar.append(B.views, B.proj, B.display, B.fit, sep(),
                B.layers.base, B.layers.wall, B.layers.tall, B.layers.panels, sep(),
-               B.fronts, B.clear, B.walls, B.ceiling, B.labels, B.isolate, sep(), B.snap, B.help);
+               B.fronts, B.runners, B.clear, B.walls, B.ceiling, B.labels, B.isolate, sep(), B.snap, B.help);
   }
   menu(B.views, () => {
     const out = [
@@ -1468,6 +1493,7 @@ function updateBar() {
   B.ceiling.classList.toggle("on", V.ceiling);
   B.labels.classList.toggle("on", V.labels);
   B.fronts.classList.toggle("on", V.frontsOpen);
+  B.runners.classList.toggle("on", V.runners);
   B.clear.classList.toggle("on", V.clearances);
   B.isolate.classList.toggle("on", V.isolate !== null);
   B.isolate.disabled = V.isolate === null && V.sel === null;
@@ -2316,7 +2342,7 @@ function memory() {
 
 function state() {
   return {sel: V.sel, isolate: V.isolate, layers: V.layers ? [...V.layers] : null, display: V.display,
-          walls: V.walls, labels: V.labels, ortho: V.ortho_on, fronts: V.frontsOpen,
+          walls: V.walls, labels: V.labels, ortho: V.ortho_on, fronts: V.frontsOpen, runners: V.runners,
           clearances: V.clearances, hidden: [...V.hidden]};
 }
 

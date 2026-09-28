@@ -14,8 +14,10 @@ What is pinned here, from the brief:
     flipped placement, a per-leaf choice, and a mitre door;
   * every part with a `line` names a designation that exists on that
     cabinet's cut list, and the unmatched count is zero for template cabinets;
-  * no part has a role the ruling leaves out (drawer box; shelves and
-    supports are DRAWN since 27 September 2026, and each ties to its line);
+  * shelves and supports are DRAWN since 27 September 2026, and drawer boxes
+    and runners since 28 September 2026 (the drawers / runners / supports
+    brief, Part 6): every box part ties to its cut-list line, and a runner is
+    hardware, said so rather than left unmatched;
   * no room -> parts in Run order, spacing equal to the Run drawing's;
   * the scene call does not change the job;
   * none of engine, validate, export_plaza, nest, room or store imports scene;
@@ -95,7 +97,14 @@ def main():
         check(f"{name}: ids unique", len(ids1), len(set(ids1)))
         check(f"{name}: and identical across two calls", ids1, ids2)
         roles = {q["role"] for it in s1["items"] for q in it["parts"]}
-        check(f"{name}: no drawer-box part", roles & {"box", "drawer_box"}, set())
+        # a box per drawer: two sides, a front, a back and a base, on every
+        # placed template cabinet that cuts drawers (Part 6, 28 September 2026)
+        boxes = sum(1 for it in s1["items"] for q in it["parts"] if q["role"] == "drawer_base")
+        want_boxes = sum(len(c.drawer_list) for c in job.cabinets
+                         if not c.is_panel and c.template != "none"
+                         and c.corner_kind not in ("mitre", "ell")
+                         and any(it["number"] == c.number for it in s1["items"]))
+        check(f"{name}: one drawer box (base) per drawer", boxes, want_boxes)
         inside = [q for it in s1["items"] for q in it["parts"] if q["role"] in ("support", "shelf")]
         want_inside = sum(c.support_total + (c.shelves or 0) + (c.fixed_shelves or 0)
                           for c in job.cabinets
@@ -112,6 +121,10 @@ def main():
             for q in it["parts"]:
                 if q["line"] is not None and q["line"] not in labels:
                     bad.append((it["number"], q["role"], q["line"]))
+                if q["role"] == "runner":
+                    if q["line"] is not None or "hardware" not in q["reason"]:
+                        bad.append((it["number"], "runner", q["line"], q["reason"]))
+                    continue                  # bought, not cut: no line, and it says so
                 if q["line"] is None and c.template != "none" and c.corner_kind != "ell":
                     unmatched_template.append((it["number"], q["role"], q["reason"]))
         check(f"{name}: every line names a designation on that cabinet's cut list", bad, [])
@@ -148,7 +161,8 @@ def main():
                   and near(min(q["z0"] for q in carc), z) and near(max(q["z1"] for q in carc), z + g.height))
             check(f"{name} cabinet {c.number}: carcass union = footprint {g.width}x{g.depth}, height {g.height} at z {z}", ok, True)
             for q in it["parts"]:
-                if q["role"] in ("door", "drawer", "blind") and c.corner_kind != "mitre":
+                # an inner drawer's face is behind the door, on the shelves' line
+                if q["role"] in ("door", "drawer", "blind") and c.corner_kind != "mitre" and q["label"] != "inner":
                     loc = SC.local_outline(job, c.number, q["outline"])
                     t = s["looks"][q["board"]]["thickness"] or std.board_t
                     ymax, ymin = max(y for _, y in loc), min(y for _, y in loc)

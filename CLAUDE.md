@@ -187,6 +187,34 @@ into `output/ui_check_drawers/`).
    drawers 1-3 (faces 110 / 165 / 220 over boxes 90 / 150 / 200) now reach 1, 6
    and 1 mm above their faces — three `drawer-box-face` criticals. The October
    job raises none of them.
+6. **Drawer boxes and runners in 3D** (`room.drawer_parts`, carried by
+   `interior_parts` — never `solid_parts` — so the plan, Finish and every wall
+   elevation are unchanged: `check_runners.py` draws them all with the boxes
+   taken out and gets the same SVG, and the snapshot's drawing hashes did not
+   move). Per drawer, off `drawer_layout`: two sides (the runner's length,
+   grain along it), a front and a back between them, a grooved 3 mm base 16 up
+   and 6 into all four (a housed 16 mm one on the bottom edge), each tied to
+   its cut-list line (`scene.ROLE_TO_PANEL`); an inner drawer's face with its
+   box. **Fronts open slides the face, box and base out together**, as far as
+   the runner travels (`pull.distance` = the layout's `travel`: its length on
+   full extension, 375 of 500 on a three-quarter runner); the runner stays.
+   **Runners are simple blocks** — rail thickness × height × length, one per
+   side, grey (`PAPER.runner` in `view3d.js`), not a board, "hardware — a
+   runner is bought, not cut" instead of a line — behind a **Runners** toggle
+   in both 3D toolbars. `check_scene.py`'s old "no drawer-box part" pin is now
+   "one drawer box per drawer", and the runner is the one part allowed no
+   line. `tools/ui_check_drawers.py --stage 3d` opens the fronts in the
+   Cabinets tab's 3D and measures the slide (500) and the runner not moving.
+
+**Report back — open, for Rudolf.** Nothing from Part 4's question remains
+open: the inner-drawer face sits on the shelves' line (his answer), heights
+are typed and auto-spaced, all-inner-or-all-outer, runner over depth − 16.
+Two things to look at in Test.json: cabinet 4's drawers now raise four
+criticals (three `drawer-box-face`, one `support-drawer-foul`) — boxes 90 /
+150 / 200 in faces 110 / 165 / 220 need to drop to 89 / 144 / 199, and the top
+box to 76 to clear the Top Front band — so Test.json does not export until
+they are changed; and the Gelmar price per pair is R0.00 in `hardware.json`
+until it is typed in.
 
 **UI restructure, Session 2 — Fresh look, first round (28 September 2026,
 the same brief, "styling only").** One `<style>` block in `app/index.html`
@@ -429,7 +457,8 @@ the 3D tab with fronts open and in X-ray. See **Supports** below. The short form
    INSIDE the finished size (`room.tape_solids`, `scene.TAPE_BAND_MM`); no
    position depends on whether an edge is taped. Shelves are spaced evenly from
    the bottom panel's top face to the top of the sides, display only, and the
-   legend says so. `scene.NOT_DRAWN` now lists drawer boxes and legs only.
+   legend says so. `scene.NOT_DRAWN` then listed drawer boxes and legs only
+   (drawer boxes drawn since 28 September 2026 — legs only now).
 4. **Three criticals on typed rows** (`validate._support_layout`): a drawer box
    into the 16 mm band under a Front / Top Rear (`support-drawer-foul`), Front
    and Top Rear overlapping in depth (`support-depth-overlap`; D >= 219 with a
@@ -981,9 +1010,14 @@ of `solid_parts` so the Finish view does not move, positioned by
 `back_face_from_front` and sized by `back_size`, only where the engine cuts
 one — not on a mitre); plus the **plinth boards and fillers that were chosen**
 (`room.plinth_solids`, `room.filler_solids`), where the plan already draws
-them. **Not drawn, by ruling: shelves, supports, drawer boxes, legs, hardware,
-handles, worktops** — their positions are not modelled and nothing is guessed
-onto a drawing. The legend says so. A base unit therefore stands visibly on
+them. **Not drawn, by ruling: legs, hinges, handles, worktops** — their
+positions are not modelled and nothing is guessed onto a drawing; the legend
+says so (`scene.NOT_DRAWN`). Shelves and supports have been drawn since 27
+September 2026, and **drawer boxes and runners since 28 September 2026**
+(`room.drawer_parts`, off `room.drawer_layout`: two sides, a front, a back and
+a base per drawer, tied to their cut-list lines; an inner drawer's face with
+its box; the runners' outer rails as grey blocks, role `runner`, board `''`,
+"hardware — a runner is bought, not cut", behind the **Runners** toggle). A base unit therefore stands visibly on
 nothing at leg height where no plinth board was chosen; that is the truth.
 An ell, a bespoke cabinet or an entered non-rectangular outline is its
 footprint as one solid, with no fronts, as `solid_parts` rules.
@@ -1010,8 +1044,9 @@ mm), `z0`/`z1`, `grain` (a world unit vector, only to lay the picture),
 zero unmatched on every template cabinet in every job, pinned — or a reason:
 `footprint only — ell / bespoke`), `layer`, `hinge` (axis as two world points
 and the turn with its sign, off `room.door_hinges`, the same rule as the plan's
-arcs and the elevation's marks), `pull` (a drawer face's direction and the
-runner's length). Per cabinet a hash of its parts, so the browser rebuilds
+arcs and the elevation's marks), `pull` (a drawer face's — and since 28
+September 2026 its box's — direction and the runner's TRAVEL, off
+`drawer_layout`: its length on a full-extension runner). Per cabinet a hash of its parts, so the browser rebuilds
 only cabinets that changed, and `room.geometry`'s width, height and depth for
 the dimension lines. Looks are sent once per board off `render.board_look`,
 the picture URL only on a grained board (`Fills.textured`'s rule) with
@@ -2615,8 +2650,9 @@ with none of this written round-trips byte for byte (`type` and `edges` are
 written only when set, `store.cabinet_to_dict`).
 
 **Three criticals, on typed rows only** (`validate._support_layout`): a drawer
-box reaching into the 16 mm band under a Front or Top Rear — a box stands on
-its own face's bottom edge, `room.drawer_box_tops` — blocks the export; Front
+box reaching into the 16 mm band under a Front or Top Rear — a box hangs 21
+above its own face's bottom (the drawer setting, 28 September 2026:
+`room.drawer_layout`, read through `room.drawer_box_tops`) — blocks the export; Front
 and Top Rear overlapping in depth (D >= 219 with a backing, 200 without); Back
 supports that do not fit between Back 1 and the bottom panel
 (`room.back_supports_fit`). Legacy rows raise none of them.

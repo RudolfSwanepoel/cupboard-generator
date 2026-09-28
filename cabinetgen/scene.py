@@ -34,8 +34,8 @@ from . import pictures as PIC
 from .engine import generate_cabinet, generate_job, resolved
 from .model import Job, Placement, resolve_board, material_thickness
 from .render import PICTURE_TILE_MM, Fills, board_look, run_layout
-from .room import (Part, _from_plan, _placed_frame, _to_plan, back_part,
-                   carcass_z, clashes, corner_points, door_hinges,
+from .room import (DRAWER_MOVING, Part, _from_plan, _placed_frame, _to_plan, back_part,
+                   carcass_z, drawer_layout, clashes, corner_points, door_hinges,
                    filler_solids, geometry, interior_parts, layer_of, overlaps,
                    placed, placed_panels, placement_for, plinth_solids,
                    pullout_envelope, solid_parts, swing_envelopes, tape_solids,
@@ -48,7 +48,7 @@ from .validate import CRITICAL, validate
 # somewhere, and the room has no figure to stop them at. Read by nothing else.
 DRAWING_MARGIN = 300
 
-NOT_DRAWN = ("Not drawn: drawer boxes, legs (positions not modelled). "
+NOT_DRAWN = ("Not drawn: legs (positions not modelled). Runners are simple blocks. "
              "Shelves are drawn evenly spaced; real heights are set at fitment.")
 
 # How deep into a part an edging band is drawn, in mm. A DRAWING constant like
@@ -61,7 +61,9 @@ TAPE_BAND_MM = 2
 ROLE_TO_PANEL = {"side": "Side", "top": "Top", "bottom": "Bottom", "door": "Door",
                  "drawer": "Drawer Face", "blind": "Blind Panel", "panel": "Panel",
                  "back": "Backing", "plinth": "Plinth", "filler": "Filler",
-                 "support": "Support", "shelf": "Shelve"}
+                 "support": "Support", "shelf": "Shelve",
+                 "drawer_side": "Drawer Side", "drawer_front": "Drawer Front",
+                 "drawer_back": "Drawer Front", "drawer_base": "Drawer Base"}
 
 
 # --- tying a solid to its cut-list line ----------------------------------------
@@ -142,6 +144,10 @@ def _parts_for(job: Job, cab, p, frame, z: int, std: Standard, mats: dict) -> Li
     panels = generate_cabinet(cab, std, mats) if not cab.is_panel else \
         [generate_cabinet(cab, std, mats)[0]]
     hinges = door_hinges(cab, g, p) if g.door_widths and not cab.is_panel else []
+    try:
+        travel = {u["index"]: u["travel"] for u in drawer_layout(cab, std, mats) if u["travel"]}
+    except ValueError:
+        travel = {}
     (_o, (dx, dy), (nx, ny)) = frame
     layer = "panels" if cab.is_panel else layer_of(cab, p)
     footprint_only = cab.template == "none" or cab.corner_kind == "ell"
@@ -156,6 +162,8 @@ def _parts_for(job: Job, cab, p, frame, z: int, std: Standard, mats: dict) -> Li
             line, reason = None, ("footprint only — bespoke" if cab.template == "none"
                                   else "footprint only — ell" if cab.corner_kind == "ell"
                                   else "footprint only")
+        elif q.role == "runner":
+            line, reason = None, "hardware — a runner is bought, not cut"
         else:
             edges = None
             if q.role == "support":
@@ -181,8 +189,11 @@ def _parts_for(job: Job, cab, p, frame, z: int, std: Standard, mats: dict) -> Li
             d["hinge"] = {"axis": [[round(X, 1), round(Y, 1), d["z0"]],
                                    [round(X, 1), round(Y, 1), d["z1"]]],
                           "angle": sign * std.door_open_deg}
-        if q.role == "drawer" and g.runner:
-            d["pull"] = {"dir": [round(nx, 6), round(ny, 6), 0.0], "distance": g.runner}
+        # a drawer's face, box and base slide out together on its runner, as far
+        # as the runner travels (full extension: its length) — off the one
+        # drawer layout (28 September 2026)
+        if q.role in DRAWER_MOVING and q.index in travel:
+            d["pull"] = {"dir": [round(nx, 6), round(ny, 6), 0.0], "distance": travel[q.index]}
         out.append(d)
     return out
 

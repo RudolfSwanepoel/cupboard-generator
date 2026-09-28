@@ -181,7 +181,7 @@ def main():
             support_rows=typed(1, 0, 2))
     check("boxes clear of the band: no critical", crits(job_of(d), "support-drawer-foul"), [])
     d2 = copy.deepcopy(d)
-    d2.drawers[0].box_height = 230          # the top drawer's box: 478 + 230 = 708 > 704
+    d2.drawers[0].box_height = 230          # the top drawer's box: 478 + 21 + 230 = 729 > 704 (drawer setting, 28 Sept)
     got = crits(job_of(d2), "support-drawer-foul")
     check("a box into the 16 mm band under the Front is a critical", len(got), 1)
     check("and it blocks the export", api.blocking(validate(job_of(d2), generate_job(job_of(d2)))), True)

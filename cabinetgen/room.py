@@ -1790,8 +1790,9 @@ def interior_parts(cab, std: Standard = STANDARD, materials: dict = None) -> Lis
     mats = MATERIALS if materials is None else materials
     lay = support_layout(cab, std, mats)
     shelves = shelf_layout(cab, std, mats)
+    drawers = drawer_parts(cab, std, mats)
     if not lay and not shelves:
-        return []
+        return [(q, []) for q in drawers]
     g = geometry(cab, std, mats)
     xs = [x for x, _ in g.footprint]
     W, D, t = max(xs) - min(xs), g.depth, std.board_t
@@ -1816,6 +1817,65 @@ def interior_parts(cab, std: Standard = STANDARD, materials: dict = None) -> Lis
                     sh["z0"], sh["z1"], "x", "fixed" if sh["fixed"] else "")
         tapes = [Tape("y1", cab.exterior_board, "pvc")] if cab.carcass_tape(mats) else []
         out.append((part, tapes))
+    return out + [(q, []) for q in drawers]
+
+
+# The parts of a drawer that slide out with its face when the fronts open.
+DRAWER_MOVING = ("drawer", "drawer_side", "drawer_front", "drawer_back", "drawer_base")
+
+
+def drawer_parts(cab, std: Standard = STANDARD, materials: dict = None) -> List[Part]:
+    """Every drawer's box — two sides, a front, a back and a base — its inner
+    face where it is an inner drawer, and its two runners' outer rails, as
+    solids in the cabinet's frame, for the 3D view (Part 6, 28 September 2026).
+
+    Placed by `drawer_layout` and nothing else, and sized as the cut list cuts
+    them: the sides the runner's length (grain along it), the front and back
+    between the sides, a grooved 3 mm base `drawer_base_offset` up the sides
+    and `groove_engage` into all four, a housed 16 mm one between them on the
+    bottom edge. Each carries its drawer's `index`, which is how the scene
+    slides it out with its face. A runner is role 'runner', board '' — hardware,
+    not a cut-list line — a simple block rail_thickness x height x length,
+    fixed to the carcass side (it does not slide). Kept out of `solid_parts`,
+    so the plan, Finish and every wall elevation are unchanged.
+    """
+    mats = MATERIALS if materials is None else materials
+    try:
+        lay = drawer_layout(cab, std, mats)
+    except ValueError:
+        return []                  # no runner fits: nothing is cut, nothing drawn
+    if not lay:
+        return []
+    D = geometry(cab, std, mats).depth
+    t, e = std.board_t, std.groove_engage
+    out = []
+    for u in lay:
+        i, n = u["index"], u["n"]
+        bx0, bx1, by0, by1, bz0, bz1 = u["box"]
+        # spec y (from the front) to the part frame's (from the wall)
+        py0, py1 = D - by1, D - by0
+        board = u["box_board"]
+        label = f"drawer {n}"
+        out.append(_box("drawer_side", board, bx0, bx0 + t, py0, py1, bz0, bz1, "y", label, i))
+        out.append(_box("drawer_side", board, bx1 - t, bx1, py0, py1, bz0, bz1, "y", label, i))
+        out.append(_box("drawer_front", board, bx0 + t, bx1 - t, py1 - t, py1, bz0, bz1, "x", label, i))
+        out.append(_box("drawer_back", board, bx0 + t, bx1 - t, py0, py0 + t, bz0, bz1, "x", label, i))
+        if u["base"] == "board":
+            z0 = bz0 + std.drawer_base_offset
+            out.append(_box("drawer_base", cab.back_board, bx0 + t - e, bx1 - t + e,
+                            py0 + t - e, py1 - t + e, z0, z0 + std.back_t, "y", label, i))
+        else:
+            out.append(_box("drawer_base", board, bx0 + t, bx1 - t, py0 + t, py1 - t,
+                            bz0, bz0 + t, "y", label, i))
+        if u["inner"]:
+            fx0, fx1 = u["face_x"]
+            fy0, fy1 = u["face_y"]
+            out.append(_box("drawer", u["face_board"], fx0, fx1, D - fy1, D - fy0,
+                            u["face"][0], u["face"][1], "z", "inner", i))
+        ry0, ry1, rz0, rz1 = u["rail"]
+        for rx0, rx1 in u["rails"]:
+            out.append(_box("runner", "", rx0, rx1, D - ry1, D - ry0, rz0, rz1, None,
+                            f"runner, drawer {n}", i))
     return out
 
 

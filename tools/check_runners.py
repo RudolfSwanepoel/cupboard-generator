@@ -455,6 +455,92 @@ def drawer_checks():
     check("the October job raises none of them", ids, set())
 
 
+def scene_3d():
+    """Part 6: drawer boxes and runners drawn in 3D, off the one layout, kept
+    out of the drawings."""
+    from cabinetgen import scene as SC
+    from cabinetgen.render import plan_svg, wall_elevation_svg
+    from cabinetgen.room import drawer_parts, interior_parts, solid_parts
+    print("\nPart 6 — drawer boxes and runners in 3D")
+    check("the legend no longer lists drawer boxes as not drawn", "drawer box" in SC.NOT_DRAWN, False)
+    c = box(runner=H.SEED_ID, drawers=[Drawer(face_height=545, box_height=150),
+                                       Drawer(face_height=170, box_height=120)])
+    j = job_of(c)
+    parts = drawer_parts(c, STANDARD, j.materials)
+    low = [q for q in parts if q.index == 1]
+    roles = sorted(q.role for q in low)
+    check("per drawer: two sides, a front, a back, a base and two runners",
+          roles, ["drawer_back", "drawer_base", "drawer_front", "drawer_side", "drawer_side", "runner", "runner"])
+
+    def ext(q):
+        xs, ys = [x for x, _ in q.outline], [y for _, y in q.outline]
+        return (round(min(xs), 1), round(max(xs), 1), round(min(ys), 1), round(max(ys), 1), q.z0, q.z1)
+    by = {}
+    for q in low:
+        by.setdefault(q.role, []).append(ext(q))
+    # D 560: the spec's y 0..500 from the front is the part frame's 60..560
+    check("the left side: x 29.5-45.5, the runner's length 60-560 (front flush with the carcass), z 21-141",
+          by["drawer_side"][0], (29.5, 45.5, 60, 560, 21, 141))
+    check("the front between the sides, at the carcass front", by["drawer_front"][0], (45.5, 554.5, 544, 560, 21, 141))
+    check("the back at the far end", by["drawer_back"][0], (45.5, 554.5, 60, 76, 21, 141))
+    check("a grooved 3 mm base 16 up the sides, 6 into all four",
+          by["drawer_base"][0], (39.5, 560.5, 70, 550, 37, 40))
+    check("the runners: 12.7 against each side, the runner's length, standing on the bottom panel",
+          sorted(by["runner"]), [(16, 28.7, 60, 560, 16, 61), (571.3, 584, 60, 560, 16, 61)])
+    s = SC.build_cabinet(j, 1) if hasattr(SC, "build_cabinet") else None
+    it = s["items"][0] if s else None
+    if it:
+        mine = [q for q in it["parts"] if q["role"] in ("drawer_side", "drawer_front", "drawer_back", "drawer_base")]
+        cut = {p.label: p.role for p in generate_job(j) if p.cabinet == 1}
+        check("every box part names its cut-list line, of its own role",
+              sorted({(q["role"], cut.get(q["line"])) for q in mine}),
+              [("drawer_back", "Drawer Front"), ("drawer_base", "Drawer Base"),
+               ("drawer_front", "Drawer Front"), ("drawer_side", "Drawer Side")])
+        faces = [q for q in it["parts"] if q["role"] == "drawer"]
+        check("fronts open: box and face slide out together, as far as the runner travels (500)",
+              {tuple(q["pull"]["dir"]) + (q["pull"]["distance"],) for q in mine + faces},
+              {tuple(faces[0]["pull"]["dir"]) + (500,)})
+        runners = [q for q in it["parts"] if q["role"] == "runner"]
+        check("a runner does not slide, and says it is hardware",
+              ({q["pull"] for q in runners}, {q["reason"] for q in runners}),
+              ({None}, {"hardware — a runner is bought, not cut"}))
+    three_q = dict(H.to_record(H.SEED), id="TQ", extension=0.75)
+    t = box(runner="TQ", drawers=[Drawer(face_height=717, box_height=150)])
+    jt = job_of(t, runners={"TQ": three_q})
+    s = SC.build_cabinet(jt, 1)
+    check("a three-quarter runner travels 375 of 500",
+          {q["pull"]["distance"] for q in s["items"][0]["parts"] if q["role"] == "drawer_base"}, {375})
+    inner = box(runner=H.SEED_ID, doors=1, drawers=[Drawer(face_height=150, box_height=150, inner=True)])
+    ji = job_of(inner)
+    s = SC.build_cabinet(ji, 1)
+    face = [q for q in s["items"][0]["parts"] if q["role"] == "drawer"]
+    check("an inner drawer's face is drawn with its box, labelled inner, and slides out",
+          ([q["label"] for q in face], face and face[0]["pull"] is not None), (["inner"], True))
+
+    print("\nnothing drawn moves the plan, Finish or any wall elevation")
+    check("solid_parts carries no drawer box and no runner",
+          {q.role for q in solid_parts(c, STANDARD, j.materials)} & {"drawer_side", "drawer_front",
+                                                                      "drawer_back", "drawer_base", "runner"}, set())
+    check("interior_parts carries them (the 3D's list)",
+          {"drawer_side", "runner"} <= {q.role for q, _ in interior_parts(c, STANDARD, j.materials)}, True)
+    import cabinetgen.room as RM
+    test = load(job_file("Test"))
+    walls = [w.id for w in test.room.walls]
+
+    def drawings():
+        return ([plan_svg(test)] + [wall_elevation_svg(test, w) for w in walls]
+                + [wall_elevation_svg(test, w, mode="finish") for w in walls])
+    with_boxes = drawings()
+    keep = RM.drawer_parts
+    RM.drawer_parts = lambda *a, **k: []
+    try:
+        without = drawings()
+    finally:
+        RM.drawer_parts = keep
+    check("Test.json: the plan and every wall elevation, Line and Finish, are the same with the "
+          "boxes and runners taken out", [a == b for a, b in zip(with_boxes, without)], [True] * len(with_boxes))
+
+
 def main():
     catalogue()
     legacy_holds()
@@ -462,6 +548,7 @@ def main():
     drawer_setting()
     inner_drawers()
     drawer_checks()
+    scene_3d()
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + "; ".join(FAILS))
