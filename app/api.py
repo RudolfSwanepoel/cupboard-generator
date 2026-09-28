@@ -1577,7 +1577,8 @@ def what_if(payload):
 
 
 def export(payload):
-    """Plazaboard CSVs and the sheet layouts. Criticals block it — that is the point."""
+    """Plazaboard CSVs, the sheet layouts and the drawings, into output/<job>/
+    cutlist/, nesting/ and drawings/. Criticals block it — that is the point."""
     job = _job(payload)
     panels = generate_job(job)
     issues = validate(job, panels)
@@ -1593,11 +1594,18 @@ def export(payload):
 
     job.name = _safe_name(job.name)          # it names files; it must not name paths
     outdir = os.path.join(OUT_DIR, job.name)
-    written = write_csvs(job, panels, outdir)
+    # Clear and rewrite (output-folders brief, 28 September 2026): the last
+    # export's three folders go to _previous/ as they were, so nothing this
+    # export does not write lingers beside what it does. snapshots/ is not
+    # export output and is never touched.
+    previous = _retire_export(outdir)
+    cutdir, nestdir, drawdir = (os.path.join(outdir, d) for d in EXPORT_DIRS)
+    written = write_csvs(job, panels, cutdir)
     with NEST_LOCK:
         nested = N.nest_job(N.nestable(panels, job.std), job.std)
+        os.makedirs(nestdir, exist_ok=True)
         for mat, sheets in nested.items():
-            path = os.path.join(outdir, f"nest_{mat}.svg")
+            path = os.path.join(nestdir, f"nest_{mat}.svg")
             N.write_svg(sheets, path, title=mat)
             written.append(path)
 
@@ -1614,24 +1622,57 @@ def export(payload):
                       wall_elevation_svg(job, w.id, pictures=""))
                      for w in job.room.walls if w.id in export_walls(job, payload)]
         drawings.append((f"{job.name}_plan.svg", plan_svg(job)))
+    if drawings:
+        os.makedirs(drawdir, exist_ok=True)
     for name, svg in drawings:
-        path = os.path.join(outdir, name)
+        path = os.path.join(drawdir, name)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(svg)
         written.append(path)
     # the pictures go only beside a drawing that asks for them: a wall's
     # elevation does, the plan (flat colour) does not
     if any(name.startswith(f"{job.name}_elevation_") for name, _svg in drawings):
-        written += _export_pictures(job, outdir)
+        written += _export_pictures(job, drawdir)
     if accepted:
-        path = os.path.join(outdir, f"{job.name}_accepted.txt")
+        path = os.path.join(cutdir, f"{job.name}_accepted.txt")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("Criticals accepted for this export, with the reason given:\n\n")
             for i in accepted:
                 fh.write(f"{i['where']}  {i['message']}\n    accepted: {i['accepted']}\n")
         written.append(path)
-    return {"ok": True, "dir": outdir, "files": [os.path.basename(p) for p in written],
+    folders = {d: sorted(os.path.basename(p) for p in written
+                         if os.path.basename(os.path.dirname(p)) == d)
+               for d in EXPORT_DIRS}
+    return {"ok": True, "dir": outdir,
+            "rel": os.path.relpath(outdir, ROOT).replace("\\", "/") + "/",
+            "files": [os.path.basename(p) for p in written],
+            "folders": {d: f for d, f in folders.items() if f},
+            "previous": previous,
             "accepted": accepted}
+
+
+# What an export writes, one folder each, under output/<job>/. snapshots/ sits
+# beside them and is written by /api/snapshot alone.
+EXPORT_DIRS = ("cutlist", "nesting", "drawings")
+SNAPSHOT_DIR = "snapshots"
+PREVIOUS_DIR = "_previous"
+
+
+def _retire_export(outdir: str) -> bool:
+    """Move the last export's folders into `_previous/`, replacing whatever it
+    held — one level of undo, nothing older. Only the export's own folders
+    move; snapshots/ and anything else in the job folder stay where they are.
+    True when there was an export to move."""
+    import shutil
+    present = [d for d in EXPORT_DIRS if os.path.isdir(os.path.join(outdir, d))]
+    if not present:
+        return False
+    prev = os.path.join(outdir, PREVIOUS_DIR)
+    shutil.rmtree(prev, ignore_errors=True)
+    os.makedirs(prev)
+    for d in present:
+        shutil.move(os.path.join(outdir, d), os.path.join(prev, d))
+    return True
 
 
 def export_walls(job, payload) -> list:
@@ -1938,8 +1979,9 @@ def drag(payload):
 
 
 def snapshot(payload):
-    """Save the 3D view the browser drew, as a PNG, into output/<job>/ under a
-    name that never overwrites: <job>_3d_<n>.png. The bytes are the browser's;
+    """Save the 3D view the browser drew, as a PNG, into output/<job>/snapshots/
+    under a name that never overwrites: <job>_3d_<n>.png, n counted in that
+    folder. An export never touches it. The bytes are the browser's;
     this only writes what it is sent, under `_safe_name`."""
     name = _safe_name(payload.get("name"))
     data = str(payload.get("png") or "")
@@ -1952,7 +1994,7 @@ def snapshot(payload):
         return {"ok": False, "error": f"bad PNG data: {exc}"}
     if not raw.startswith(b"\x89PNG"):
         return {"ok": False, "error": "not a PNG"}
-    outdir = os.path.join(OUT_DIR, name)
+    outdir = os.path.join(OUT_DIR, name, SNAPSHOT_DIR)
     os.makedirs(outdir, exist_ok=True)
     n = 1
     while os.path.exists(os.path.join(outdir, f"{name}_3d_{n}.png")):

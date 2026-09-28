@@ -9,7 +9,7 @@ its Long / Short edge counts (Part 1), Catalogue -> Boards | Runners and the
 runner library (Part 2), the drawer's runner and inner drawers in the editor
 (Parts 2 and 4), and drawer boxes and runners in the 3D (Part 6). Against
 `Test.json`, never saved: the top-bar Save is the only thing that writes.
-Screenshots go into output/ui_check_drawers/.
+Screenshots go into output/_checks/ui_check_drawers/.
 
 Playwright is the only third-party package anywhere near this app and only the
 ui_check scripts need it; without it this says so and exits 0.
@@ -36,7 +36,7 @@ ap.add_argument("--headed", action="store_true")
 args = ap.parse_args()
 URL = f"http://127.0.0.1:{args.port}/"
 LAUNCH = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
-SHOTS = os.path.join(ROOT, "output", "ui_check_drawers")
+SHOTS = os.path.join(ROOT, "output", "_checks", "ui_check_drawers")
 
 FAILS = []
 

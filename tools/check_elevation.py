@@ -24,6 +24,7 @@ What is pinned here, and why:
   * With no room there is no datum, so the side-by-side drawing comes back
     exactly as it was.
 """
+import base64
 import math
 import os
 import re
@@ -651,13 +652,57 @@ def ui_restructure():
         check("two of three walls ticked: exactly those two, and the plan",
               svgs, sorted([f"exp_elevation_{ids[0]}.svg", f"exp_elevation_{ids[2]}.svg",
                             "exp_plan.svg"]))
-        check("and on disk: no Run drawing, no unticked wall",
-              sorted(f for f in os.listdir(os.path.join(out, "exp"))
-                     if f.endswith(".svg") and not f.startswith("nest_")), svgs)
+        jobdir = os.path.join(out, "exp")
+        check("and on disk, in drawings/: no Run drawing, no unticked wall",
+              sorted(f for f in os.listdir(os.path.join(jobdir, "drawings"))
+                     if f.endswith(".svg")), svgs)
+
+        # The folders (output-folders brief, 28 September 2026).
+        check("the export writes cutlist/, nesting/ and drawings/, nothing else",
+              sorted(os.listdir(jobdir)), ["cutlist", "drawings", "nesting"])
+        check("CSVs in cutlist/, sheets in nesting/, as the reply says",
+              (all(f.endswith(".csv") for f in os.listdir(os.path.join(jobdir, "cutlist"))),
+               sorted(os.listdir(os.path.join(jobdir, "nesting"))) == r["folders"]["nesting"],
+               all(f.startswith("nest_") for f in r["folders"]["nesting"]),
+               r["folders"]["cutlist"] == sorted(os.listdir(os.path.join(jobdir, "cutlist"))),
+               r["previous"]), (True, True, True, True, False))
+        check("the reply names output/<job>/", r["rel"].endswith("exp/"), True)
+
+        # A stale file (the Run drawing an older export wrote, a wall since
+        # unticked) and a snapshot beside the export.
+        stale = os.path.join(jobdir, "drawings", "exp_elevation.svg")
+        open(stale, "w").write("<svg/>")
+        snap = api.snapshot({"name": "exp", "png": "data:image/png;base64," +
+                             base64.b64encode(b"\x89PNG\r\n\x1a\nx").decode()})
+        check("a snapshot goes into snapshots/",
+              (snap["ok"], os.listdir(os.path.join(jobdir, "snapshots"))),
+              (True, ["exp_3d_1.png"]))
+        first = sorted(os.listdir(os.path.join(jobdir, "drawings")))
         r = api.export({"job": job_to_dict(three)})
         check("no list at all is every wall",
               sorted(f for f in r["files"] if f.startswith("exp_elevation_")),
               sorted(f"exp_elevation_{i}.svg" for i in ids))
+        check("a second export moves the first into _previous/, as it was",
+              (r["previous"], sorted(os.listdir(os.path.join(jobdir, "_previous"))),
+               sorted(os.listdir(os.path.join(jobdir, "_previous", "drawings")))),
+              (True, ["cutlist", "drawings", "nesting"], first))
+        check("the stale file does not survive into the new export",
+              os.path.exists(os.path.join(jobdir, "drawings", "exp_elevation.svg")), False)
+        check("snapshots/ is untouched by the export",
+              os.listdir(os.path.join(jobdir, "snapshots")), ["exp_3d_1.png"])
+        snap = api.snapshot({"name": "exp", "png": "data:image/png;base64," +
+                             base64.b64encode(b"\x89PNG\r\n\x1a\nx").decode()})
+        check("the next snapshot counts in snapshots/ and never overwrites",
+              (snap["file"].endswith("exp/snapshots/exp_3d_2.png") or snap["file"],
+               sorted(os.listdir(os.path.join(jobdir, "snapshots")))),
+              (True, ["exp_3d_1.png", "exp_3d_2.png"]))
+        api.export({"job": job_to_dict(three), "walls": [ids[0]]})
+        check("_previous/ is one level only: the last export, not the first",
+              sorted(os.listdir(os.path.join(jobdir, "_previous", "drawings"))),
+              sorted(r["folders"]["drawings"]))
+        check("still no _previous inside _previous",
+              sorted(os.listdir(os.path.join(jobdir, "_previous"))),
+              ["cutlist", "drawings", "nesting"])
         plain = kitchen()
         plain.room, plain.placements, plain.name = None, [], "noroom"
         r = api.export({"job": job_to_dict(plain)})

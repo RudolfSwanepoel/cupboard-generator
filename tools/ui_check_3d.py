@@ -749,18 +749,18 @@ def stage_f5(pw):
     check_true("clicking a badge selects the cabinet and the dock shows its issue",
                page.evaluate("() => S.sel !== null") and page.locator("#v3ddock #editor .dockissues div").count() > 0)
 
-    # 13. snapshot writes a PNG into output/Test/
-    outdir = os.path.join(ROOT, "output", "Test")
+    # 13. snapshot writes a PNG into output/Test/snapshots/
+    outdir = os.path.join(ROOT, "output", "Test", "snapshots")
     before = set(os.listdir(outdir)) if os.path.isdir(outdir) else set()
     page.click("#v3dbar button:has-text('Snapshot')")
     page.wait_for_function("() => document.getElementById('toast').textContent.indexOf('Saved') === 0", timeout=15000)
     after = set(os.listdir(outdir))
     new = sorted(after - before)
-    check_true("a new PNG landed in output/Test/", len(new) == 1 and new[0].startswith("Test_3d_") and new[0].endswith(".png"), f"{new}")
+    check_true("a new PNG landed in output/Test/snapshots/", len(new) == 1 and new[0].startswith("Test_3d_") and new[0].endswith(".png"), f"{new}")
     if new:
         with open(os.path.join(outdir, new[0]), "rb") as fh:
             check("and it is a PNG", fh.read(4), b"\x89PNG")
-        check("the toast names it", "Saved output/Test/" + new[0] in page.locator("#toast").text_content(), True)
+        check("the toast names it", "Saved output/Test/snapshots/" + new[0] in page.locator("#toast").text_content(), True)
     page.click("#v3dbar button:has-text('Snapshot')")
     page.wait_for_function("() => document.getElementById('toast').textContent.indexOf('_3d_') > 0", timeout=15000)
     check("a second one does not overwrite the first", len(set(os.listdir(outdir)) - before), 2)

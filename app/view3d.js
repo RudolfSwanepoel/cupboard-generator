@@ -1447,7 +1447,7 @@ function buildBar() {
   B.labels = h("button", {text: "Labels", title: "L: item numbers", onclick: () => { V.labels = !V.labels; updateBar(); requestRender(); }});
   B.isolate = h("button", {text: "Isolate", title: "ghost everything but the selection (the plan's isolate too)",
                            onclick: () => setIsolate(V.isolate === null ? V.sel : null)});
-  B.snap = h("button", {text: "Snapshot", title: "save this view as a PNG into output/<job>/", onclick: () => snapshot()});
+  B.snap = h("button", {text: "Snapshot", title: "save this view as a PNG into output/<job>/snapshots/", onclick: () => snapshot()});
   B.fit = h("button", {text: "Fit", title: "F: fit the selection, or everything", onclick: () => fitSelection(true)});
   B.help = h("button", {text: "?", title: "shortcuts", onclick: () => toggleHelp()});
   if (OPTS.single) {
