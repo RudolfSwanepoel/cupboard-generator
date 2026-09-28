@@ -601,7 +601,10 @@ def stage_f4(pw):
     check("the 3D Isolate toggle clears the plan's isolate too", page.evaluate("() => S.isolate"), None)
 
     # the item list and the context menu
-    check("the item list has a row per item", page.locator("#v3dlist .row").count(), 13)
+    # one row per item in the job — counted off the job, not a number: Test.json
+    # is live data and gained item 14 on 28 September 2026
+    check("the item list has a row per item", page.locator("#v3dlist .row").count(),
+          page.evaluate("() => S.job.cabinets.length"))
     page.locator('#v3dlist .row[data-n="13"]').click()
     settle(page)
     check("a list click selects and isolates", page.evaluate("() => [S.job.cabinets[S.sel].number, S.isolate]"), [13, 13])
@@ -1062,7 +1065,7 @@ def stage_room(pw):
     # 3. a new job with a room: a board, a cabinet, placed from the table, dragged
     page.click("#new")
     page.wait_for_function("() => S.job.name === 'untitled' && !S.job.room && S.res", timeout=15000)
-    page.click('nav [data-tab="boards"]')
+    page.click('nav [data-tab="catalogue"]')             # Catalogue -> Boards since 28 Sept 2026
     page.locator('#boards input[data-pick]').first.check()
     page.wait_for_function("() => S.job.boards.length > 0", timeout=15000)
     page.click('nav [data-tab="room"]')

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "note": "The hardware catalogue. Shared across every project and committed to the repo, like boards.json. A job does not point at this file: selecting a runner copies its record into the job, which is what keeps a quoted job quoted.",
+  "runners": [
+    {
+      "id": "GELMAR45",
+      "name": "Gelmar 45 mm full-extension ball-bearing",
+      "supplier": "Gelmar",
+      "sku": "7011-7017",
+      "price": 0,
+      "type": "side-mount ball-bearing",
+      "height": 45,
+      "side_clearance": 13.5,
+      "rail_thickness": 12.7,
+      "lengths": [
+        300,
+        350,
+        400,
+        450,
+        500,
+        550,
+        600
+      ],
+      "extension": "full",
+      "capacity_kg": 35,
+      "lift": 5,
+      "setback": 3
+    }
+  ]
+}

@@ -33,6 +33,10 @@ python tools\check_scene.py
 echo.
 python tools\check_supports.py
 echo.
+python tools\check_attached.py
+echo.
+python tools\check_runners.py
+echo.
 echo ---------------------------------------------
 echo You want to see: 22 cabinets reproduce exactly
 echo             and: 0 wrong

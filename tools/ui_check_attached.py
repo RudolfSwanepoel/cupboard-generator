@@ -64,7 +64,7 @@ def computed(page):
 
 def select_row(page, number):
     if page.evaluate("() => S.tab") != "cabinets":
-        page.click('nav [data-tab="cabinets"]')           # the app opens on Boards
+        page.click('nav [data-tab="cabinets"]')           # the app opens on Catalogue -> Boards
     page.click(f'#cabtable tr[data-i] td.n:first-child:text-is("{number}")')
     page.wait_for_function(f"() => S.sel !== null && S.job.cabinets[S.sel].number === {number}", timeout=5000)
 

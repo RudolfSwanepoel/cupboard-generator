@@ -143,8 +143,10 @@ def _apply_acceptances(job: Job, issues: List[Issue]):
 
 def validate(job: Job, panels: List[Panel]) -> List[Issue]:
     std = job.std
+    job.bind_runners()
     out: List[Issue] = []
     out += _panel_fits_board(panels, std)
+    out += _runners(job)
     out += _cabinet_structure(job.cabinets, std)
     out += _front_stacks(job.cabinets, std)
     out += _shelf_clears_back(job.cabinets, panels, std)
@@ -208,6 +210,28 @@ def _panel_fits_board(panels, std):
     return out
 
 
+def _runners(job: Job):
+    """A cabinet whose drawers hang on a runner the project never selected
+    (28 September 2026). The same reasoning as a board the project never
+    selected: nothing captured a price for it, and a record the job does not
+    carry is one the next edit of the library can change under it. CRITICAL.
+    A blank runner is the built-in LEGACY record every job before the catalogue
+    was quoted on, and is not a fault."""
+    out = []
+    for c in job.cabinets:
+        if c.is_panel or not c.drawer_list or not c.runner:
+            continue
+        if c.runner not in (job.runners or {}):
+            known = c.runner_rec is not None
+            out.append(Issue(CRITICAL, str(c.number),
+                             f"its drawers hang on runner {c.runner}, which this project "
+                             f"has not selected — tick it on Catalogue -> Runners"
+                             + ("" if known else " (it is not in the catalogue either; "
+                                "the drawers are cut on the legacy lengths until it is)"),
+                             check="runner-not-selected"))
+    return out
+
+
 def _cabinet_structure(cabinets, std):
     """D1 — cabinets 45 and 49 went to Plazaboard with no side panels."""
     out = []
@@ -217,12 +241,14 @@ def _cabinet_structure(cabinets, std):
         if c.door_count and c.width <= 0:
             out.append(Issue(CRITICAL, str(c.number), "door on a cabinet with no width", check="door-no-width"))
         if c.drawer_list:
-            runner = std.pick_runner(c.depth)
+            rr = c.runner_or_legacy
+            runner = std.pick_runner(c.depth, rr.lengths)
             if runner is None:
                 out.append(Issue(
                     CRITICAL, str(c.number),
-                    f"{c.depth} mm deep is too shallow for any runner "
-                    f"(shortest is {min(std.runner_lengths)}, needs {std.runner_clearance} behind)", check="runner-depth"))
+                    f"{c.depth} mm deep is too shallow for any length of "
+                    f"{rr.name or 'its runner'} (shortest is {rr.shortest}, needs "
+                    f"{std.runner_clearance} behind)", check="runner-depth"))
         if c.shelves and c.back == "none":
             out.append(Issue(WARNING, str(c.number),
                              "shelves in a cabinet with no back — check the shelf depth is intentional"))

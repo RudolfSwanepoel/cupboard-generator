@@ -589,7 +589,7 @@
 <div id="strip"></div>
 
 <nav>
-  <button data-tab="boards" class="on">Boards</button>
+  <button data-tab="catalogue" class="on">Catalogue</button>
   <button data-tab="cabinets">Cabinets</button>
   <button data-tab="room">Room</button>
   <button data-tab="view3d">3D view</button>
@@ -627,8 +627,17 @@
     </div>
   </section>
 
-  <section id="tab-boards">
-    <div class="card"><h2>Board library</h2><div id="boards"></div></div>
+  <!-- Catalogue (28 September 2026): the Boards tab, unchanged, as one of two
+       sub-tabs, beside the runner library. Hinges and handles come later. -->
+  <section id="tab-catalogue">
+    <div class="subtabs" id="catsubs"><button data-catsub="boards" class="on">Boards</button><button
+      data-catsub="runners">Runners</button></div>
+    <div id="catboards">
+      <div class="card"><h2>Board library</h2><div id="boards"></div></div>
+    </div>
+    <div id="catrunners" hidden>
+      <div class="card"><h2>Runner library</h2><div id="runners"></div></div>
+    </div>
   </section>
 
   <section id="tab-room" hidden>
@@ -736,7 +745,7 @@ const S = {
   sel: null,        // selected cabinet index
   selRendered: -2,  // which index the editor DOM currently shows
   dirty: false,     // edits are on screen that are not on disk
-  tab: "boards",     // a new job starts on Boards: board selection drives everything
+  tab: "catalogue", // a new job starts on Catalogue -> Boards: board selection drives everything
   def: null,        // /api/defaults
 };
 
@@ -867,7 +876,8 @@ async function compute() {
   if (!res.ok) toast(res.error, true);
   dropLapsed(res.lapsed || []);
   renderStrip();
-  if (S.tab === "boards" && S.lib) drawBoards();
+  if (S.tab === "catalogue" && S.catSub === "boards" && S.lib) drawBoards();
+  if (S.tab === "catalogue" && S.catSub === "runners" && S.rlib) drawRunners();
   renderList();
   refreshScene();          // the 3D views catch up, now or when next shown
   renderTab();             // the wall elevation, where it is showing (Room -> Elevation)
@@ -1037,6 +1047,35 @@ function showRoomSub() {
   $("elevcard").hidden = plan;
 }
 
+/* ---------- Catalogue: Boards | Runners ---------------------------------------
+   Two sub-tabs, the same pattern as Room's Plan | Elevation (28 September
+   2026). Boards is the Boards tab exactly as it was; Runners is the runner
+   library. Every jump that used to land on Boards lands on Catalogue -> Boards
+   through `openCatalogue`. */
+
+S.catSub = "boards";
+
+$("catsubs").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-catsub]");
+  if (!b || b.dataset.catsub === S.catSub) return;
+  S.catSub = b.dataset.catsub;
+  showCatSub();
+  renderTab();
+});
+
+function showCatSub() {
+  document.querySelectorAll("#catsubs [data-catsub]").forEach((x) =>
+    x.classList.toggle("on", x.dataset.catsub === S.catSub));
+  $("catboards").hidden = S.catSub !== "boards";
+  $("catrunners").hidden = S.catSub !== "runners";
+}
+
+function openCatalogue(sub) {
+  S.catSub = sub || "boards";
+  showCatSub();
+  document.querySelector('nav [data-tab="catalogue"]').click();
+}
+
 /* ---------- cabinet list ------------------------------------------------ */
 
 function frontsText(c) {
@@ -1162,8 +1201,8 @@ $("add").addEventListener("click", async () => {
   const picked = (S.res && S.res.boards) || [];
   if (!picked.length) {
     toast("No board selected yet. A cabinet has to be cut from something — open " +
-          "the Boards tab and tick at least one board into this project first.", true);
-    document.querySelector('nav [data-tab="boards"]').click();
+          "Catalogue -> Boards and tick at least one board into this project first.", true);
+    openCatalogue("boards");
     return;
   }
   const r = await post("/api/next-number", {job: S.job});
@@ -1183,6 +1222,16 @@ $("add").addEventListener("click", async () => {
   fresh.carcass_board = pool[0];
   fresh.exterior_board = pool[pool.length - 1];
   fresh.has_doors = false;      // tick it on when this cabinet actually has doors
+  // Its drawer runner (28 September 2026): the project's first, or — with none
+  // selected — the Gelmar seed, copied into the project by the server so it is
+  // priced like any selection. Never the legacy record.
+  const rd = await post("/api/runner-default", {job: S.job});
+  if (rd && rd.ok) {
+    fresh.runner = rd.id;
+    S.job.runners = rd.runners;
+    if (rd.added) toast(`${rd.name} selected into this project for the drawers — ` +
+                        `change it on Catalogue -> Runners.`);
+  }
   // The support rows for its kind (28 September 2026): the engine's defaults,
   // not the browser's — base Front + Top Rear + 2 Backs, wall 3 Backs, tall 4,
   // each cut from the carcass in that board's own edging. They follow the
@@ -1948,6 +1997,18 @@ $("editor").addEventListener("change", (e) => {
   schedule(); renderList();
 });
 
+$("editor").addEventListener("change", (e) => {
+  if (!e.target.dataset.runner) return;
+  const c = S.job.cabinets[S.sel];
+  if (!c) return;
+  if (e.target.value === (c.runner || "")) return;
+  changeRunner(c, e.target.value, e.target);
+});
+
+$("editor").addEventListener("click", (e) => {
+  if (e.target.id === "druncat") openCatalogue("runners");
+});
+
 $("editor").addEventListener("change", async (e) => {
   const key = e.target.dataset.tick;
   if (key === undefined) return;
@@ -2629,12 +2690,68 @@ function renderDrawers() {
       the box follows the Carcass board (${esc(boxDefault || "—")}) and the face the
       Exterior board (${esc(faceDefault || "—")}); pick a board on one row to give
       just that drawer a different finish.</p>
+    ${runnerHTML(c)}
     ${edgingHTML(c, "drawer")}
     <p class="hint">Each box is edged in PVC in its own box material's colour —
       <b data-boxedge="1">—</b> for the default. It follows the box and is not
       chosen here.</p>`;
   refreshEdging();
   solveStack();
+}
+
+// The runner the drawers hang on (28 September 2026): one of the project's
+// selected runners, by id. The readout is the engine's — the length it picks,
+// what is left behind, the travel, the box width — never worked out here.
+function runnerHTML(c) {
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const info = (g && g.runner) || {};
+  const ids = (S.res && S.res.runners) || Object.keys(S.job.runners || {});
+  const recs = (S.res && S.res.runner_records) || S.job.runners || {};
+  const cur = c.runner || "";
+  const legacy = S.def.legacy_runner || {};
+  const opts = [];
+  if (!cur) opts.push(`<option value="" selected>${esc(legacy.name || "Legacy runners")} — ${
+    (legacy.lengths || []).join(" / ")}, no longer offered</option>`);
+  if (cur && ids.indexOf(cur) < 0) opts.push(`<option value="${esc(cur)}" selected>${
+    esc(cur)} (not selected into this project)</option>`);
+  ids.forEach((k) => opts.push(`<option value="${esc(k)}"${k === cur ? " selected" : ""}>${
+    esc((recs[k] || {}).name || k)}</option>`));
+  const read = info.length
+    ? `runner <b>${info.length}</b> long — the box is ${info.length} long and
+       ${info.box_width} wide, ${info.behind} left behind it, pulls out ${info.travel}`
+    : info.length === null && c.drawers && c.drawers.length
+      ? `<span class="over">no length on this runner fits ${c.depth} deep</span>` : "";
+  return `<div class="tape"><label>Runner</label>
+      <div class="leaf"><select data-runner="1" title="the runner these drawers hang on">
+        ${opts.join("")}</select>
+        <button type="button" class="mini" id="druncat" title="the runner library">Catalogue…</button></div>
+      <span class="note" data-runread="1">${read}</span>
+      ${!ids.length && !cur ? "" : ""}
+      ${!cur ? `<span class="note">These drawers were quoted on the legacy runner lengths and are
+        cut exactly as they were. Pick a catalogue runner to re-point them — you are shown
+        which drawer lines move first.</span>` : ""}
+    </div>`;
+}
+
+// Re-pointing a cabinet at another runner can move its drawer lines (a depth
+// that now takes 400 or 550): the engine says which first, as unticking does.
+async function changeRunner(c, to, sel) {
+  const pre = await post("/api/runner-swap", {job: S.job, to: to, cabinets: [c.number]});
+  if (!pre || !pre.ok) { toast((pre && pre.error) || "no reply", true); sel.value = c.runner || ""; return; }
+  if (pre.error_after) { toast(pre.error_after, true); sel.value = c.runner || ""; return; }
+  if (pre.moves.length) {
+    const lines = pre.moves.map((m) => `    ${m.label}   ${m.role}   ` +
+      (m.before ? `${m.before[0]} x ${m.before[1]}` : "—") + "  ->  " +
+      (m.after ? `${m.after[0]} x ${m.after[1]}` : "—")).join("\n");
+    const ok = window.confirm(`Moving cabinet ${c.number} onto ${to} changes ` +
+      `${pre.moves.length} drawer line${pre.moves.length === 1 ? "" : "s"}:\n\n${lines}\n\n` +
+      `That is a design change: the drawer boxes are sized off the runner. No ` +
+      `designation is renamed. Go ahead?`);
+    if (!ok) { sel.value = c.runner || ""; return; }
+  }
+  c.runner = to;
+  renderDrawers();
+  schedule();
 }
 
 let solveSeq = 0;
@@ -4238,6 +4355,245 @@ $("boards").addEventListener("change", async (e) => {
   await compute();
   drawBoards();
 });
+
+/* ---------- the runner library (Catalogue -> Runners) ------------------------
+   hardware.json in the repo, beside boards.json, with the same bargain: a
+   project selects a runner and the record is copied into the job, price per
+   pair and all — that copy is the price capture. Everything a runner drives
+   (box width, box length, the "no runner fits" critical, the 3D) is the
+   engine's reading of the record the cabinet names; nothing here sizes a
+   drawer. A cabinet saved before the catalogue hangs on the built-in legacy
+   record (350 / 450 / 500), which is kept as quoted and never offered. */
+
+S.rlib = null;         // the library as /api/runners last returned it
+S.rEdit = null;        // the runner being edited, or null
+
+const runnerMoney = (v) => "R " + (+v || 0).toLocaleString("en-ZA",
+  {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+async function renderRunnersTab() {
+  const r = await post("/api/runners", {});
+  if (!r.ok) { toast(r.error, true); return; }
+  S.rlib = r;
+  drawRunners();
+}
+
+function extText(x) {
+  return x === "full" || !x ? "full" : Math.round(+x * 100) + " %";
+}
+
+function drawRunners() {
+  const r = S.rlib;
+  if (!r) { $("runners").innerHTML = ""; return; }
+  const chosen = (S.res && S.res.runners) || Object.keys(S.job.runners || {});
+  const hw = (S.res && S.res.hardware) || [];
+  const pairsOf = (id) => hw.filter((h) => h.id === id).reduce((a, h) => a + h.pairs, 0);
+  const rows = r.runners.map((x) => {
+    const inJob = chosen.indexOf(x.id) >= 0;
+    const pairs = pairsOf(x.id);
+    return `<tr>
+      <td><input type="checkbox" data-rpick="${esc(x.id)}" ${inJob ? "checked" : ""}
+           style="width:auto" title="use this runner in this project"></td>
+      <td><b>${esc(x.name)}</b><div class="note">id ${esc(x.id)}${x.supplier ? " · " + esc(x.supplier) : ""}${
+        x.sku ? " · SKU " + esc(x.sku) : ""} · ${esc(x.type)}</div></td>
+      <td class="n">${x.height} · ${x.side_clearance}</td>
+      <td class="note" style="max-width:150px;white-space:normal">${(x.lengths || []).join(" · ")}</td>
+      <td>${extText(x.extension)}${x.capacity_kg ? `<div class="note">${x.capacity_kg} kg</div>` : ""}</td>
+      <td class="n">${runnerMoney(x.price)}</td>
+      <td class="note">${inJob ? (pairs ? `${pairs} pair${pairs === 1 ? "" : "s"}` : "selected, no drawers on it")
+                               : ""}</td>
+      <td class="note">${(x.used_by || []).length ? x.used_by.map(esc).join(", ")
+                          : `<span class="note">no saved job</span>`}</td>
+      <td>
+        <button data-redit="${esc(x.id)}">Edit</button>
+        ${inJob ? `<button data-rswap="${esc(x.id)}" title="hang every drawer cabinet in this project on this runner">Use for all drawers</button>` : ""}
+        <button data-rdel="${esc(x.id)}" title="remove from the library">Del</button>
+      </td></tr>`;
+  }).join("");
+
+  const legacy = hw.filter((h) => !h.id);
+  const lg = S.def.legacy_runner || {};
+  const pill = chosen.length
+    ? `<span class="pill ok">${chosen.length} runner${chosen.length === 1 ? "" : "s"} in this project</span>`
+    : `<span class="pill">no runner selected — a new cabinet takes the ${esc(S.def.runner_seed || "seed")} runner</span>`;
+  const cost = hw.filter((h) => h.id && h.pairs).map((h) =>
+    `${esc(h.id)}: ${h.pairs} pair${h.pairs === 1 ? "" : "s"} × ${runnerMoney(h.price)} = <b>${runnerMoney(h.total)}</b>`).join(" · ");
+  $("runners").innerHTML = `
+    <div class="matline" style="border-bottom:1px solid var(--line)">
+      ${pill}
+      <span class="note">Ticking a runner copies it into this project at today's price
+      per pair. Editing a runner here never changes a job already quoted.</span>
+      <span class="grow"></span>
+      <button id="rnew" class="primary">Add runner</button>
+    </div>
+    <div class="scroll"><table><thead><tr>
+      <th title="use in this project">Use</th><th>Runner</th>
+      <th class="n" title="the outer rail's height, and the clearance each side between carcass side and box side, mm">Height · clear.</th>
+      <th>Lengths</th><th>Extension</th>
+      <th class="n">Price / pair</th><th>In this project</th><th>Used by saved jobs</th><th></th>
+    </tr></thead><tbody>${rows ||
+      `<tr><td colspan="9" class="empty">The library is empty. Add a runner.</td></tr>`}</tbody></table></div>
+    ${legacy.length ? `<div class="matline" style="border-top:1px solid var(--line)">
+      <span class="pill">legacy</span>
+      <span class="note">Cabinet${legacy[0].cabinets.length === 1 ? "" : "s"}
+      ${legacy[0].cabinets.join(", ")} (${legacy[0].pairs} pair${legacy[0].pairs === 1 ? "" : "s"})
+      hang on <b>${esc(lg.name || "legacy runners")}</b> — ${(lg.lengths || []).join(" / ")},
+      ${lg.side_clearance} a side — as they were quoted. It is never offered for a new
+      cabinet; re-point them with <b>Use for all drawers</b> or in each cabinet's Drawers
+      section, and you are shown which drawer lines move first.</span></div>` : ""}
+    ${cost ? `<div class="matline"><span class="note">Runners in this project: ${cost}.
+      Bought from the supplier, so not in the Plazaboard estimate.</span></div>` : ""}
+    <p class="note" style="padding:8px 12px 12px;max-width:86ch">
+      The library is <b>${esc(r.path)}</b> in the repo, so it syncs with the code.
+      A drawer's box is sized off its runner: its <b>length</b> is the longest length
+      the runner offers that leaves ${(S.def.standard || {}).runner_clearance || 40} mm
+      behind it in the carcass, and its <b>width</b> is the opening less the runner's
+      clearance each side. <b>Lift</b> is how far the drawer side's bottom sits above
+      the rail's; <b>setback</b> how far the inner member starts behind the box front.
+      Only side-mount ball-bearing runners are built; soft-close and undermount need a
+      spec sheet first.</p>
+    <div id="runneredit"></div>`;
+  drawRunnerEditor();
+}
+
+function drawRunnerEditor() {
+  const box = $("runneredit");
+  if (!box) return;
+  const x = S.rEdit;
+  if (!x) { box.innerHTML = ""; return; }
+  const types = S.def.runner_types || ["side-mount ball-bearing"];
+  const num = (id, label, v, step, note) => `<div class="f"><label>${label}</label>
+      <input type="number" step="${step}" id="rf-${id}" value="${v === undefined || v === null ? "" : v}">
+      ${note ? `<span class="note">${note}</span>` : ""}</div>`;
+  box.innerHTML = `<div class="card" style="margin:12px">
+    <h2>${x.id ? "Edit runner — " + esc(x.id) : "New runner"}</h2>
+    <div class="body">
+      <div class="grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="f"><label>ID</label>
+          <input id="rf-id" value="${esc(x.id || "")}" ${x.id ? "readonly" : ""}
+                 placeholder="from the name">
+          <span class="note">what a cabinet names; fixed once saved</span></div>
+        <div class="f wide" style="grid-column:2/-1"><label>Name</label>
+          <input id="rf-name" value="${esc(x.name || "")}"
+                 placeholder="e.g. Gelmar 45 mm full-extension ball-bearing"></div>
+        <div class="f"><label>Supplier</label><input id="rf-supplier" value="${esc(x.supplier || "")}"></div>
+        <div class="f"><label>SKU</label><input id="rf-sku" value="${esc(x.sku || "")}"></div>
+        ${num("price", "Price per pair", x.price || 0, "0.01", "captured into a project when it is ticked")}
+        <div class="f"><label>Type</label><select id="rf-type">${types.map((t) =>
+          `<option${t === x.type ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
+        ${num("height", "Height (mm)", x.height, "0.1", "the outer rail")}
+        ${num("side_clearance", "Side clearance (mm each side)", x.side_clearance, "0.1",
+              "box width = opening − 2 × this")}
+        ${num("rail_thickness", "Rail thickness (mm)", x.rail_thickness, "0.1", "information: drawn in 3D")}
+        <div class="f wide" style="grid-column:1/-1"><label>Lengths available (mm)</label>
+          <input id="rf-lengths" value="${esc((x.lengths || []).join(" "))}" placeholder="300 350 400 450 500">
+          <span class="note">the box length is the longest of these that leaves
+            ${(S.def.standard || {}).runner_clearance || 40} mm behind it</span></div>
+        <div class="f"><label>Extension</label>
+          <input id="rf-extension" value="${esc(x.extension === undefined ? "full" : String(x.extension))}"
+                 placeholder="full, or a fraction like 0.75">
+          <span class="note">full: travel = length</span></div>
+        ${num("capacity_kg", "Capacity (kg)", x.capacity_kg, "1", "")}
+        ${num("lift", "Lift (mm)", x.lift, "0.1", "drawer side bottom above the rail bottom")}
+        ${num("setback", "Setback (mm)", x.setback, "0.1", "inner member behind the box front")}
+      </div>
+      <div class="presets">
+        <button id="rf-save" class="primary">Save to the library</button>
+        <button id="rf-cancel">Cancel</button>
+      </div>
+    </div></div>`;
+}
+
+$("runners").addEventListener("click", async (e) => {
+  const ed = e.target.closest("[data-redit]");
+  if (ed) {
+    S.rEdit = Object.assign({}, S.rlib.runners.find((x) => x.id === ed.dataset.redit));
+    drawRunnerEditor();
+    $("runneredit").scrollIntoView({block: "nearest"});
+    return;
+  }
+  if (e.target.id === "rnew") {
+    const seed = S.rlib.runners.find((x) => x.id === S.def.runner_seed) || {};
+    // a new runner starts from the seed's fitting figures, with no id, name or price
+    S.rEdit = {id: "", name: "", supplier: "", sku: "", price: 0,
+               type: (S.def.runner_types || [])[0], height: seed.height || 45,
+               side_clearance: seed.side_clearance || 13.5, rail_thickness: seed.rail_thickness || 12.7,
+               lengths: [], extension: "full", capacity_kg: 0, lift: seed.lift || 5,
+               setback: seed.setback || 3};
+    drawRunnerEditor();
+    $("runneredit").scrollIntoView({block: "nearest"});
+    return;
+  }
+  if (e.target.id === "rf-cancel") { S.rEdit = null; drawRunnerEditor(); return; }
+  if (e.target.id === "rf-save") {
+    const v = (id) => $("rf-" + id).value;
+    const runner = {id: v("id").trim().toUpperCase(), name: v("name").trim(),
+      supplier: v("supplier").trim(), sku: v("sku").trim(), price: v("price"),
+      type: v("type"), height: v("height"), side_clearance: v("side_clearance"),
+      rail_thickness: v("rail_thickness"), lengths: v("lengths"),
+      extension: v("extension"), capacity_kg: v("capacity_kg"), lift: v("lift"),
+      setback: v("setback")};
+    const r = await post("/api/runner-save", {runner: runner, from: S.rEdit.id || "", job: S.job});
+    if (!r.ok) { toast(r.error, true); return; }
+    if (r.job) { S.job = r.job; markDirty(true); }
+    toast(`Saved ${r.id} to the library` + (r.project_follows
+      ? " — this project's copy follows it (its captured price is kept); saved jobs keep theirs." : "."));
+    S.rEdit = null;
+    await compute();
+    await renderRunnersTab();
+    return;
+  }
+  const del = e.target.closest("[data-rdel]");
+  if (del) {
+    if (!window.confirm(`Remove ${del.dataset.rdel} from the runner library?`)) return;
+    const r = await post("/api/runner-delete", {id: del.dataset.rdel});
+    if (!r.ok) { toast(r.error, true); return; }
+    await renderRunnersTab();
+    return;
+  }
+  const sw = e.target.closest("[data-rswap]");
+  if (sw) { await swapRunner(sw.dataset.rswap); return; }
+});
+
+// Ticking a runner into the project copies its record — price included.
+$("runners").addEventListener("change", async (e) => {
+  const id = e.target.dataset.rpick;
+  if (id === undefined) return;
+  const r = await post("/api/runner-select", {job: S.job, id: id, on: e.target.checked});
+  if (!r.ok) { toast(r.error, true); e.target.checked = !e.target.checked; return; }
+  S.job = r.job;
+  places();
+  markDirty(true);
+  await compute();
+  drawRunners();
+});
+
+// Every drawer cabinet onto one runner. The engine says first which drawer
+// lines move — re-pointing an old job may legitimately change drawer lengths —
+// and nothing is written until that has been confirmed.
+async function swapRunner(to) {
+  const pre = await post("/api/runner-swap", {job: S.job, to: to});
+  if (!pre.ok) { toast(pre.error, true); return; }
+  if (!pre.cabinets.length) { toast(`Every drawer cabinet is already on ${to}.`); return; }
+  if (pre.error_after) { toast(pre.error_after, true); return; }
+  const lines = pre.moves.map((m) => `    ${m.cabinet}: ${m.label}   ${m.role}   ` +
+    (m.before ? `${m.before[0]} x ${m.before[1]}` : "—") + "  ->  " +
+    (m.after ? `${m.after[0]} x ${m.after[1]}` : "—")).join("\n");
+  const ok = window.confirm(`Hang cabinet${pre.cabinets.length === 1 ? "" : "s"} ` +
+    `${pre.cabinets.join(", ")} on ${to}?\n\n` +
+    (pre.moves.length ? `These drawer lines move:\n\n${lines}\n\n` +
+      `That is a design change — the boxes are sized off the runner. No designation is renamed.`
+      : `No drawer line moves: every box comes out the same size.`));
+  if (!ok) return;
+  const r = await post("/api/runner-swap", {job: S.job, to: to, apply: true});
+  if (!r.ok) { toast(r.error, true); return; }
+  S.job = r.job;
+  places();
+  markDirty(true);
+  await compute();
+  drawRunners();
+  toast(`Cabinet${r.cabinets.length === 1 ? "" : "s"} ${r.cabinets.join(", ")} now on ${to}.`);
+}
 
 /* Swapping a project board propagates everywhere it is used, so nothing is
    written until the change has been shown: which cabinets, which panels, and
@@ -6007,7 +6363,7 @@ function guarded(box, render, reset) {
 }
 
 function renderTab() {
-  if (S.tab === "boards") renderBoardsTab();
+  if (S.tab === "catalogue") { if (S.catSub === "runners") renderRunnersTab(); else renderBoardsTab(); }
   else if (S.tab === "cabinets") renderCab3D();
   else if (S.tab === "room") {
     renderUnplaced();
@@ -6030,7 +6386,7 @@ document.querySelector("nav").addEventListener("click", (e) => {
   const was = S.tab;
   S.tab = b.dataset.tab;
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("on", x === b));
-  ["boards", "cabinets", "room", "view3d", "cutlist", "nesting", "validation"].forEach((t) => {
+  ["catalogue", "cabinets", "room", "view3d", "cutlist", "nesting", "validation"].forEach((t) => {
     $("tab-" + t).hidden = t !== S.tab;
   });
   // Nothing renders in 3D while its tab is hidden: a laptop left on another
@@ -6494,8 +6850,8 @@ function adopt(job) {
 $("new").addEventListener("click", () => {
   if (!okToDiscard("Starting a new job")) return;
   adopt(blankJob());
-  // a new job starts on Boards: nothing can be cut until a board is selected
-  document.querySelector('nav [data-tab="boards"]').click();
+  // a new job starts on Catalogue -> Boards: nothing can be cut until a board is selected
+  openCatalogue("boards");
 });
 
 $("save").addEventListener("click", async () => {

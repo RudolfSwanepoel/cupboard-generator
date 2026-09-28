@@ -695,8 +695,33 @@ class Cabinet:
     # every job predating the tickbox reads. False keeps all four measurements
     # and the style in the job file but stops anything reading them.
     corner_unit: Optional[bool] = None
+    # The drawer runner this cabinet's drawers hang on (28 September 2026): the
+    # id of a runner the job selected from Catalogue -> Runners. Blank is the
+    # built-in LEGACY record (350 / 450 / 500), which is what every job saved
+    # before the catalogue reads, so none of them moves; it is never offered
+    # for a new cabinet. See `runner_rec` and `cabinetgen.hardware`.
+    runner: str = ""
 
     # ---- what is actually live, once the tickboxes have had their say ------
+
+    @property
+    def runner_rec(self):
+        """The runner record this cabinet is built on (`hardware.Runner`): the
+        job's copy of the one it names — bound by `Job.bind_runners` — or, for
+        a blank id or the seed id, the built-in record. None when it names a
+        runner nobody can find; the engine then cuts on LEGACY and the
+        validator blocks the export (`runner-not-selected`)."""
+        from . import hardware as H
+        bound = getattr(self, "_runner_bound", None)
+        if bound is not None and bound[0] == self.runner:
+            return bound[1]
+        return H.resolve(self.runner, None)
+
+    @property
+    def runner_or_legacy(self):
+        """`runner_rec`, or LEGACY where that is None — what is cut."""
+        from . import hardware as H
+        return self.runner_rec or H.LEGACY
 
     @property
     def is_panel(self) -> bool:
@@ -1407,6 +1432,26 @@ class Job:
     # there changes what the next job costs and never what this one did.
     materials: dict = field(default_factory=lambda: {k: dict(v)
                                                      for k, v in MATERIALS.items()})
+
+    # runner id -> the record this job was quoted with (28 September 2026),
+    # copied in from Catalogue -> Runners when the runner is ticked into the
+    # project, price and all: the same price capture `materials` is for a board.
+    # Written to the job file only when there is one, so every job saved before
+    # it round-trips byte for byte. In selection order.
+    runners: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.bind_runners()
+
+    def bind_runners(self):
+        """Hand every cabinet the job's copy of the runner it names, so
+        `Cabinet.runner_rec` — read wherever a drawer is sized, however deep in
+        the geometry — is this job's record and not a default. Called on
+        construction and by `generate_job` / `validate`; a cabinet whose runner
+        changes afterwards falls back to the built-in records until then."""
+        from . import hardware as H
+        for cab in self.cabinets:
+            cab._runner_bound = (cab.runner, H.resolve(cab.runner, self.runners))
 
     @property
     def board_ids(self) -> List[str]:

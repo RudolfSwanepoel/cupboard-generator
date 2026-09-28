@@ -31,9 +31,12 @@ class Standard:
     stack_gap: int = 2          # between stacked fronts in one opening
 
     # ---- drawers -----------------------------------------------------------
-    runner_lengths: tuple = (350, 450, 500)
+    # The runner itself — its lengths, its side clearance, its height, lift and
+    # setback — is a catalogue record (Catalogue -> Runners, `hardware.json`,
+    # 28 September 2026), selected into a job like a board. What was
+    # `runner_lengths` (350 / 450 / 500) is `hardware.LEGACY` now, and the old
+    # `drawer_front_deduct` 59 is two of its 13.5 clearances plus two box sides.
     runner_clearance: int = 40  # minimum space behind the runner
-    drawer_front_deduct: int = 59   # front/back length = internal width - this
     drawer_base_offset: int = 16    # base groove sits this far up from the bottom edge
     # Authoring aids for the face-height editor, not construction dimensions. The
     # heights they produce are what gets ordered; these only decide where a stack
@@ -164,14 +167,32 @@ class Standard:
         span = door_length - 2 * self.hinge_inset_drawn
         return [round(self.hinge_inset_drawn + span * i / (n - 1)) for i in range(n)]
 
-    def pick_runner(self, depth: int):
-        """Longest runner that leaves runner_clearance behind it. None if nothing fits."""
+    def pick_runner(self, depth: int, lengths) -> "int | None":
+        """Longest of a runner record's `lengths` that leaves runner_clearance
+        behind it. None if nothing fits. No length is special.
+
+            pick_runner(560, [350, 450, 500])   ->   500
+            pick_runner(450, [300, 350, 400, 450, 500, 550, 600])   ->   400
+        """
         usable = depth - self.runner_clearance
-        fits = [r for r in self.runner_lengths if r <= usable]
+        fits = [r for r in lengths if r <= usable]
         return max(fits) if fits else None
 
-    def drawer_front_length(self, w: int) -> int:
-        return self.internal_width(w) - self.drawer_front_deduct
+    def drawer_box_width(self, w: int, side_clearance: float) -> int:
+        """The box's outside width: the opening less the runner's clearance
+        each side (Gelmar: opening - 27).
+
+            drawer_box_width(600, 13.5)   ->   541
+        """
+        return self.internal_width(w) - int(round(2 * side_clearance))
+
+    def drawer_front_length(self, w: int, side_clearance: float) -> int:
+        """Drawer front and back: the box width less its two 16 mm sides —
+        internal width - 59 on a 13.5 clearance, exactly the old deduct.
+
+            drawer_front_length(600, 13.5)   ->   509
+        """
+        return self.drawer_box_width(w, side_clearance) - 2 * self.board_t
 
     def drawer_base(self, front_len: int, runner: int, material: str) -> tuple:
         """(length, width) of the drawer base."""

@@ -31,7 +31,7 @@ def panel_from_dict(d: dict) -> Panel:
 LATE_CABINET_FIELDS = (
     "corner_hand", "blind_width", "blind_board", "blind_edge_kind",
     "arm_shelves", "arm_shelf_arm", "arm_shelf_depth", "mitred_shelves",
-    "corner_door_width",
+    "corner_door_width", "runner",
 )
 
 
@@ -149,6 +149,11 @@ def job_to_dict(job: Job) -> dict:
     # written before criticals could be accepted.
     if job.acceptances:
         d["acceptances"] = [asdict(a) for a in job.acceptances]
+    # The runners this project selected, and the records it was quoted with —
+    # only when there is one, so a job saved before the catalogue is
+    # byte-identical.
+    if job.runners:
+        d["runners"] = job.runners
     return d
 
 
@@ -171,6 +176,7 @@ def job_from_dict(d: dict) -> Job:
                  for p in d.get("plinths", [])],
         acceptances=[Acceptance(**_only_known(Acceptance, a))
                      for a in d.get("acceptances", []) if isinstance(a, dict)],
+        runners=(dict(d["runners"]) if isinstance(d.get("runners"), dict) else {}),
     )
 
 

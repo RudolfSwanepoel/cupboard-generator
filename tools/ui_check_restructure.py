@@ -11,8 +11,8 @@ written to `output/ui_check_restructure/` for looking at.
 What it drives, against `jobs/Test.json` unless it says otherwise — the brief's
 Session 1 verification list:
 
-* tabs     the new order, the app opening on Boards (and New going there), and
-           the internal jumps still landing: Add with no board -> Boards, the
+* tabs     the new order, the app opening on Catalogue -> Boards (and New going there), and
+           the internal jumps still landing: Add with no board -> Catalogue -> Boards, the
            dock's issue line -> Validation, Show in cut list -> Cut list.
 * plan     Room -> Plan: the plan, layer toggles, isolate, zoom both ways, a
            real-mouse drag of a cabinet, click-select into the docked editor,
@@ -157,21 +157,23 @@ def mouse_drag(page, x0, y0, x1, y1, steps=14, pause=0.02):
 # ---------------------------------------------------------------------------
 
 def stage_tabs(pw):
-    print("\ntabs — the new order, opening on Boards, the internal jumps")
+    print("\ntabs — the new order, opening on Catalogue -> Boards, the internal jumps")
     browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
     errors = []
     ctx, page = new_page(browser, errors)
     check("the tab order", page.locator("nav button").all_inner_texts(),
-          ["Boards", "Cabinets", "Room", "3D view", "Cut list", "Nesting", "Validation"])
-    check("the app opens on Boards", (page.evaluate("() => S.tab"),
-                                      page.locator("#tab-boards").is_visible()), ("boards", True))
+          ["Catalogue", "Cabinets", "Room", "3D view", "Cut list", "Nesting", "Validation"])
+    # Boards became Catalogue -> Boards on 28 September 2026 (the drawers /
+    # runners / supports brief); the board library itself did not change
+    check("the app opens on Catalogue -> Boards", (page.evaluate("() => [S.tab, S.catSub]"),
+                                      page.locator("#catboards").is_visible()), (["catalogue", "boards"], True))
     shot(page, "tab_1_boards_new_job")
     tab(page, "cabinets")
     page.click("#add")
-    page.wait_for_function("() => S.tab === 'boards'", timeout=5000)
-    check("Add cabinet with no board selected goes to Boards", page.evaluate("() => S.tab"), "boards")
+    page.wait_for_function("() => S.tab === 'catalogue' && S.catSub === 'boards'", timeout=5000)
+    check("Add cabinet with no board selected goes to Catalogue -> Boards", page.evaluate("() => [S.tab, S.catSub]"), ["catalogue", "boards"])
     load_job(page, "Test")
-    for i, t in enumerate(["boards", "cabinets", "room", "view3d", "cutlist", "nesting", "validation"]):
+    for i, t in enumerate(["catalogue", "cabinets", "room", "view3d", "cutlist", "nesting", "validation"]):
         tab(page, t)
         if t == "cabinets":
             cab3d_ready(page)
@@ -179,7 +181,7 @@ def stage_tabs(pw):
             page.wait_for_function("() => typeof V3D === 'object' && V3D && !S.sceneStale", timeout=30000)
         time.sleep(0.5)
         check_true(f"{t}: its section shows, the others do not",
-                   page.evaluate("(t) => ['boards','cabinets','room','view3d','cutlist','nesting','validation']"
+                   page.evaluate("(t) => ['catalogue','cabinets','room','view3d','cutlist','nesting','validation']"
                                  ".every((k) => document.getElementById('tab-' + k).hidden === (k !== t))", t))
         shot(page, f"tab_{i + 1}_{t}")
     # the jumps
@@ -197,8 +199,8 @@ def stage_tabs(pw):
           (page.evaluate("() => S.tab"), page.locator("#cutlist tr.flash").get_attribute("data-label")),
           ("cutlist", label))
     page.click("#new")
-    page.wait_for_function("() => S.job.name === 'untitled' && S.tab === 'boards'", timeout=10000)
-    check("New goes to Boards: a new job starts there", page.evaluate("() => S.tab"), "boards")
+    page.wait_for_function("() => S.job.name === 'untitled' && S.tab === 'catalogue' && S.catSub === 'boards'", timeout=10000)
+    check("New goes to Catalogue -> Boards: a new job starts there", page.evaluate("() => [S.tab, S.catSub]"), ["catalogue", "boards"])
     check("no console errors", errors, [])
     ctx.close()
     browser.close()

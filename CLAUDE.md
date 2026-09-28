@@ -35,6 +35,7 @@ python tools/check_accept.py
 python tools/check_scene.py
 python tools/check_supports.py
 python tools/check_attached.py
+python tools/check_runners.py
 python tools/snapshot.py --compare baseline.json
 ```
 
@@ -44,7 +45,10 @@ real mouse in headless Chromium, `python tools/ui_check_attached.py` the
 attached-panel editor, drags and dialogs, and `python tools/ui_check_restructure.py`
 the UI restructure (tab order, Room -> Plan / Elevation, the Cabinets tab's 3D,
 the attached-panel drag, placing from the unplaced list, export by wall), with
-screenshots into `output/ui_check_restructure/`. All three are optional —
+screenshots into `output/ui_check_restructure/`, and `python tools/ui_check_drawers.py`
+the drawers / runners / supports brief (Supports' counts, Catalogue -> Boards |
+Runners, the runner library and swap, drawer boxes in 3D), screenshots into
+`output/ui_check_drawers/`. All four are optional —
 Playwright is the only third-party package anywhere near this app, and only
 those scripts need it — and each says so and exits 0 when it is not installed.
 The cloud machine's Chromium is revision 1194, which is `playwright==1.56.0`.
@@ -94,6 +98,39 @@ into `output/ui_check_drawers/`).
    ("PVC WHITE on 1 long + 1 short edges"). Pinned in `check_supports.py`
    `counts_not_ticks()`: the same counts cut the same line and cost whichever
    edges they name.
+2. **Runner catalogue, and Boards became Catalogue.** The top tab is
+   **Catalogue** with two sub-tabs, **Boards | Runners** (`S.catSub`, the Room
+   Plan | Elevation pattern); Boards is the board library exactly as it was,
+   and every jump that landed on Boards (start-up, New, Add cabinet with no
+   board) lands on Catalogue -> Boards through `openCatalogue`. Runners is
+   `hardware.json` (a `runners` list — `save` keeps any other list, so hinges
+   and handles can sit beside it) through `cabinetgen/hardware.py`: add / edit /
+   delete, tick into the project (the record is copied into `Job.runners`,
+   price per pair captured, written only when there is one), a used-by-saved-
+   jobs guard on delete, and **Use for all drawers**. Seed: **Gelmar 45 mm
+   full-extension ball-bearing** (`GELMAR45`: 45 high, 13.5 a side, 12.7 rail,
+   300-600, full, 35 kg, lift 5, setback 3). A cabinet names its runner
+   (`Cabinet.runner`, written only when set); a new cabinet takes the job's
+   first, or the Gelmar seed copied in (`/api/runner-default`). **The length
+   is picked over the record's list** (`Standard.pick_runner(depth, lengths)`:
+   the longest leaving `runner_clearance` 40 behind), **the box width off its
+   clearance** (`Standard.drawer_box_width` / `drawer_front_length`: opening −
+   2 × 13.5, then two 16 mm sides — the old 59 exactly). `Standard.runner_lengths`
+   and `drawer_front_deduct` are gone: a cabinet naming no runner — every job
+   saved before this — is cut on the built-in **`hardware.LEGACY`** record
+   (350 / 450 / 500, 13.5, 45, lift 5, setback 3), never offered for new work,
+   so the October job and Test.json cut exactly what they cut. The runner
+   record is reached through `Cabinet.runner_rec`, bound to the job's copy by
+   `Job.bind_runners` (on construction, and by `generate_job` / `validate`), so
+   every geometry call reads it without a new argument. Re-pointing a cabinet
+   (its Drawers section's **Runner** dropdown) or the job (**Use for all
+   drawers**) asks `/api/runner-swap` first and names the drawer lines that
+   move (a depth that now takes 400 or 550 — a design change the operator
+   makes). A cabinet naming a runner the project never selected is a CRITICAL
+   (`runner-not-selected`); `runner-depth` keeps its id and names the record's
+   shortest. Runner pairs are priced off the job's copy in `hardware` on the
+   compute reply and on Catalogue -> Runners — **not** in the Plazaboard
+   estimate. `tools/check_runners.py` pins it.
 
 **UI restructure, Session 2 — Fresh look, first round (28 September 2026,
 the same brief, "styling only").** One `<style>` block in `app/index.html`
@@ -227,10 +264,15 @@ dirty. Nothing else about either changed.
 | `<job>_elevation.svg` in the export | always written | **Removed** (brief) |
 | `<job>_elevation_<wall>.svg` | every wall | the walls ticked at export |
 | Plan in the export | — (never written) | `<job>_plan.svg`, always with a room |
-| Starting tab | Cabinets | Boards (start-up and New) |
+| Starting tab | Cabinets | Boards (start-up and New) — **Catalogue -> Boards** since the drawers brief |
 | 3D tab (room, handles, list, card, snapshot…) | 3D tab | 3D tab, unchanged; its module is now one `createView()` instance |
 | Attached-panel drag in 3D (spec B4) | not built | Cabinets tab's 3D |
 | Placing an item by drag from a list | not built (ruled not needed 21 Sept) | Room -> Plan, Room -> Elevation, 3D tab |
+| Board library (list, add / edit / delete, tick, swap, pictures) | Boards tab | **Catalogue -> Boards**, unchanged (drawers brief, 28 Sept) |
+| Runner lengths 350 / 450 / 500 | `Standard.runner_lengths` | `hardware.LEGACY` — a cabinet naming no runner; new work picks from Catalogue -> Runners |
+| Drawer front deduct 59 | `Standard.drawer_front_deduct` | derived: 2 × the runner's `side_clearance` + two box sides (`Standard.drawer_front_length`) |
+| A support's per-edge tickboxes (Front / Rear / Left / Right, Inner / Outer) | Supports section | **Long edges** and **Short edges** 0 / 1 / 2 in the same row; which edge a count means is `support_edges_for_counts` |
+| "Cut from" / "Edging" / "Colour" on a support row | Supports section | **Support Material / Edging Material / Edging Colour**, same controls |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**
@@ -1163,6 +1205,9 @@ restructure.
 cabinetgen/standard.py     every construction constant. Start here.
 cabinetgen/boards.py       the board library: load, save, tape names, job usage
 boards.json                the library itself, shared through the repo
+cabinetgen/hardware.py     the hardware catalogue: runners (LEGACY, the Gelmar seed, load,
+                           save, resolve); hinges and handles later
+hardware.json              the catalogue itself (`runners` list), shared through the repo
 cabinetgen/pictures.py     board pictures: Pictures/, what is stored, what is served
 Pictures/                  the board pictures themselves, shared through the repo
 cabinetgen/model.py        Panel, Drawer, Cabinet, Job
@@ -1209,6 +1254,9 @@ tools/check_scene.py       the 3D scene: ids, parts vs geometry, to_world, carca
                            sides, cut-list lines, Run order, read-only, no reader of it
 tools/check_supports.py    typed supports: the worked positions, what each cuts, the three
                            criticals, legacy rows unchanged, tape inside the size, the scene
+tools/check_runners.py     runners: the catalogue, LEGACY, the length and width a runner gives, the
+                           swap, the delete guard; the drawer setting; the drawer checks
+tools/ui_check_drawers.py  the drawers / runners / supports brief in the running app (Playwright)
 tools/check_attached.py    attached panels: derived place, attach/detach round trip, moves with
                            the cabinet, the room checks in and tip-up out, delete, duplicate,
                            the job file; and a new cabinet's supports by kind
@@ -1819,7 +1867,7 @@ places that assume it:
 | standard.py | `internal_width` | 103-104 | `W - 2t` — every shelf, support, top, bottom and divider width |
 | standard.py | `back_face_from_front` | 108 | shelf depth and the back's position |
 | standard.py | `back_size` | 120, 122, 124 | the backing panel, `W-20` / `H-20` / `H-10` |
-| standard.py | `drawer_front_length` | 155 | drawer front and back length, via `internal_width` |
+| standard.py | `drawer_box_width`, `drawer_front_length` | 180-195 | drawer box width (opening less the runner's clearance) and front / back length (less two `board_t` box sides), via `internal_width` |
 | standard.py | `drawer_base` | 161, 164 | drawer base, grooved and housed |
 | engine.py | `generate_cabinet` | 32 | `Wi`, which sizes tops, bottoms, supports, shelves, dividers |
 | engine.py | `generate_cabinet` | 78 | default divider height, `H - 2t` |

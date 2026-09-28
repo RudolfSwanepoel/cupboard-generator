@@ -160,7 +160,110 @@ def stage_supports(pw):
     browser.close()
 
 
-STAGES = {"supports": stage_supports}
+def stage_catalogue(pw):
+    print("\nPart 2 — Catalogue: Boards | Runners, and every jump that lands on Boards")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    check("the app opens on Catalogue -> Boards",
+          page.evaluate("() => [S.tab, S.catSub, !document.querySelector('#catboards').hidden]"),
+          ["catalogue", "boards", True])
+    check("the first tab reads Catalogue", page.evaluate("() => document.querySelector('nav button').textContent"), "Catalogue")
+    check("  and there is no Boards tab any more", page.evaluate("() => !!document.querySelector('nav [data-tab=\"boards\"]')"), False)
+    check("Boards is the board library, as it was", page.evaluate("() => !!document.querySelector('#boards table')"), True)
+    page.click('#catsubs [data-catsub="runners"]')
+    page.wait_for_selector("#runners table", timeout=10000)
+    check("Runners shows the library with the Gelmar seed",
+          page.evaluate("() => S.rlib.runners.map((r) => r.id)"), ["GELMAR45"])
+    row = page.evaluate("() => document.querySelector('#runners tbody tr').textContent")
+    check("  its lengths 300-600, 13.5 clearance, 45 high",
+          all(x in row for x in ("300 · 350 · 400 · 450 · 500 · 550 · 600", "13.5", "45")), True)
+    shot(page, "catalogue_runners")
+    # New goes to Catalogue -> Boards, from Runners
+    page.click("#new")
+    page.wait_for_function("() => S.job.name === 'untitled' && S.tab === 'catalogue' && S.catSub === 'boards'", timeout=10000)
+    check("New goes to Catalogue -> Boards", page.evaluate("() => [S.tab, S.catSub]"), ["catalogue", "boards"])
+    # Add cabinet with no board selected: the refusal lands on Catalogue -> Boards
+    page.evaluate("() => { S.catSub = 'runners'; showCatSub(); }")
+    tab(page, "cabinets")
+    page.click("#add")
+    page.wait_for_function("() => S.tab === 'catalogue'", timeout=5000)
+    check("Add cabinet with no board goes to Catalogue -> Boards", page.evaluate("() => [S.tab, S.catSub]"), ["catalogue", "boards"])
+    # a board ticked, a cabinet added: it takes the Gelmar runner, copied in
+    first = page.evaluate("() => S.lib.boards.find((b) => !b.thin).id")
+    page.check(f'#boards [data-pick="{first}"]')
+    page.wait_for_function(f"() => (S.res.boards || []).indexOf({json.dumps(first)}) >= 0", timeout=10000)
+    tab(page, "cabinets")
+    page.click("#add")
+    page.wait_for_function("() => S.job.cabinets.length === 1", timeout=10000)
+    computed(page)
+    check("a new cabinet names the Gelmar runner", page.evaluate("() => S.job.cabinets[0].runner"), "GELMAR45")
+    check("  and the project carries its copy, price captured",
+          page.evaluate("() => Object.keys(S.job.runners)"), ["GELMAR45"])
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+def stage_runners(pw):
+    print("\nPart 2 — runners: tick in, the Drawers section, a swap that moves drawer lines, add / delete")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    dialogs = []
+    page.on("dialog", lambda d: dialogs.append(d.message))
+    load_job(page, "Test")
+    select(page, 4)
+    page.wait_for_selector("#drawerbox select[data-runner]", timeout=5000)
+    check("cabinet 4 (saved before the catalogue) is on the legacy runner",
+          page.evaluate("() => document.querySelector('#drawerbox select[data-runner]').value"), "")
+    read = text(page, "#drawerbox [data-runread]")
+    check("  the readout is the engine's: 500 long, 70 behind", ("500" in read and "70 left behind" in read), True)
+    openc = page.evaluate("() => { document.querySelector('#druncat').click(); return [S.tab, S.catSub]; }")
+    check("Catalogue… in the Drawers section opens Catalogue -> Runners", openc, ["catalogue", "runners"])
+    page.wait_for_selector('#runners [data-rpick="GELMAR45"]', timeout=10000)
+    page.check('#runners [data-rpick="GELMAR45"]')
+    page.wait_for_function("() => (S.res.runners || []).indexOf('GELMAR45') >= 0", timeout=10000)
+    check("ticking copies the record into the project", page.evaluate("() => S.job.runners.GELMAR45.lengths"),
+          [300, 350, 400, 450, 500, 550, 600])
+    # make cabinet 7 shallower: legacy picks 350 there, Gelmar 400 — a real move
+    page.evaluate("() => { const c = S.job.cabinets.find((x) => x.number === 7); c.depth = 460; }")
+    computed(page)
+    before = page.evaluate("() => S.res.panels.filter((p) => p.cabinet === 7 && p.role === 'Drawer Side').map((p) => p.length)")
+    check("at 460 deep the legacy runner cuts 350 sides", before, [350] * len(before))
+    dialogs.clear()
+    page.click('#runners [data-rswap="GELMAR45"]')
+    page.wait_for_function("() => S.job.cabinets.filter((c) => c.drawers.length && c.kind !== 'panel').every((c) => c.runner === 'GELMAR45')", timeout=10000)
+    computed(page)
+    check("Use for all drawers asked first, naming the lines that move",
+          bool(dialogs) and "350 x" in dialogs[0] and "400 x" in dialogs[0], True)
+    after = page.evaluate("() => S.res.panels.filter((p) => p.cabinet === 7 && p.role === 'Drawer Side').map((p) => p.length)")
+    check("  and cabinet 7's sides are 400 now", after, [400] * len(after))
+    four = page.evaluate("() => S.res.panels.filter((p) => p.cabinet === 4 && p.role === 'Drawer Side').map((p) => p.length)")
+    check("  cabinet 4 at 570 deep is 500 either way", four, [500] * len(four))
+    shot(page, "runners_in_project")
+    # a runner added in the library, then deleted (it names no saved job)
+    page.click("#rnew")
+    page.fill("#rf-name", "Check runner")
+    page.fill("#rf-lengths", "300, 400 350")
+    page.click("#rf-save")
+    page.wait_for_function("() => S.rlib && S.rlib.runners.some((r) => r.id === 'CHECKRUNNER')", timeout=10000)
+    check("Add runner saves it, lengths cleaned and sorted",
+          page.evaluate("() => S.rlib.runners.find((r) => r.id === 'CHECKRUNNER').lengths"), [300, 350, 400])
+    page.click('#runners [data-rdel="CHECKRUNNER"]')
+    page.wait_for_function("() => S.rlib && !S.rlib.runners.some((r) => r.id === 'CHECKRUNNER')", timeout=10000)
+    check("  and Del takes it out again", True, True)
+    # the per-cabinet control: back onto nothing but GELMAR45 is offered
+    select(page, 7)
+    page.wait_for_selector("#drawerbox select[data-runner]", timeout=5000)
+    opts = page.evaluate("() => [...document.querySelectorAll('#drawerbox select[data-runner] option')].map((o) => o.value)")
+    check("the Drawers section offers the project's runners, and not legacy", opts, ["GELMAR45"])
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+STAGES = {"supports": stage_supports, "catalogue": stage_catalogue, "runners": stage_runners}
 
 with sync_playwright() as pw:
     for key, fn in STAGES.items():

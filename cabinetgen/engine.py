@@ -307,12 +307,19 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     # stays in the job file and nothing is built from it.
     stack = cab.drawer_list
     if stack:
-        runner = std.pick_runner(cab.depth)
+        # The runner is a catalogue record the cabinet names (28 September 2026):
+        # the box length is the longest length on it that leaves
+        # runner_clearance behind, and the box width is the opening less its
+        # side clearance each way. A cabinet naming no runner is on LEGACY, the
+        # 350 / 450 / 500 every job before the catalogue was quoted on.
+        rr = cab.runner_or_legacy
+        runner = std.pick_runner(cab.depth, rr.lengths)
         if runner is None:
             raise ValueError(
                 f"cabinet {n}: no runner fits a {cab.depth} mm deep box "
-                f"(need {min(std.runner_lengths) + std.runner_clearance} mm)")
-        front_len = std.drawer_front_length(cab.width)
+                f"(need {(rr.shortest or 0) + std.runner_clearance} mm for the "
+                f"shortest {rr.name or 'runner'}, {rr.shortest})")
+        front_len = std.drawer_front_length(cab.width, rr.side_clearance)
         # The box is a board of its own and so is the face. Both default to the
         # cabinet's — box from the carcass, face from the exterior — so a job
         # written before they could be chosen cuts exactly what it was quoted.
@@ -534,6 +541,7 @@ def generate_job(job: Job) -> List[Panel]:
     names them as it creates them, and touches nothing the job already owns —
     not a bespoke panel, not a loose one, not a code. Pinned in check_drag.py."""
     out: List[Panel] = []
+    job.bind_runners()
     for cab in job.cabinets:
         out.extend(generate_cabinet(cab, job.std, job.materials))
     out.extend(resolved(job.loose, job.materials))

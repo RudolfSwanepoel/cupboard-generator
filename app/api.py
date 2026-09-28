@@ -5,6 +5,7 @@ engine; this module only moves it from a dataclass into a dict.
 """
 import base64
 import binascii
+import copy
 import glob
 import json
 import os
@@ -18,6 +19,7 @@ from urllib.parse import unquote
 from cabinetgen import boards as B
 from cabinetgen import nest as N
 from cabinetgen import pictures as PIC
+from cabinetgen import hardware as H
 from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
                                 opening_for, remainder, split_pair, stack)
 from cabinetgen.engine import generate_job, mitre_door_width, panel_of
@@ -131,7 +133,12 @@ def defaults(payload):
         "ok": True,
         "standard": {k: v for k, v in asdict(STANDARD).items()
                      if isinstance(v, (int, float, str))},
-        "runner_lengths": list(STANDARD.runner_lengths),
+        # The runner catalogue's fixed answers (28 September 2026): the types
+        # built, the seed a new cabinet falls back to, and the LEGACY record a
+        # cabinet naming no runner is cut on — never offered for new work.
+        "runner_types": list(H.RUNNER_TYPES),
+        "runner_seed": H.SEED_ID,
+        "legacy_runner": asdict(H.LEGACY),
         "codes": CODES,
         "edge_materials": sorted(x for x in ALLOWED_EDGE if x),
         "kinds": ["tall", "upper", "base", "panel"],
@@ -268,6 +275,27 @@ def _placed_at(job, cab):
     return {"wall": p.wall, "x": p.x, "y": p.y, "z": p.z}
 
 
+def _runner_info(job, cab, std):
+    """One cabinet's runner, resolved: the record's id and name, whether it is
+    LEGACY or selected, and — where it has drawers — the length picked, the
+    space left behind it, the travel and the box width."""
+    rr = cab.runner_rec
+    rec = rr or H.LEGACY
+    info = {"id": cab.runner, "name": rec.name, "legacy": not cab.runner,
+            "selected": (not cab.runner) or cab.runner in (job.runners or {}),
+            "known": rr is not None, "lengths": list(rec.lengths),
+            "height": rec.height, "side_clearance": rec.side_clearance,
+            "length": None, "behind": None, "travel": None, "box_width": None}
+    if cab.drawer_list and not cab.is_panel:
+        length = std.pick_runner(cab.depth, rec.lengths)
+        info["length"] = length
+        if length is not None:
+            info["behind"] = cab.depth - length
+            info["travel"] = rec.travel(length)
+        info["box_width"] = std.drawer_box_width(cab.width, rec.side_clearance)
+    return info
+
+
 def _geometry_info(job, cab, std):
     g = geometry(cab, std, job.materials)
     # One leaf per door panel that was actually cut, so a bespoke or corner unit
@@ -290,6 +318,10 @@ def _geometry_info(job, cab, std):
             # is why the Size fields can be greyed and still say something true.
             "corner": _corner_info(cab, std, job.materials),
             "drawers_on": bool(cab.drawer_list),
+            # The runner the drawers hang on, as the engine reads it: the
+            # length it picks, what is left behind, how far it pulls out. The
+            # editor shows these and works out none of them.
+            "runner": _runner_info(job, cab, std),
             "doors_on": bool(cab.door_count),
             "door_count": cab.door_count,
             # Which board each leaf is cut from, resolved, and which of those was
@@ -737,6 +769,177 @@ def board_delete(payload):
     return {"ok": True}
 
 
+# --- the runner catalogue (28 September 2026) -----------------------------------
+#
+# The same shape as the board library: a list in the repo (`hardware.json`),
+# selected into a project by copying the record in (the price capture), and a
+# delete that refuses a runner a saved job uses. Everything a runner drives —
+# box width, box length, the "no runner fits" critical, the 3D — reads the
+# record the cabinet names.
+
+# The drawer box lines a runner sizes: what a runner swap reports as moving.
+DRAWER_BOX_ROLES = ("Drawer Side", "Drawer Front", "Drawer Base")
+
+
+def _runner_payload(r, usage=None):
+    d = H.to_record(r)
+    d["shortest"] = r.shortest
+    d["travel_at"] = {str(n): r.travel(n) for n in r.lengths}
+    if usage is not None:
+        d["used_by"] = list(usage.get(r.id, []))
+    return d
+
+
+def runner_list(payload):
+    """The runner library, plus which saved jobs use each one."""
+    usage = H.scan_jobs(JOBS_DIR)
+    return {"ok": True,
+            "runners": [_runner_payload(r, usage) for r in H.load()],
+            "path": os.path.basename(H.LIBRARY),
+            "types": list(H.RUNNER_TYPES), "seed": H.SEED_ID,
+            "legacy": _runner_payload(H.LEGACY)}
+
+
+def runner_save(payload):
+    """Add or edit one runner in the library. The id is a key: it cannot be
+    changed on an existing runner (a saved job names it). The project on screen
+    keeps its captured price; every other field of its copy follows the library,
+    as a board's does, and the reply says so."""
+    lib = H.load()
+    d = dict(payload.get("runner") or {})
+    name = str(d.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "error": "a runner needs a name"}
+    old_id = H.clean_id(payload.get("from"))
+    rid = old_id or H.clean_id(d.get("id")) or H.next_id(lib, name)
+    if not old_id and H.find(lib, rid) is not None:
+        return {"ok": False, "error": f"there is already a runner {rid} — pick another id"}
+    d["id"] = rid
+    r = H.runner_from_dict(d)
+    if r.type not in H.RUNNER_TYPES:
+        return {"ok": False, "error": f"only {', '.join(H.RUNNER_TYPES)} runners are built"}
+    if not r.lengths:
+        return {"ok": False, "error": "a runner needs at least one length"}
+    for k in ("height", "side_clearance"):
+        if not getattr(r, k) or getattr(r, k) <= 0:
+            return {"ok": False, "error": f"{k.replace('_', ' ')} must be more than 0"}
+    out = [x for x in lib if x.id != rid]
+    at = next((i for i, x in enumerate(lib) if x.id == rid), len(out))
+    out.insert(at, r)
+    H.save(out)
+    reply = {"ok": True, "id": rid}
+    job = _job(payload) if payload.get("job") else None
+    if job is not None and rid in (job.runners or {}):
+        price = job.runners[rid].get("price", r.price)
+        job.runners[rid] = dict(H.to_record(r), price=price)
+        reply["job"] = job_to_dict(job)
+        reply["project_follows"] = True
+    return reply
+
+
+def runner_delete(payload):
+    """Remove a runner from the library, but never one a saved job uses."""
+    rid = str(payload.get("id") or "")
+    used = H.scan_jobs(JOBS_DIR).get(rid, [])
+    if used:
+        return {"ok": False,
+                "error": f"{rid} is used by {', '.join(used)} — those jobs keep their "
+                         f"own copy, but removing it from the library would leave "
+                         f"nothing to select it from again"}
+    H.save([r for r in H.load() if r.id != rid])
+    return {"ok": True}
+
+
+def runner_select(payload):
+    """Tick a library runner into this project (its record is copied in, price
+    captured), or take one out — refused while a cabinet still names it."""
+    job = _job(payload)
+    rid = str(payload.get("id") or "")
+    if payload.get("on"):
+        r = (H.find(H.load(), rid) or H.builtin(rid)) if rid else None
+        if r is None:
+            return {"ok": False, "error": f"no runner {rid!r} in the catalogue"}
+        job.runners = dict(job.runners or {})
+        job.runners[rid] = H.to_record(r)
+    else:
+        using = [c.number for c in job.cabinets if c.runner == rid]
+        if using:
+            return {"ok": False,
+                    "error": f"{rid} is still named by cabinet{'s' if len(using) > 1 else ''} "
+                             f"{', '.join(map(str, using))} — point "
+                             f"{'them' if len(using) > 1 else 'it'} at another runner first"}
+        job.runners = {k: v for k, v in (job.runners or {}).items() if k != rid}
+    return {"ok": True, "job": job_to_dict(job)}
+
+
+def runner_default(payload):
+    """The runner a NEW cabinet names: the project's first; with none selected,
+    the Gelmar seed, copied in from the catalogue (or the built-in seed if the
+    catalogue has lost it) so it is priced like any selection."""
+    job = _job(payload)
+    if job.runners:
+        return {"ok": True, "id": next(iter(job.runners)), "added": False,
+                "runners": job.runners}
+    r = H.find(H.load(), H.SEED_ID) or H.SEED
+    job.runners = {r.id: H.to_record(r)}
+    return {"ok": True, "id": r.id, "added": True, "name": r.name,
+            "runners": job.runners}
+
+
+def runner_swap(payload):
+    """Point cabinets at another runner, and say which drawer lines move first.
+
+    `to` is the runner (a selected id; blank is LEGACY and is refused — it is
+    never offered for new work); `cabinets` the numbers to move (default:
+    every cabinet with drawers on `from`, or on anything when `from` is not
+    given). Returns the lines that change — drawer sides, fronts and bases
+    whose size moves, e.g. a depth that now takes 400 or 550 — and, with
+    `apply`, the job with the runner written. Numbers never change."""
+    job = _job(payload)
+    to = str(payload.get("to") or "")
+    if not to:
+        return {"ok": False, "error": "choose a runner to move onto"}
+    if to not in (job.runners or {}):
+        return {"ok": False, "error": f"{to} is not selected into this project — tick it first"}
+    frm = payload.get("from")
+    nums = payload.get("cabinets")
+    if nums is None:
+        nums = [c.number for c in job.cabinets if c.drawer_list and not c.is_panel
+                and (frm is None or c.runner == str(frm)) and c.runner != to]
+    nums = [int(n) for n in nums]
+    after = copy.deepcopy(job)
+    for c in after.cabinets:
+        if c.number in nums:
+            c.runner = to
+    after.bind_runners()
+
+    def lines(j):
+        try:
+            ps = generate_job(j)
+        except ValueError as exc:
+            return None, str(exc)
+        return {(p.cabinet, p.label, p.role): (p.length, p.width, p.qty, p.material)
+                for p in ps if p.cabinet in nums and p.role in DRAWER_BOX_ROLES}, ""
+
+    before, e0 = lines(job)
+    moved, e1 = lines(after)
+    moves = []
+    if before is not None and moved is not None:
+        for k in sorted(set(before) | set(moved), key=lambda k: (k[0], k[1])):
+            b, a = before.get(k), moved.get(k)
+            if b != a:
+                moves.append({"cabinet": k[0], "label": k[1], "role": k[2],
+                              "before": list(b) if b else None,
+                              "after": list(a) if a else None})
+    reply = {"ok": True, "cabinets": nums, "moves": moves,
+             "error_after": e1, "to": to}
+    if payload.get("apply"):
+        if e1:
+            return {"ok": False, "error": e1}
+        reply["job"] = job_to_dict(after)
+    return reply
+
+
 # --- board pictures ---------------------------------------------------------
 #
 # Two ways in, one answer. Both end at `cabinetgen.pictures`, which copies the
@@ -1165,6 +1368,12 @@ def compute(payload):
         # record it was quoted with. The dropdowns offer these and nothing else.
         "boards": job.board_ids,
         "materials": {k: _board_payload(job, k) for k in (job.materials or {})},
+        # The runners this project selected, in selection order, and how many
+        # pairs each one hangs — priced from the job's own copy, never folded
+        # into the Plazaboard total (runners are not bought from them).
+        "runners": list((job.runners or {}).keys()),
+        "runner_records": {k: dict(v) for k, v in (job.runners or {}).items()},
+        "hardware": _hardware_summary(job),
         "room": _room_info(job),
         "panels": [], "issues": [], "blocking": False, "lapsed": [],
         "summary": {"materials": {}, "edging": {}, "potholes": 0},
@@ -1219,6 +1428,26 @@ def compute(payload):
     out["summary"] = summary
     out["cost"] = estimate_cost(job, summary)
     return out
+
+
+def _hardware_summary(job):
+    """Runner pairs per runner: one pair per drawer, priced off the job's copy
+    of the record (the price capture). LEGACY carries no price."""
+    rows = {}
+    for c in job.cabinets:
+        if c.is_panel or not c.drawer_list:
+            continue
+        key = c.runner
+        rec = (job.runners or {}).get(key) if key else None
+        name = (rec or {}).get("name") or (c.runner_rec or H.LEGACY).name
+        price = float((rec or {}).get("price") or 0)
+        r = rows.setdefault(key, {"id": key, "name": name, "pairs": 0,
+                                  "price": price, "cabinets": []})
+        r["pairs"] += len(c.drawer_list)
+        r["cabinets"].append(c.number)
+    for r in rows.values():
+        r["total"] = round(r["pairs"] * r["price"], 2)
+    return list(rows.values())
 
 
 def drawer_stack(payload):
@@ -1958,6 +2187,12 @@ ROUTES = {
     "/api/drawer-divider": drawer_divider,
     "/api/what-if": what_if,
     "/api/boards": board_list,
+    "/api/runners": runner_list,
+    "/api/runner-save": runner_save,
+    "/api/runner-delete": runner_delete,
+    "/api/runner-select": runner_select,
+    "/api/runner-default": runner_default,
+    "/api/runner-swap": runner_swap,
     "/api/board-save": board_save,
     "/api/board-delete": board_delete,
     "/api/board-select": board_select,
