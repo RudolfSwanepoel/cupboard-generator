@@ -78,6 +78,7 @@ const LOOK = {
   runner: {roughness: 0.45, metalness: 0.3},                                          // hardware: grey
   room: {roughness: 0.9, metalness: 0},                                               // floor, walls, ceiling: matte
   edge: {opacity: 0.55, angle: 20},   // Shaded + edges: only where faces meet at an angle, and quieter
+  front: {opacity: 1, angle: 1, width: 1.25},   // a FRONT's perimeter: every edge, full strength, in every display mode (px)
   outline: {selected: 2.0, hover: 1.4},   // the selection is an OUTLINE (px), not a tint
   grid: {minor: 0.22, major: 0.4},
 };
@@ -657,7 +658,8 @@ function dropLooks(keep, all) {
 // What a mesh is drawn with: the variant of its shared materials, and its
 // thin edges shown or not — in Shaded + edges only where faces meet at an
 // angle (EdgesGeometry's threshold, LOOK.edge.angle) and quieter
-// (LOOK.edge.opacity); X-ray as it always was. The selection outline is
+// (LOOK.edge.opacity); X-ray as it always was. A front's perimeter is drawn
+// in every mode (`isFront`). The selection outline is
 // separate (`outlineMesh`) and is not touched here.
 function applyDisplay(mesh) {
   const xray = V.display === "xray";
@@ -665,9 +667,14 @@ function applyDisplay(mesh) {
   if (mesh.userData.mats) mesh.material = mesh.userData.mats(variant);
   const edges = mesh.userData.edges;
   if (edges) {
-    edges.visible = V.display !== "shaded";
-    edges.material.opacity = (xray ? 1 : LOOK.edge.opacity) * (mesh.userData.ghost ? GHOST : 1);
-    edges.material.transparent = true;
+    if (edges.userData.front) {
+      edges.visible = true;
+      edges.material = frontLineMaterial(mesh.userData.ghost ? "ghost" : "solid");
+    } else {
+      edges.visible = V.display !== "shaded";
+      edges.material.opacity = (xray ? 1 : LOOK.edge.opacity) * (mesh.userData.ghost ? GHOST : 1);
+      edges.material.transparent = true;
+    }
   }
   if (mesh.userData.outline) mesh.userData.outline.material = outlineMaterial(mesh.userData.outlineKind, mesh.userData.ghost);
 }
@@ -683,6 +690,37 @@ function extrude(outline, z0, z1) {
   return g;
 }
 
+// A FRONT — a door leaf, a drawer face, a blind corner's flush panel (Round 2,
+// 29 September 2026). Its perimeter is what makes a run read as doors: the
+// 3 mm gaps between neighbours are a pixel or less at the Home zoom, so each
+// front draws every one of its own edges as a thin line at PAPER.edgeFront,
+// at full strength and in Shaded as well as Shaded + edges. Carcass and
+// interior parts keep the angle threshold and the quieter line.
+//
+// Drawn as FAT lines (three's LineSegments2, as the selection outline is), not
+// GL lines: a front's material is pulled towards the camera by a polygon
+// offset (it sits exactly on the carcass face), and a GL line takes no
+// offset, so a thin line on a front's own face lost the depth test to the
+// face it outlines and came out broken and faint. A fat line is triangles and
+// takes an offset of its own.
+function isFront(part) {
+  return part.role === "door" || part.role === "drawer" || part.role === "blind";
+}
+
+function frontLineMaterial(variant) {
+  return cachedMaterial(["frontline", variant].join("|"), () => {
+    const m = new LineMaterial({
+      color: PAPER.edgeFront, linewidth: LOOK.front.width, transparent: true,
+      opacity: variant === "ghost" ? LOOK.front.opacity * GHOST : LOOK.front.opacity,
+      toneMapped: false, depthWrite: false, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -8});
+    m.userData.shared = true;
+    m.userData.outline = true;                 // `resize` keeps its resolution
+    if (V.els.view) m.resolution.set(Math.max(V.els.view.clientWidth, 1), Math.max(V.els.view.clientHeight, 1));
+    return m;
+  });
+}
+
 function edgeColourFor(role) {
   if (role === "door" || role === "drawer" || role === "blind" || role === "panel") return PAPER.edgeFront;
   return PAPER.edgeCarcass;
@@ -693,11 +731,21 @@ function buildPart(part) {
   const mats = materialsFor(part);
   const mesh = new THREE.Mesh(geom, mats("solid"));
   mesh.userData = {part: part, number: part.cab, id: part.id, ghost: false, mats: mats};
-  const edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(geom, LOOK.edge.angle),
-    new THREE.LineBasicMaterial({color: edgeColourFor(part.role), transparent: true,
-                                 opacity: LOOK.edge.opacity, toneMapped: false}));
+  const front = isFront(part);
+  let edges;
+  if (front) {
+    const eg = new THREE.EdgesGeometry(geom, LOOK.front.angle);
+    edges = new LineSegments2(new LineSegmentsGeometry().fromEdgesGeometry(eg), frontLineMaterial("solid"));
+    eg.dispose();
+    edges.renderOrder = 1;
+  } else {
+    edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geom, LOOK.edge.angle),
+      new THREE.LineBasicMaterial({color: edgeColourFor(part.role), transparent: true,
+                                   opacity: LOOK.edge.opacity, toneMapped: false}));
+  }
   edges.userData.base = edgeColourFor(part.role);
+  edges.userData.front = front;
   mesh.add(edges);
   mesh.userData.edges = edges;
   // a door rotates about its hinge, a drawer face slides out: keep the rest
@@ -1039,7 +1087,11 @@ function outlineMesh(mesh, kind) {
   if (!ol) {
     // built the first time the part is selected or hovered, from the same
     // EdgesGeometry its thin edges use, so the two cannot disagree
-    const g = new LineSegmentsGeometry().fromEdgesGeometry(mesh.userData.edges.geometry);
+    // (a front's thin edges are fat lines already: the same segments, copied)
+    const src = mesh.userData.edges;
+    const g = src.userData.front
+      ? new LineSegmentsGeometry().setPositions(src.geometry.attributes.instanceStart.data.array)
+      : new LineSegmentsGeometry().fromEdgesGeometry(src.geometry);
     ol = new LineSegments2(g, outlineMaterial(kind, mesh.userData.ghost));
     ol.computeLineDistances();
     ol.renderOrder = 2;

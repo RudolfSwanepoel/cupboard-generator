@@ -1204,8 +1204,68 @@ def stage_look(pw):
     check("selected: the outline shows on the face", page.evaluate(f"() => V3C.partInfo({json.dumps(face['id'])}).outline"), "sel")
     px1 = page.evaluate("([x, y]) => V3C.pixel(x, y)", at)
     check("and the pixel on the face is unchanged (the outline, not the face, shows selection)", px1, px0)
+    look_fronts(page)
     check("no console errors", errors, [])
     browser.close()
+
+
+def look_fronts(page):
+    """Round 2, item 2 (29 September 2026): the gaps between fronts read. Every
+    door leaf and drawer face draws its perimeter in every display mode, and at
+    the 3D tab's Home zoom a scan across the seam between two neighbouring
+    fronts crosses a line that stands out from the faces either side."""
+    open_3d(page)
+    wait_scene(page)
+    page.evaluate("() => { V3D.select(null); V3D.setDisplay('shaded'); V3D.viewHome(false); }")
+    settle(page)
+    time.sleep(0.4)
+    sc = page.evaluate("() => fetch('/api/scene', {method: 'POST', headers: {'Content-Type': 'application/json'},"
+                       " body: JSON.stringify({job: S.job})}).then((r) => r.json())")
+    parts = {p["id"]: p for i in sc["items"] for p in i["parts"]}
+    side = next(p for i in sc["items"] if i["number"] == 1 for p in i["parts"] if p["role"] == "side")
+    check("Shaded: a front's perimeter is drawn, a carcass side's edges are not",
+          (page.evaluate("() => V3D.partInfo('1:door:0').edges"),
+           page.evaluate(f"() => V3D.partInfo({json.dumps(side['id'])}).edges")), (True, False))
+    ox, oy = viewport_origin_of(page, "#v3dview canvas")
+
+    def lum(p):
+        return 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]
+
+    def seam(a_id, b_id, label):
+        a, b = parts[a_id], parts[b_id]
+        (ax0, ay0, ax1, ay1), (bx0, by0, bx1, by1) = [
+            (min(q[0] for q in p["outline"]), min(q[1] for q in p["outline"]),
+             max(q[0] for q in p["outline"]), max(q[1] for q in p["outline"])) for p in (a, b)]
+        if abs(a["z0"] - b["z0"]) < 1:                # side by side: a vertical seam, scanned along the wall
+            z = (a["z0"] + a["z1"]) / 2
+            if (ax1 - ax0) > (ay1 - ay0):             # the fronts run along x (wall A), facing +y
+                m = (min(ax1, bx1) + max(ax0, bx0)) / 2
+                ends = [(m - 60, max(ay1, by1), z), (m + 60, max(ay1, by1), z)]
+            else:                                     # along y (wall B), facing -x
+                m = (min(ay1, by1) + max(ay0, by0)) / 2
+                ends = [(min(ax0, bx0), m - 60, z), (min(ax0, bx0), m + 60, z)]
+        else:                                         # one over the other: a horizontal seam, scanned up
+            lo, hi = (a, b) if a["z0"] < b["z0"] else (b, a)
+            m = (lo["z1"] + hi["z0"]) / 2
+            ends = [((ax0 + ax1) / 2, max(ay1, by1), m - 60), ((ax0 + ax1) / 2, max(ay1, by1), m + 60)]
+        p0, p1 = [page.evaluate("([x, y, z]) => V3D.project(x, y, z)", list(e)) for e in ends]
+        n = max(int(math.hypot(p1["x"] - p0["x"], p1["y"] - p0["y"]) * 2), 8)
+        pts = [[ox + p0["x"] + (p1["x"] - p0["x"]) * k / n, oy + p0["y"] + (p1["y"] - p0["y"]) * k / n] for k in range(n + 1)]
+        px = page.evaluate("(pts) => pts.map(([x, y]) => V3D.pixel(x, y))", pts)
+        ls = [lum(p) for p in px]
+        # against the NEARER of the two faces, so two boards of different
+        # colours do not pass on their own difference
+        fa, fb = sum(ls[:3]) / 3, sum(ls[-3:]) / 3
+        off = max(min(abs(v - fa), abs(v - fb)) for v in ls)
+        check_true(f"{label}: a line between the two stands out from the faces at Home",
+                   off >= 15, f"faces {fa:.0f} and {fb:.0f}, the seam {off:.0f} off the nearer, over {n / 2:.0f} px")
+
+    seam("1:door:0", "1:door:1", "cabinet 1's pair of doors")
+    seam("11:door:0", "11:door:1", "cabinet 11's pair (GREY)")
+    seam("4:drawer:0", "4:drawer:1", "cabinet 4's drawers 1 and 2")
+    seam("4:drawer:2", "4:drawer:3", "cabinet 4's drawers 3 and 4")
+    seam("7:drawer:0", "7:drawer:1", "cabinet 7's drawers 1 and 2 (one board)")
+    page.evaluate("() => V3D.setDisplay('edges')")
 
 
 def viewport_origin_of(page, selector):
