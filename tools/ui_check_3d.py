@@ -13,7 +13,12 @@ WebGL in headless Chromium is software-rendered through SwiftShader, which is
 what `--use-angle=swiftshader --enable-unsafe-swiftshader` asks for.
 
 What is exercised is the brief's acceptance list, stage by stage, against
-`jobs/Test.json` unless a check says otherwise. The Python checks in
+`tools/fixtures/Test_3d.json` unless a check says otherwise: Test.json frozen
+as it stood at HEAD on 29 September 2026 (14a5ea7). It used to read the live
+`jobs/Test.json`, which was edited and saved in the app while these checks
+were running on that date (cabinet 4's drawer faces, panel 8's depth), and
+three lines that pinned those figures failed: a check never reads live
+workshop data. The Python checks in
 `tools/check_scene.py` are the unit level; this is the "in the running app,
 with a real mouse" level that the brief asks for on top of them.
 """
@@ -154,18 +159,23 @@ def stage_f1(pw):
     check("view3d.js is not loaded before the tab is opened",
           any("view3d.js" in u for u in before), False)
     check("nor is three.js", any("/vendor/" in u for u in before), False)
-    load_job(page, "Test")
+    load_fixture(page, "Test_3d")
     open_3d(page)
     wait_scene(page)
     check("every request went to this server only", sorted(hosts), ["127.0.0.1"])
     fetched = [u.split("/", 3)[3] for u in requests if "/vendor/" in u or "view3d" in u]
     # three's fat-line trio joined the vendored set with the 3D realism brief
-    # (29 September 2026): the selection outline is drawn with it
-    check("the module, the two libraries and three's line addons were fetched, and nothing else off /vendor/",
+    # (29 September 2026): the selection outline is drawn with it; and with
+    # Round 2 its GTAOPass and what that imports (ambient occlusion)
+    check("the module, the two libraries and three's line and GTAO addons were fetched, and nothing else off /vendor/",
           sorted(set(fetched)),
           ["app/view3d.js", "vendor/camera-controls/camera-controls.module.js",
            "vendor/three/addons/lines/LineMaterial.js", "vendor/three/addons/lines/LineSegments2.js",
            "vendor/three/addons/lines/LineSegmentsGeometry.js",
+           "vendor/three/addons/math/SimplexNoise.js",
+           "vendor/three/addons/postprocessing/GTAOPass.js", "vendor/three/addons/postprocessing/Pass.js",
+           "vendor/three/addons/shaders/CopyShader.js", "vendor/three/addons/shaders/GTAOShader.js",
+           "vendor/three/addons/shaders/PoissonDenoiseShader.js",
            "vendor/three/three.core.js", "vendor/three/three.module.js"])
     check("no console errors", errors, [])
     check_true("a WebGL canvas is in the viewport",
@@ -235,7 +245,7 @@ def stage_f3(pw):
     ctx, page = new_page(browser, errors)
     page.goto(URL)
     page.wait_for_function("() => S.def !== null", timeout=15000)
-    load_job(page, "Test")
+    load_fixture(page, "Test_3d")
     open_3d(page)
     wait_scene(page)
     scene = page.request.post(URL.rstrip("/") + "/api/scene",
@@ -490,7 +500,7 @@ def stage_f4(pw):
     page.goto(URL)
     page.wait_for_function("() => S.def !== null", timeout=15000)
     page.evaluate("() => { try { localStorage.clear(); } catch (e) {} }")
-    load_job(page, "Test")
+    load_fixture(page, "Test_3d")
     open_3d(page)
     wait_scene(page)
     scene = page.request.post(URL.rstrip("/") + "/api/scene",
@@ -560,7 +570,7 @@ def stage_f4(pw):
     page.click('nav [data-tab="cabinets"]')              # the app opens on Boards
     page.click("#cabdock .docktog")
     check("and opens again", page.evaluate("() => document.getElementById('cabdock').classList.contains('closed')"), False)
-    load_job(page, "Test")
+    load_fixture(page, "Test_3d")
     check("with nothing selected the dock says what to do",
           "Select a cabinet" in page.locator("#editor").inner_text(), True)
 
@@ -670,7 +680,7 @@ def stage_f5(pw):
     ctx, page = new_page(browser, errors)
     page.goto(URL)
     page.wait_for_function("() => S.def !== null", timeout=15000)
-    load_job(page, "Test")
+    load_fixture(page, "Test_3d")
     open_3d(page)
     wait_scene(page)
     scene = page.request.post(URL.rstrip("/") + "/api/scene",
@@ -788,7 +798,7 @@ def stage_f6(pw):
     ctx, page = new_page(browser, errors)
     page.goto(URL)
     page.wait_for_function("() => S.def !== null", timeout=15000)
-    load_job(page, "Test")
+    load_fixture(page, "Test_3d")
     open_3d(page)
     wait_scene(page)
     left, top, w, hgt = viewport_origin(page)
@@ -1162,7 +1172,7 @@ def stage_look(pw):
     errors = []
     ctx, page = new_page(browser, errors)
     page.goto(URL)
-    load_job(page, "Test")
+    load_fixture(page, "Test_3d")
     page.click('nav [data-tab="cabinets"]')
     page.evaluate("() => { selectCabinet(S.job.cabinets.findIndex((c) => c.number === 4), {isolate: false}); renderList(); }")
     page.wait_for_function("() => typeof V3C === 'object' && V3C !== null", timeout=30000)
@@ -1218,9 +1228,82 @@ def stage_look(pw):
     time.sleep(0.3)
     px2 = page.evaluate("([x, y]) => V3C.pixel(x, y)", at)
     check("and the pixel on the face is still unchanged (the outline, not the face, shows the pick)", px2, px0)
+    look_depth(page)
     look_fronts(page)
     check("no console errors", errors, [])
     browser.close()
+
+
+def look_depth(page):
+    """Round 2, item 4 (29 September 2026): light and depth. On cabinet 11 alone
+    (GREY doors, a white carcass) the top is brightest and the side a step
+    darker than it; the front still reads its swatch with the key re-balanced,
+    shadows cast and AO on; the shadow map is drawn when the scene changes and
+    not while orbiting; AO is off under X-ray; and what is read off the view
+    (the snapshot's path) carries the AO."""
+    page.evaluate("() => { selectCabinet(S.job.cabinets.findIndex((c) => c.number === 11), {isolate: false}); renderList(); }")
+    page.wait_for_function("() => !S.cabSceneStale && cabTimer === null && S.cab3dShown === 11", timeout=20000)
+    page.evaluate("() => { V3C.select(2); V3C.viewHome(false); }")
+    page.wait_for_function("() => V3C.idle()", timeout=10000)
+    time.sleep(0.4)
+    lk = page.evaluate("() => V3C.look()")
+    check("shadows: three's PCFShadowMap (constant 1), drawn on demand, none due once the view is still",
+          (lk["shadowMap"]["type"], lk["shadowMap"]["auto"], lk["shadowMap"]["due"]), (1, False, False))
+    # headless Chromium draws in software, where AO starts off (about a second a
+    # frame); the laptop's graphics card has it on. Here it is switched on.
+    check("AO starts off on a software renderer, and the toolbar has its button",
+          (lk["software"], lk["aoOn"], page.locator("#c3dbar button:has-text('AO')").count()), (True, False, 1))
+    sc = page.evaluate("() => fetch('/api/scene-cabinet', {method: 'POST', headers: {'Content-Type': 'application/json'},"
+                       " body: JSON.stringify({job: S.job, number: 11})}).then((r) => r.json())")
+    parts = next(i for i in sc["items"] if i["number"] == 11)["parts"]
+
+    def box(p):
+        xs = [q[0] for q in p["outline"]]
+        ys = [q[1] for q in p["outline"]]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    door = next(p for p in parts if p["role"] == "door")
+    top = next(p for p in parts if p["role"] == "top")
+    side = min((p for p in parts if p["role"] == "side"), key=lambda p: box(p)[0])
+    d, s, t = box(door), box(side), box(top)
+    pts = {"front": ((d[0] + d[2]) / 2, d[3], (door["z0"] + door["z1"]) / 2),
+           "side": (s[0], (s[1] + s[3]) / 2, (side["z0"] + side["z1"]) / 2),
+           "top": ((t[0] + t[2]) / 2, (t[1] + t[3]) / 2, top["z1"]),
+           "floor": (s[0] - 60, (s[1] + s[3]) / 2, 0)}          # beside its foot, under its contact shadow
+    ox, oy = viewport_origin_of(page, "#c3dview canvas")
+
+    def read():
+        out = {}
+        for k, p in pts.items():
+            pr = page.evaluate("([x, y, z]) => V3C.project(x, y, z)", list(p))
+            out[k] = page.evaluate("([x, y]) => V3C.pixel(x, y)", [ox + pr["x"], oy + pr["y"]])
+        return out
+
+    off = read()
+    page.click("#c3dbar button:has-text('AO')")
+    check("the AO button turns it on", page.evaluate("() => V3C.state().ao"), True)
+    on = read()
+    swatch = sc["looks"][door["board"]]["colour"]
+    want = [int(swatch[1 + 2 * i:3 + 2 * i], 16) for i in range(3)]
+    check_true(f"shadows and AO on: the front ({door['board']} {swatch}) still reads within 8 of its swatch",
+               all(abs(on["front"][i] - want[i]) <= 8 for i in range(3)), f"pixel {on['front']}")
+    check_true("the white carcass has form: its top is brightest, its side a step darker",
+               on["top"][0] - on["side"][0] >= 20 and on["top"][0] >= 240, f"top {on['top']}, side {on['side']}")
+    check_true("AO darkens the floor at the cabinet's foot, and what is read off the view carries it",
+               off["floor"][0] - on["floor"][0] >= 4, f"AO off {off['floor']}, on {on['floor']}")
+    # orbiting draws frames and never the shadow map
+    page.mouse.move(ox + 200, oy + 300)
+    page.mouse.down()
+    page.mouse.move(ox + 260, oy + 320, steps=6)
+    due = page.evaluate("() => V3C.look().shadowMap.due")
+    page.mouse.up()
+    page.wait_for_function("() => V3C.idle()", timeout=10000)
+    check("orbiting: no shadow map is due", (due, page.evaluate("() => V3C.look().shadowMap.due")), (False, False))
+    page.evaluate("() => V3C.setDisplay('xray')")
+    check("X-ray: AO is off, and its button disabled",
+          (page.evaluate("() => V3C.state().ao"), page.locator("#c3dbar button:has-text('AO')").is_disabled()), (False, True))
+    page.evaluate("() => { V3C.setDisplay('edges'); V3C.tune({ao: false}); V3C.viewHome(false); }")
+    page.wait_for_function("() => V3C.idle()", timeout=10000)
 
 
 def look_fronts(page):

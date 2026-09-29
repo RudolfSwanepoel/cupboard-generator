@@ -495,10 +495,12 @@ def stage_cab3d(pw):
         r = page.evaluate("() => { const r = document.querySelector('#c3dview canvas').getBoundingClientRect(); return [r.left, r.top]; }")
         page.mouse.click(r[0] + pr["x"], r[1] + pr["y"])
         time.sleep(0.4)
-        shot(page, "cab3d_part_pick", "#cab3dcard")
+        # read the flash BEFORE the screenshot: it lasts 1.2 s, and a software-
+        # rendered screenshot of the 3D card can take longer than what is left
         check("picking a door opens the editor at Doors",
               page.evaluate("() => { const f = document.querySelector('#editor .sec.flash'); return f && f.classList.contains('s-doors') ? 'Doors' : f && f.className; }"),
               "Doors")
+        shot(page, "cab3d_part_pick", "#cab3dcard")
         check_true("  and the part card names its cut-list line",
                    door["line"] and door["line"] in page.locator("#c3dview .v3dcard").inner_text())
     # the editor's Save: an edit shows at once, Save refreshes

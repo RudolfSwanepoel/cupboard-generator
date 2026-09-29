@@ -19,6 +19,7 @@ import CameraControls from "camera-controls";
 import {LineSegments2} from "three/addons/lines/LineSegments2.js";
 import {LineSegmentsGeometry} from "three/addons/lines/LineSegmentsGeometry.js";
 import {LineMaterial} from "three/addons/lines/LineMaterial.js";
+import {GTAOPass} from "three/addons/postprocessing/GTAOPass.js";
 
 CameraControls.install({THREE: THREE});
 
@@ -57,6 +58,7 @@ const PAPER = {
   runner: 0x8d9398,      // a drawer runner's outer channel: hardware, not a board — plain grey
   runnerInner: 0xb4b9bd, // its inner member, a tone lighter so the two read apart
   white: 0xffffff,       // lights
+  contact: 0x1c1e1d,     // the contact shadow under a standing cabinet
   cubeGround: 0x999999,
   none: 0x000000,        // emissive off, and a transparent clear
 };
@@ -70,9 +72,29 @@ const PAPER = {
    units of its swatch hex — checked in ui_check_3d.py --stage look.        */
 const LOOK = {
   exposure: 1.0,          // NeutralToneMapping exposure (tuned below, see the Status entry)
-  environment: 1.0,       // the environment's intensity: the diffuse floor and the reflections
+  environment: 0.7,       // the environment's intensity: the diffuse floor and the reflections
   sky: {ceiling: 1.2, wall: 1.0, floor: 0.5},   // the neutral room the environment is: radiance per face
-  key: 0.4,               // the one directional light, for form; irradiance = intensity × cos
+  // the one directional light, for form: the IRRADIANCE it puts on a front
+  // that faces it squarely along the floor (Round 2). The light's own
+  // intensity follows from where it stands (`fitKey`), so a front reads its
+  // swatch whether the key is over an L of two runs or one cabinet alone.
+  key: 1.4,
+  // where the key stands (Round 2): above and a little in front of the fronts,
+  // as a ceiling's downlights are — `elevation` degrees up from the floor,
+  // and with no room `turn` degrees round from straight in front, so the side
+  // the Home view shows takes less of it than the front
+  keyFrom: {elevation: 55, turn: 25},
+  // the key's shadow: three r186's PCFShadowMap (its PCFSoftShadowMap is gone:
+  // "has been removed. Using PCFShadowMap instead"), softened by `radius`
+  shadow: {size: 2048, radius: 3, bias: -0.0004, normalBias: 5, strength: 1},
+  // the faint contact shadow under a cabinet standing on (or a leg height
+  // off) the floor: `margin` mm out from its footprint, fading to nothing
+  contact: {opacity: 0.22, margin: 70, reach: 200},
+  // ambient occlusion (three's GTAOPass): radius and thickness in mm
+  // (the pass's defaults are for a scene in metres); `denoise` is the depth, in
+  // mm, within which the denoiser takes a neighbouring pixel as the same surface
+  ao: {radius: 140, thickness: 180, scale: 1.3, samples: 16, distanceExponent: 1,
+       distanceFallOff: 1, intensity: 1, resolution: 1, denoise: 250, passes: 3},
   board: {roughness: 0.45, metalness: 0, clearcoat: 0.12, clearcoatRoughness: 0.5},   // melamine
   tape: {roughness: 0.45, metalness: 0, clearcoat: 0.12, clearcoatRoughness: 0.5},    // an edging band
   runner: {roughness: 0.45, metalness: 0.3},                                          // hardware: grey
@@ -133,6 +155,7 @@ const V = {
   hidden: new Set(),   // numbers hidden in 3D (the item list's eye)
   frontsOpen: false,
   runners: true,       // drawer runners drawn (the Runners toggle)
+  ao: true,            // ambient occlusion (the AO toggle); never under X-ray
   clearances: false,
   sel: null,           // selected cabinet number
   hover: null,         // {number, id}
@@ -217,6 +240,12 @@ function makeRenderer() {
   // compresses the top without tinting, so a board's hue is its hue.
   r.toneMapping = THREE.NeutralToneMapping;
   r.toneMappingExposure = LOOK.exposure;
+  // shadows off the key light (Round 2). The map is drawn when the scene or
+  // the light changes (`shadowsDirty`), never per frame while orbiting.
+  r.shadowMap.enabled = true;
+  r.shadowMap.type = THREE.PCFShadowMap;
+  r.shadowMap.autoUpdate = false;
+  r.shadowMap.needsUpdate = true;
   const canvas = r.domElement;
   canvas.tabIndex = 0;                                   // shortcuts need focus
   canvas.addEventListener("webglcontextlost", (e) => {
@@ -282,9 +311,17 @@ function makeControls(camera, dom, orthographic) {
 
 /* ---------- render on demand, never in a loop -------------------------------- */
 
+// One frame, as the viewport shows it: the scene, then the ambient occlusion
+// over it. `render`, the snapshot and the pixel read all come through here,
+// so a snapshot carries what is on screen.
+function draw() {
+  V.renderer.render(V.scene, V.camera);
+  if (aoActive()) drawAO();
+}
+
 function render() {
   if (!V.renderer || !V.visible || V.lost) return;
-  V.renderer.render(V.scene, V.camera);
+  draw();
   placeLabels();
   if (V.cube) V.cube.render();
 }
@@ -341,6 +378,7 @@ function resize() {
   V.ortho.bottom = -half / aspect;
   V.ortho.updateProjectionMatrix();
   for (const m of V.materials.values()) if (m.userData.outline) m.resolution.set(w, hh);
+  sizeAO();
   requestRender();
 }
 
@@ -382,9 +420,175 @@ function makeLights() {
   const g = new THREE.Group();
   const key = new THREE.DirectionalLight(PAPER.white, LOOK.key);
   key.position.set(-0.5, -0.8, 1.0);
+  key.castShadow = true;
+  key.shadow.mapSize.set(LOOK.shadow.size, LOOK.shadow.size);
+  key.shadow.radius = LOOK.shadow.radius;
+  key.shadow.bias = LOOK.shadow.bias;
+  key.shadow.normalBias = LOOK.shadow.normalBias;
+  key.shadow.intensity = LOOK.shadow.strength;
   V.key = key;
-  g.add(key);
+  g.add(key, key.target);
   return g;
+}
+
+// Which way the key comes from, in the room frame on the floor: the side the
+// fronts FACE. Every wall carrying something counts once — not by how much
+// stands on it, so the fronts of an L's two runs take the same light and read
+// the same — and a room with runs all round, or no room (the Run, and the
+// Cabinets tab's one cabinet, whose fronts face +y), takes +y turned a little
+// to the right.
+function keyHeading() {
+  const room = V.payload && V.payload.room;
+  let x = 0, y = 0;
+  if (room) {
+    for (const w of room.walls) {
+      if (!V.payload.items.some((it) => it.wall === w.id && it.placed)) continue;
+      x += w.normal[0];
+      y += w.normal[1];
+    }
+  }
+  const len = Math.hypot(x, y);
+  if (len > 0.2) {
+    // how squarely the best-lit fronts face it: 1 on one wall, 0.707 on an L
+    let facing = 0;
+    for (const w of room.walls) {
+      if (!V.payload.items.some((it) => it.wall === w.id && it.placed)) continue;
+      facing = Math.max(facing, (w.normal[0] * x + w.normal[1] * y) / len);
+    }
+    return [x / len, y / len, Math.max(facing, 0.5)];
+  }
+  const t = THREE.MathUtils.degToRad(LOOK.keyFrom.turn);
+  return [Math.sin(t), Math.cos(t), Math.cos(t)];
+}
+
+// Stand the key over the scene and fit its shadow map to the scene's bounds:
+// on every rebuild, never while orbiting.
+function fitKey() {
+  if (!V.key) return;
+  const [hx, hy, facing] = keyHeading();
+  const e = THREE.MathUtils.degToRad(LOOK.keyFrom.elevation);
+  if (V.keyFront === undefined) V.keyFront = LOOK.key;
+  V.key.intensity = V.keyFront / (Math.cos(e) * facing);
+  const dir = toRender(hx * Math.cos(e), hy * Math.cos(e), Math.sin(e)).normalize();
+  const c = V.bbox.getCenter(new THREE.Vector3());
+  const r = Math.max(V.bbox.getSize(new THREE.Vector3()).length() / 2, 500);
+  V.key.position.copy(c).add(dir.clone().multiplyScalar(r * 2));
+  V.key.target.position.copy(c);
+  V.key.target.updateMatrixWorld();
+  const cam = V.key.shadow.camera;
+  cam.left = -r; cam.right = r; cam.top = r; cam.bottom = -r;
+  cam.near = r * 0.5;
+  cam.far = r * 3.5;
+  cam.updateProjectionMatrix();
+  V.keyDir = dir;
+  shadowsDirty();
+}
+
+function shadowsDirty() {
+  if (V.renderer) V.renderer.shadowMap.needsUpdate = true;
+}
+
+/* ---------- ambient occlusion -------------------------------------------------
+   three's GTAOPass (vendored, r186), behind the AO toggle; off under X-ray.
+   It is driven directly, not through an EffectComposer: the pass works its
+   occlusion out of its own depth-and-normal drawing of the scene, and the
+   result is multiplied over the frame already on screen. A composer would draw
+   the scene into a target and tone-map the whole image in its output pass —
+   every paper line, the background and the grid with it (`toneMapped: false`
+   means nothing there), without the canvas's own antialiasing — so the frame
+   with AO on would not be the frame with AO off, darker in the corners.    */
+
+function makeAO() {
+  const size = V.renderer.getDrawingBufferSize(new THREE.Vector2());
+  const pass = new GTAOPass(V.scene, V.camera, Math.max(1, Math.round(size.x * LOOK.ao.resolution)),
+                            Math.max(1, Math.round(size.y * LOOK.ao.resolution)), undefined,
+    {radius: LOOK.ao.radius, thickness: LOOK.ao.thickness, scale: LOOK.ao.scale, samples: LOOK.ao.samples,
+     distanceExponent: LOOK.ao.distanceExponent, distanceFallOff: LOOK.ao.distanceFallOff});
+  pass.updatePdMaterial({depthPhi: LOOK.ao.denoise});
+  pass.output = GTAOPass.OUTPUT.Off;            // the occlusion only; the blend is ours (`drawAO`)
+  // a wall is one-sided, drawn from inside the room: both sides here, and the
+  // walls the camera is behind taken out (`hiddenFromAO`)
+  pass.normalMaterial.side = THREE.DoubleSide;
+  // only what is solid occludes: the pass's own rule hides points and lines,
+  // ours also the fat lines, overlays, handles, ghosts and contact shadows
+  const cache = [];
+  let background = null;
+  pass._overrideVisibility = () => {
+    V.scene.traverse((o) => { if (o.visible && hiddenFromAO(o)) { o.visible = false; cache.push(o); } });
+    background = V.scene.background;
+    V.scene.background = null;
+  };
+  pass._restoreVisibility = () => {
+    for (const o of cache) o.visible = true;
+    cache.length = 0;
+    V.scene.background = background;
+  };
+  return pass;
+}
+
+const _aoUp = new THREE.Vector3(0, 0, -1);
+function hiddenFromAO(o) {
+  if (o.isLine || o.isPoints || o.isLineSegments2 || o.userData.noAO) return true;
+  if (!o.isMesh) return false;
+  if (o.userData.ghost || o.userData.overlay) return true;
+  const kind = o.userData.kind;
+  if ((kind === "wall" && V.walls !== "all") || kind === "ceiling") {
+    // drawn only from inside the room: behind it, it is not in the frame
+    const n = kind === "wall" ? o.userData.inward : _aoUp;
+    if (!n) return false;
+    if (V.ortho_on) return V.camera.getWorldDirection(new THREE.Vector3()).dot(n) > 0;
+    return V.camera.position.clone().sub(o.userData.at).dot(n) < 0;
+  }
+  return false;
+}
+
+function softwareRendered() {
+  try {
+    const gl = V.renderer.getContext();
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    return /swiftshader|llvmpipe|software|basic render/i.test(name);
+  } catch (err) {
+    return false;
+  }
+}
+
+function aoActive() {
+  return !!(V.ao && V.aoPass && V.display !== "xray");
+}
+
+function sizeAO() {
+  if (!V.aoPass) return;
+  const size = V.renderer.getDrawingBufferSize(new THREE.Vector2());
+  V.aoPass.setSize(Math.max(1, Math.round(size.x * LOOK.ao.resolution)),
+                   Math.max(1, Math.round(size.y * LOOK.ao.resolution)));
+}
+
+function drawAO() {
+  const p = V.aoPass;
+  if (p.camera !== V.camera) {
+    p.camera = V.camera;
+    p.gtaoMaterial.defines.PERSPECTIVE_CAMERA = V.camera.isPerspectiveCamera ? 1 : 0;
+    p.gtaoMaterial.needsUpdate = true;
+  }
+  p.render(V.renderer, null, null);
+  // The pass denoises once, which turns the occlusion's dither into grain; on
+  // pale boards that grain shows. So it is denoised again, to and fro between
+  // the pass's two targets, each time on another channel of its noise.
+  let from = p.pdRenderTarget, to = p.gtaoRenderTarget;
+  const pd = p.pdMaterial.uniforms;
+  const passes = V.aoPasses !== undefined ? V.aoPasses : LOOK.ao.passes;
+  for (let i = 1; i < passes; i++) {
+    pd.tDiffuse.value = from.texture;
+    pd.index.value = i;
+    p._renderPass(V.renderer, p.pdMaterial, to, PAPER.white, 1.0);
+    [from, to] = [to, from];
+  }
+  pd.tDiffuse.value = p.gtaoRenderTarget.texture;
+  pd.index.value = 0;
+  p.blendMaterial.uniforms.intensity.value = LOOK.ao.intensity;
+  p.blendMaterial.uniforms.tDiffuse.value = from.texture;
+  p._renderPass(V.renderer, p.blendMaterial, null);      // multiplied over the frame on screen
 }
 
 // The background: a slight gradient, PAPER.bgTop over PAPER.bgBottom, as a
@@ -665,6 +869,10 @@ function applyDisplay(mesh) {
   const xray = V.display === "xray";
   const variant = xray ? "xray" : (mesh.userData.ghost ? "ghost" : "solid");
   if (mesh.userData.mats) mesh.material = mesh.userData.mats(variant);
+  // every board casts and receives; a ghost and an x-ray casts nothing, and a
+  // band (inside its part's size) leaves the casting to its part
+  mesh.castShadow = variant === "solid" && !mesh.userData.tape;
+  mesh.receiveShadow = !xray;
   const edges = mesh.userData.edges;
   if (edges) {
     if (edges.userData.front) {
@@ -768,6 +976,7 @@ function applyRunners() {
       if (m.userData.part && isRunner(m.userData.part)) m.visible = V.runners;
     }
   }
+  shadowsDirty();
   requestRender();
 }
 
@@ -874,7 +1083,9 @@ function wallMesh(w, top, closed) {
   const m = new THREE.Matrix4().makeBasis(dir, up, nrm);
   m.setPosition(w.start[0], w.start[1], 0);
   mesh.applyMatrix4(m);
-  mesh.userData = {wall: w.id, kind: "wall"};
+  mesh.receiveShadow = true;
+  mesh.userData = {wall: w.id, kind: "wall", inward: toRender(w.normal[0], w.normal[1], 0),
+                   at: toRender(w.start[0], w.start[1], 0)};
   const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 1),
     new THREE.LineBasicMaterial({color: PAPER.edgeWall, toneMapped: false}));
   edges.applyMatrix4(m);
@@ -923,6 +1134,7 @@ function buildShell(payload) {
                                       metalness: LOOK.room.metalness}));
     floor.position.z = -0.5;
     floor.userData.kind = "floor";
+    floor.receiveShadow = true;
     shell.add(floor);
     const floorEdge = new THREE.LineSegments(new THREE.EdgesGeometry(floor.geometry, 1),
       new THREE.LineBasicMaterial({color: PAPER.edgeWall, toneMapped: false}));
@@ -938,6 +1150,7 @@ function buildShell(payload) {
                                       metalness: LOOK.room.metalness, side: THREE.BackSide}));
     ceil.position.z = room.top;
     ceil.userData.kind = "ceiling";
+    ceil.userData.at = new THREE.Vector3(0, 0, room.top);
     ceil.visible = V.ceiling;
     V.ceilMesh = ceil;
     shell.add(ceil);
@@ -951,11 +1164,65 @@ function buildShell(payload) {
                                       metalness: LOOK.room.metalness}));
     floor.position.set((b.max.x + b.min.x) / 2, -(b.max.y + b.min.y) / 2, -0.5);   // room frame, in the root
     floor.userData.kind = "floor";
+    floor.receiveShadow = true;
     shell.add(floor);
   }
   V.root.add(shell);
   V.shell = shell;
+  buildContacts(payload);
   applyWalls();
+}
+
+// A faint contact shadow under every item standing on the floor, or a leg
+// height off it (legs are not drawn, so a base unit hangs 100 mm up and
+// without this reads as floating): a soft-edged dark patch on the floor, the
+// item's plan extent and LOOK.contact.margin more. Drawing only; the extent is
+// read off the outlines the server sent.
+const CONTACT_MM = 5;                     // one pixel of a contact shadow's picture, in mm
+function contactTexture(w, d, margin) {
+  // the footprint, white on nothing, blurred out over the margin around it
+  const c = document.createElement("canvas");
+  c.width = Math.max(4, Math.round((w + 2 * margin) / CONTACT_MM));
+  c.height = Math.max(4, Math.round((d + 2 * margin) / CONTACT_MM));
+  const g = c.getContext("2d");
+  const m = margin / CONTACT_MM;
+  g.filter = `blur(${(m / 2.5).toFixed(1)}px)`;
+  g.fillStyle = "#" + PAPER.white.toString(16);
+  g.fillRect(m, m, c.width - 2 * m, c.height - 2 * m);
+  return new THREE.CanvasTexture(c);
+}
+
+function buildContacts(payload) {
+  if (V.contacts) {
+    V.root.remove(V.contacts);
+    V.contacts.children.forEach((m) => { m.geometry.dispose(); m.material.alphaMap.dispose(); m.material.dispose(); });
+  }
+  const g = new THREE.Group();
+  g.userData.noAO = true;
+  for (const item of payload.items) {
+    if (!item.parts.length) continue;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, z0 = Infinity;
+    for (const p of item.parts) {
+      z0 = Math.min(z0, p.z0);
+      for (const [x, y] of p.outline) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    }
+    if (z0 > LOOK.contact.reach) continue;
+    const m = LOOK.contact.margin;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0 + 2 * m, y1 - y0 + 2 * m),
+      new THREE.MeshBasicMaterial({color: PAPER.contact, alphaMap: contactTexture(x1 - x0, y1 - y0, m), transparent: true,
+                                   opacity: LOOK.contact.opacity, depthWrite: false, toneMapped: false,
+                                   side: THREE.DoubleSide}));
+    mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, 0.6);         // room frame, in the root
+    mesh.userData = {contact: item.number, noAO: true};
+    mesh.renderOrder = 1;
+    g.add(mesh);
+  }
+  V.root.add(g);
+  V.contacts = g;
+}
+
+function contactOf(number) {
+  return V.contacts ? V.contacts.children.find((m) => m.userData.contact === number) : null;
 }
 
 function applyWalls() {
@@ -995,6 +1262,7 @@ function computeBBox() {
   const c = b.getCenter(new THREE.Vector3());
   V.grid.position.set(Math.round(c.x / 1000) * 1000, Math.round(c.y / 1000) * 1000, -1);
   V.scene.add(V.grid);
+  fitKey();
 }
 
 function rebuildAll() {
@@ -1023,6 +1291,8 @@ function applyGhosting() {
     const hiddenHere = V.hidden.has(item.number);
     grp.visible = !hiddenHere;
     const ghost = !itemShown(item);
+    const contact = contactOf(item.number);
+    if (contact) contact.visible = !hiddenHere && !ghost && V.display !== "xray";
     for (const mesh of grp.children) {
       mesh.userData.ghost = ghost;
       // an isolated view takes pointer events away from everything else,
@@ -1041,6 +1311,7 @@ function applyGhosting() {
   }
   applySelection();
   updateHandles();
+  shadowsDirty();
   requestRender();
 }
 
@@ -1832,6 +2103,8 @@ function buildBar() {
   B.fronts = h("button", {text: "Fronts", title: "O: open / close every door and drawer", onclick: () => toggleFronts()});
   B.runners = h("button", {text: "Runners", title: "show or hide the drawer runners (simple blocks: outer channel and inner member)",
                            onclick: () => { V.runners = !V.runners; applyRunners(); updateBar(); }});
+  B.ao = h("button", {text: "AO", title: "ambient occlusion: the soft dark where boards meet (off under X-ray)",
+                      onclick: () => { V.ao = !V.ao; updateBar(); requestRender(); }});
   B.clear = h("button", {text: "Clearances", title: "C: door swings and drawer pull-outs", onclick: () => toggleClearances()});
   B.walls = h("button", {text: "Walls: auto ▾", title: "which walls are drawn"});
   B.ceiling = h("button", {text: "Ceiling", title: "draw the ceiling", onclick: () => { V.ceiling = !V.ceiling; applyWalls(); updateBar(); }});
@@ -1844,9 +2117,9 @@ function buildBar() {
   if (OPTS.single) {
     // the one cabinet alone: nothing to layer, isolate, wall off or clear
     B.layers = {};
-    bar.append(B.views, B.proj, B.display, B.fit, sep(), B.fronts, B.runners, B.labels, sep(), B.help);
+    bar.append(B.views, B.proj, B.display, B.ao, B.fit, sep(), B.fronts, B.runners, B.labels, sep(), B.help);
   } else {
-    bar.append(B.views, B.proj, B.display, B.fit, sep(),
+    bar.append(B.views, B.proj, B.display, B.ao, B.fit, sep(),
                B.layers.base, B.layers.wall, B.layers.tall, B.layers.panels, sep(),
                B.fronts, B.runners, B.clear, B.walls, B.ceiling, B.labels, B.isolate, sep(), B.snap, B.help);
   }
@@ -1885,6 +2158,8 @@ function updateBar() {
   B.labels.classList.toggle("on", V.labels);
   B.fronts.classList.toggle("on", V.frontsOpen);
   B.runners.classList.toggle("on", V.runners);
+  B.ao.classList.toggle("on", V.ao && V.display !== "xray");
+  B.ao.disabled = V.display === "xray" || !V.aoPass;
   B.clear.classList.toggle("on", V.clearances);
   B.isolate.classList.toggle("on", V.isolate !== null);
   B.isolate.disabled = V.isolate === null && V.sel === null;
@@ -1893,8 +2168,13 @@ function updateBar() {
 
 function setDisplay(mode) {
   V.display = mode;
-  for (const grp of V.groups.values()) grp.children.forEach(applyDisplay);
+  for (const grp of V.groups.values()) {
+    grp.children.forEach(applyDisplay);
+    const contact = contactOf(grp.userData.number);
+    if (contact) contact.visible = grp.visible && itemShown(grp.userData.item) && mode !== "xray";
+  }
   if (V.roomParts) V.roomParts.children.forEach(applyDisplay);
+  shadowsDirty();
   updateBar();
   requestRender();
 }
@@ -2070,6 +2350,7 @@ function poseFront(m) {
     m.position.set(part.pull.dir[0] * part.pull.distance * t,
                    part.pull.dir[1] * part.pull.distance * t, 0);
   }
+  shadowsDirty();                         // a front moved: the scene changed
 }
 
 function applyFronts(instant) {
@@ -2182,7 +2463,7 @@ function badgeFor(number) {
 
 function snapshot() {
   if (!V.renderer || !V.hooks.snapshot) return;
-  V.renderer.render(V.scene, V.camera);          // the buffer is not preserved: draw, then read
+  draw();                                         // the buffer is not preserved: draw, then read
   V.hooks.snapshot(V.renderer.domElement.toDataURL("image/png"));
 }
 
@@ -2222,7 +2503,7 @@ function handleMesh(dir, origin, colour, axis) {
   g.position.copy(origin);
   g.renderOrder = 20;
   g.userData = {handle: axis, dir: dir.clone().normalize()};
-  [shaft, head, grab].forEach((m) => { m.userData = {handle: axis, group: g}; m.renderOrder = 20; });
+  [shaft, head, grab].forEach((m) => { m.userData = {handle: axis, group: g, noAO: true}; m.renderOrder = 20; });
   return g;
 }
 
@@ -2384,6 +2665,7 @@ function moveAttach(d, e) {
   // the preview: the panel's group moved by the difference, in the room frame
   const dx = d.at.x - d.from.x, dy = d.at.y - d.from.y, dz = d.at.z - d.from.z;
   d.grp.position.set(dx, -dy, dz);                  // at_y runs back: -y in the room frame
+  shadowsDirty();
   if (V.handles) V.handles.position.copy(toRender(dx, -dy, dz));
   status(`panel ${d.item.number}: at_${d.axis} ${d.at[d.axis]} mm${d.reason ? " · " + d.reason : ""}`);
   requestRender();
@@ -2456,6 +2738,10 @@ function moveDrag(d, e) {
   const out = new THREE.Vector3(d.wall.normal[0], d.wall.normal[1], 0).multiplyScalar(dy);
   d.grp.position.copy(along.add(out).setZ(zNow - zWas));              // room frame, in the root
   attachedGroups(d.number).forEach((g) => g.position.copy(d.grp.position));   // they move with it
+  const contact = contactOf(d.number);
+  if (contact && !contact.userData.rest) contact.userData.rest = contact.position.clone();
+  if (contact) contact.position.copy(contact.userData.rest).add(new THREE.Vector3(d.grp.position.x, d.grp.position.y, 0));
+  shadowsDirty();
   if (V.handles) V.handles.position.copy(toRender(d.grp.position.x, d.grp.position.y, d.grp.position.z));
   const fig = d.axis === "x" ? `x ${d.at.x}` : d.axis === "y" ? `y ${d.at.y}` : `z ${d.at.z}`;
   status(`${d.item.number}: ${fig} mm${reason ? " · " + reason : ""}`);
@@ -2492,6 +2778,9 @@ function finishMove(d, cancelled) {
   V.controls.enabled = true;
   d.grp.position.set(0, 0, 0);
   attachedGroups(d.number).forEach((g) => g.position.set(0, 0, 0));
+  const contact = contactOf(d.number);
+  if (contact && contact.userData.rest) contact.position.copy(contact.userData.rest);
+  shadowsDirty();
   if (V.handles) V.handles.position.set(0, 0, 0);
   const changed = d.at.x !== d.from.x || d.at.z !== d.from.z || d.at.y !== d.from.y;
   if (cancelled || !d.moved || !changed) { status(V.hint); requestRender(); return; }
@@ -2553,6 +2842,11 @@ function mount(els, hooks) {
   V.persp = cams.persp;
   V.ortho = cams.ortho;
   V.camera = V.persp;
+  try { V.aoPass = makeAO(); } catch (err) { V.aoPass = null; V.ao = false; }
+  // on by default where a graphics card draws it; a software renderer (no
+  // GPU: SwiftShader, llvmpipe, Windows' basic driver) takes about a second a
+  // frame over it, so there it starts off and the toggle turns it on
+  if (softwareRendered()) V.ao = false;
   V.clock = new THREE.Clock();
   V.cP = makeControls(V.persp, V.renderer.domElement, false);
   V.cO = makeControls(V.ortho, V.renderer.domElement, true);
@@ -2562,6 +2856,7 @@ function mount(els, hooks) {
     new THREE.MeshBasicMaterial({color: PAPER.pivot, depthTest: false, transparent: true, opacity: 0.85,
                                  toneMapped: false}));
   V.pivotDot.renderOrder = 10;
+  V.pivotDot.userData.noAO = true;
   V.pivotDot.visible = false;
   V.scene.add(V.pivotDot);
   V.observer = new ResizeObserver(() => resize());
@@ -2621,6 +2916,7 @@ function update(payload, opts) {
   applyFronts(true);                       // rebuilt parts take the open/closed state as it stands
   buildList();
   if (V.hooks.updated) V.hooks.updated(payload);
+  shadowsDirty();
   requestRender();
 }
 
@@ -2757,7 +3053,8 @@ function memory() {
 function state() {
   return {sel: V.sel, isolate: V.isolate, layers: V.layers ? [...V.layers] : null, display: V.display,
           walls: V.walls, labels: V.labels, ortho: V.ortho_on, fronts: V.frontsOpen, runners: V.runners,
-          clearances: V.clearances, hidden: [...V.hidden], picked: V.picked || null};
+          clearances: V.clearances, hidden: [...V.hidden], picked: V.picked || null,
+          ao: aoActive()};
 }
 
 function camera() {
@@ -2818,7 +3115,7 @@ function wallAt(clientX, clientY) {
 // straight off the drawing buffer (which is not preserved between frames).
 function pixel(clientX, clientY) {
   if (!V.renderer) return null;
-  V.renderer.render(V.scene, V.camera);
+  draw();
   const gl = V.renderer.getContext();
   const r = V.renderer.domElement.getBoundingClientRect();
   const pr = V.renderer.getPixelRatio();
@@ -2835,7 +3132,14 @@ function tune(o) {
   if (!V.renderer) return null;
   if (o.exposure !== undefined) V.renderer.toneMappingExposure = o.exposure;
   if (o.environment !== undefined) V.scene.environmentIntensity = o.environment;
-  if (o.key !== undefined && V.key) V.key.intensity = o.key;
+  if (o.elevation !== undefined) LOOK.keyFrom.elevation = o.elevation;
+  if (o.key !== undefined) V.keyFront = o.key;
+  if (o.key !== undefined || o.elevation !== undefined) fitKey();
+  if (o.ao !== undefined) { V.ao = !!o.ao; updateBar(); }
+  if (o.aoParams && V.aoPass) V.aoPass.updateGtaoMaterial(o.aoParams);
+  if (o.aoPasses !== undefined) V.aoPasses = o.aoPasses;
+  if (o.pdParams && V.aoPass) V.aoPass.updatePdMaterial(o.pdParams);
+  if (o.shadows !== undefined && V.key) { V.key.castShadow = !!o.shadows; shadowsDirty(); }
   if (o.envEuler) V.scene.environmentRotation.set(o.envEuler[0], o.envEuler[1], o.envEuler[2]);
   requestRender();
   return look();
@@ -2845,11 +3149,29 @@ function tune(o) {
 function look() {
   return {exposure: V.renderer ? V.renderer.toneMappingExposure : LOOK.exposure,
           environment: V.scene ? V.scene.environmentIntensity : LOOK.environment,
-          key: V.key ? V.key.intensity : LOOK.key,
+          key: V.keyFront !== undefined ? V.keyFront : LOOK.key, keyIntensity: V.key ? V.key.intensity : null,
           envRot: V.scene ? V.scene.environmentRotation.toArray().slice(0, 3) : null, board: LOOK.board,
           edge: LOOK.edge, outline: LOOK.outline, materials: V.materials.size,
+          keyFrom: LOOK.keyFrom, keyDir: V.keyDir ? toRoom(V.keyDir) : null, shadow: LOOK.shadow,
+          shadowMap: V.renderer ? {type: V.renderer.shadowMap.type, auto: V.renderer.shadowMap.autoUpdate,
+                                   due: V.renderer.shadowMap.needsUpdate} : null,
+          ao: LOOK.ao, aoOn: aoActive(), software: softwareRendered(),
           pictures: [...V.pictures].map(([b, r]) => [b, !!r.tex, r.failed]),
           toneMapping: V.renderer ? V.renderer.toneMapping : null};
+}
+
+// How long one frame takes, for the report on AO (the checks only): `n`
+// frames drawn one after another, each forced through by reading a pixel
+// back, in milliseconds a frame.
+function frameTime(n) {
+  if (!V.renderer) return null;
+  const gl = V.renderer.getContext();
+  const buf = new Uint8Array(4);
+  draw();
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) { draw(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf); }
+  return (performance.now() - t0) / n;
 }
 
 function dispose() {
@@ -2861,6 +3183,8 @@ function dispose() {
   if (V.roomParts) disposeObject(V.roomParts);
   if (V.shell) disposeObject(V.shell);
   dropLooks({}, true);
+  if (V.aoPass) V.aoPass.dispose();
+  if (V.contacts) V.contacts.children.forEach((m) => { m.geometry.dispose(); m.material.alphaMap.dispose(); m.material.dispose(); });
   if (V.env) V.env.dispose();
   if (V.background) V.background.dispose();
   if (V.cube) V.cube.dispose();
@@ -2871,5 +3195,5 @@ function dispose() {
   V.renderer = V.scene = V.camera = V.controls = null;
 }
 
-  return {mount, setVisible, update, select, setLayers, isolate, flyTo, idle, bounds, partInfo, debugCam, pickHandleAt, dragInfo, overlayInfo, groupIds, debugShell, memory, state, camera, project, unproject, dispose, resize, fitAll, viewHome, viewTop, viewWall, setProjection, setDisplay, wallAt, pixel, look, tune};
+  return {mount, setVisible, update, select, setLayers, isolate, flyTo, idle, bounds, partInfo, debugCam, pickHandleAt, dragInfo, overlayInfo, groupIds, debugShell, memory, state, camera, project, unproject, dispose, resize, fitAll, viewHome, viewTop, viewWall, setProjection, setDisplay, wallAt, pixel, look, tune, frameTime};
 }
