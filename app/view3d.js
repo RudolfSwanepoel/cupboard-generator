@@ -50,7 +50,8 @@ const PAPER = {
   ink: "#191c1a",
   muted: "#767e78",
   fallback: "#d9d6cf",  // a look the server did not send (model.NO_COLOUR); never a board
-  runner: 0x8d9398,      // a drawer runner: hardware, not a board — plain grey
+  runner: 0x8d9398,      // a drawer runner's outer channel: hardware, not a board — plain grey
+  runnerInner: 0xb4b9bd, // its inner member, a tone lighter so the two read apart
   white: 0xffffff,       // lights
   ground: 0x8f8f86,      // hemisphere light, from below
   cubeGround: 0x999999,
@@ -370,9 +371,12 @@ function textureFor(board, rot) {
 // is turned onto the part's `grain` vector: 0 or 90 degrees, as the elevation
 // does it, never an angle worked out here from a photograph.
 function materialsFor(part) {
-  if (part.role === "runner") {
-    // hardware: one grey, no board, no picture (Part 6, 28 September 2026)
-    const m = new THREE.MeshStandardMaterial({color: PAPER.runner, roughness: 0.45, metalness: 0.3});
+  if (isRunner(part)) {
+    // hardware: one grey, no board, no picture (Part 6, 28 September 2026);
+    // the inner member a lighter tone than the outer channel (29 Sept 2026)
+    const m = new THREE.MeshStandardMaterial({
+      color: part.role === "runner_inner" ? PAPER.runnerInner : PAPER.runner,
+      roughness: 0.45, metalness: 0.3});
     return [m, m.clone()];
   }
   const look = V.payload.looks[part.board] || {colour: PAPER.fallback, grain: false, picture: ""};
@@ -446,16 +450,21 @@ function buildPart(part) {
   // a door rotates about its hinge, a drawer face slides out: keep the rest
   // position so an animation can come back to it
   mesh.userData.rest = {position: mesh.position.clone(), quaternion: mesh.quaternion.clone()};
-  if (part.role === "runner") mesh.visible = V.runners;
+  if (isRunner(part)) mesh.visible = V.runners;
   applyDisplay(mesh);
   return mesh;
 }
 
-// The Runners toggle: runner blocks shown or not, every cabinet at once.
+// A runner part: its outer channel or its inner member (R3, 29 September 2026).
+function isRunner(part) {
+  return part.role === "runner_outer" || part.role === "runner_inner";
+}
+
+// The Runners toggle: both members shown or not, every cabinet at once.
 function applyRunners() {
   for (const grp of V.groups.values()) {
     for (const m of grp.children) {
-      if (m.userData.part && m.userData.part.role === "runner") m.visible = V.runners;
+      if (m.userData.part && isRunner(m.userData.part)) m.visible = V.runners;
     }
   }
   requestRender();
@@ -1353,11 +1362,12 @@ function roleName(part) {
                  blind: "Blind panel", panel: "Panel", back: "Backing", carcass: "Carcass (footprint only)",
                  plinth: "Plinth board", filler: "Filler", support: "Support", shelf: "Shelf",
                  drawer_side: "Drawer side", drawer_front: "Drawer front", drawer_back: "Drawer back",
-                 drawer_base: "Drawer base", runner: "Runner"};
+                 drawer_base: "Drawer base", runner_outer: "Runner (outer channel)",
+                 runner_inner: "Runner (inner member)"};
   const n = names[part.role] || part.role;
   if (part.role === "drawer" && part.label === "inner") return `Inner drawer face ${part.index + 1}`;
   if (part.role === "door" || part.role === "drawer") return `${n} ${part.index + 1}`;
-  if (/^drawer_|^runner$/.test(part.role)) return `${n}, drawer ${part.index + 1}`;
+  if (/^drawer_|^runner_/.test(part.role)) return `${n}, drawer ${part.index + 1}`;
   if (part.role === "support" && part.label) return `${n} — ${part.label}`;
   if (part.role === "shelf") return part.label === "fixed" ? `${n} (fixed)` : n;
   return n;
@@ -1439,7 +1449,7 @@ function buildBar() {
                                onclick: () => { if (V.hooks.toggleLayer) V.hooks.toggleLayer(k); }});
   }
   B.fronts = h("button", {text: "Fronts", title: "O: open / close every door and drawer", onclick: () => toggleFronts()});
-  B.runners = h("button", {text: "Runners", title: "show or hide the drawer runners (simple blocks)",
+  B.runners = h("button", {text: "Runners", title: "show or hide the drawer runners (simple blocks: outer channel and inner member)",
                            onclick: () => { V.runners = !V.runners; applyRunners(); updateBar(); }});
   B.clear = h("button", {text: "Clearances", title: "C: door swings and drawer pull-outs", onclick: () => toggleClearances()});
   B.walls = h("button", {text: "Walls: auto ▾", title: "which walls are drawn"});

@@ -1854,7 +1854,11 @@ def _drawer_tapes(cab, drawers: List[Part], std: Standard, mats: dict):
 
 
 # The parts of a drawer that slide out with its face when the fronts open.
-DRAWER_MOVING = ("drawer", "drawer_side", "drawer_front", "drawer_back", "drawer_base")
+DRAWER_MOVING = ("drawer", "drawer_side", "drawer_front", "drawer_back", "drawer_base",
+                 "runner_inner")
+
+# The runner's two members (R3, 29 September 2026): hardware, drawn, not cut.
+RUNNER_ROLES = ("runner_outer", "runner_inner")
 
 
 def drawer_parts(cab, std: Standard = STANDARD, materials: dict = None) -> List[Part]:
@@ -1867,10 +1871,20 @@ def drawer_parts(cab, std: Standard = STANDARD, materials: dict = None) -> List[
     between the sides, a grooved 3 mm base `drawer_base_offset` up the sides
     and `groove_engage` into all four, a housed 16 mm one between them on the
     bottom edge. Each carries its drawer's `index`, which is how the scene
-    slides it out with its face. A runner is role 'runner', board '' — hardware,
-    not a cut-list line — a simple block rail_thickness x height x length,
-    fixed to the carcass side (it does not slide). Kept out of `solid_parts`,
-    so the plan, Finish and every wall elevation are unchanged.
+    slides it out with its face. A runner is TWO members a side (R3, 29
+    September 2026), both board '' — hardware, not a cut-list line — sized off
+    the catalogue record, never Standard:
+
+      * `runner_outer`, the channel fixed to the carcass side: rail_thickness
+        x height x length, against the side from the carcass front, `lift`
+        under the box — it does not slide;
+      * `runner_inner`, the member fixed to the drawer side: inner_thickness x
+        inner_height, against the box side, centred vertically in the outer,
+        from `setback` behind the box front to the outer's back — nested in
+        the channel when closed, and sliding out with the box.
+
+    Kept out of `solid_parts`, so the plan, Finish and every wall elevation
+    are unchanged.
     """
     mats = MATERIALS if materials is None else materials
     try:
@@ -1881,6 +1895,8 @@ def drawer_parts(cab, std: Standard = STANDARD, materials: dict = None) -> List[
         return []
     D = geometry(cab, std, mats).depth
     t, e = std.board_t, std.groove_engage
+    rr = cab.runner_or_legacy
+    it, ih = rr.inner_t, rr.inner_h
     out = []
     for u in lay:
         i, n = u["index"], u["n"]
@@ -1907,8 +1923,15 @@ def drawer_parts(cab, std: Standard = STANDARD, materials: dict = None) -> List[
                             u["face"][0], u["face"][1], "z", "inner", i))
         ry0, ry1, rz0, rz1 = u["rail"]
         for rx0, rx1 in u["rails"]:
-            out.append(_box("runner", "", rx0, rx1, D - ry1, D - ry0, rz0, rz1, None,
+            out.append(_box("runner_outer", "", rx0, rx1, D - ry1, D - ry0, rz0, rz1, None,
                             f"runner, drawer {n}", i))
+        # the inner members: against each box side, on the side facing its
+        # channel, centred on the channel's height
+        mid = (rz0 + rz1) / 2
+        iy0 = u["inner_y0"]
+        for ix0, ix1 in ((bx0 - it, bx0), (bx1, bx1 + it)):
+            out.append(_box("runner_inner", "", ix0, ix1, D - ry1, D - iy0,
+                            mid - ih / 2, mid + ih / 2, None, f"runner, drawer {n}", i))
     return out
 
 

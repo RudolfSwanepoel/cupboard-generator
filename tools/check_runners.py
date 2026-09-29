@@ -537,8 +537,9 @@ def scene_3d():
     parts = drawer_parts(c, STANDARD, j.materials)
     low = [q for q in parts if q.index == 1]
     roles = sorted(q.role for q in low)
-    check("per drawer: two sides, a front, a back, a base and two runners",
-          roles, ["drawer_back", "drawer_base", "drawer_front", "drawer_side", "drawer_side", "runner", "runner"])
+    check("per drawer: two sides, a front, a back, a base and two runners of two members each",
+          roles, ["drawer_back", "drawer_base", "drawer_front", "drawer_side", "drawer_side",
+                  "runner_inner", "runner_inner", "runner_outer", "runner_outer"])
 
     def ext(q):
         xs, ys = [x for x, _ in q.outline], [y for _, y in q.outline]
@@ -553,8 +554,17 @@ def scene_3d():
     check("the back at the far end", by["drawer_back"][0], (45.5, 554.5, 60, 76, 21, 141))
     check("a grooved 3 mm base 16 up the sides, 6 into all four",
           by["drawer_base"][0], (39.5, 560.5, 70, 550, 37, 40))
-    check("the runners: 12.7 against each side, the runner's length, standing on the bottom panel",
-          sorted(by["runner"]), [(16, 28.7, 60, 560, 16, 61), (571.3, 584, 60, 560, 16, 61)])
+    check("the outer channels: 12.7 against each side, the runner's length, standing on the bottom panel",
+          sorted(by["runner_outer"]), [(16, 28.7, 60, 560, 16, 61), (571.3, 584, 60, 560, 16, 61)])
+    check("the inner members (R3): 6 against each box side, 37 high centred in the 45 channel, "
+          "from the setback (2) behind the box front to the channel's back",
+          sorted(by["runner_inner"]), [(23.5, 29.5, 60, 558, 20.0, 57.0), (570.5, 576.5, 60, 558, 20.0, 57.0)])
+    rec = dict(H.to_record(H.SEED), id="WIDE", inner_height=30, inner_thickness=9)
+    jw = job_of(box(runner="WIDE", drawers=[Drawer(face_height=717, box_height=150)]),
+                runners={"WIDE": rec})
+    w = [ext(q) for q in drawer_parts(jw.cabinets[0], STANDARD, jw.materials) if q.role == "runner_inner"]
+    check("  sized off the record, never Standard (inner 9 x 30)",
+          sorted((round(x1 - x0, 1), round(z1 - z0, 1)) for x0, x1, _a, _b, z0, z1 in w), [(9, 30), (9, 30)])
     s = SC.build_cabinet(j, 1) if hasattr(SC, "build_cabinet") else None
     it = s["items"][0] if s else None
     if it:
@@ -568,10 +578,15 @@ def scene_3d():
         check("fronts open: box and face slide out together, as far as the runner travels (500)",
               {tuple(q["pull"]["dir"]) + (q["pull"]["distance"],) for q in mine + faces},
               {tuple(faces[0]["pull"]["dir"]) + (500,)})
-        runners = [q for q in it["parts"] if q["role"] == "runner"]
-        check("a runner does not slide, and says it is hardware",
-              ({q["pull"] for q in runners}, {q["reason"] for q in runners}),
+        outer = [q for q in it["parts"] if q["role"] == "runner_outer"]
+        inner = [q for q in it["parts"] if q["role"] == "runner_inner"]
+        check("the outer channel does not slide, and says it is hardware",
+              ({q["pull"] for q in outer}, {q["reason"] for q in outer}),
               ({None}, {"hardware — a runner is bought, not cut"}))
+        check("the inner member slides with the box, as far as it travels (500), hardware too",
+              ({tuple(q["pull"]["dir"]) + (q["pull"]["distance"],) for q in inner},
+               {q["reason"] for q in inner}, {q["line"] for q in inner}),
+              ({tuple(faces[0]["pull"]["dir"]) + (500,)}, {"hardware — a runner is bought, not cut"}, {None}))
     three_q = dict(H.to_record(H.SEED), id="TQ", extension=0.75)
     t = box(runner="TQ", drawers=[Drawer(face_height=717, box_height=150)])
     jt = job_of(t, runners={"TQ": three_q})
@@ -588,9 +603,10 @@ def scene_3d():
     print("\nnothing drawn moves the plan, Finish or any wall elevation")
     check("solid_parts carries no drawer box and no runner",
           {q.role for q in solid_parts(c, STANDARD, j.materials)} & {"drawer_side", "drawer_front",
-                                                                      "drawer_back", "drawer_base", "runner"}, set())
+                                                                      "drawer_back", "drawer_base", "runner_outer",
+                                                                      "runner_inner"}, set())
     check("interior_parts carries them (the 3D's list)",
-          {"drawer_side", "runner"} <= {q.role for q, _ in interior_parts(c, STANDARD, j.materials)}, True)
+          {"drawer_side", "runner_outer", "runner_inner"} <= {q.role for q, _ in interior_parts(c, STANDARD, j.materials)}, True)
     import cabinetgen.room as RM
     test = load(job_file("Test_drawers"))
     walls = [w.id for w in test.room.walls]

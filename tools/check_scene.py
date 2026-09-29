@@ -16,7 +16,8 @@ What is pinned here, from the brief:
     cabinet's cut list, and the unmatched count is zero for template cabinets;
   * shelves and supports are DRAWN since 27 September 2026, and drawer boxes
     and runners since 28 September 2026 (the drawers / runners / supports
-    brief, Part 6): every box part ties to its cut-list line, and a runner is
+    brief, Part 6): every box part ties to its cut-list line, and the runner
+    parts — its outer channel and inner member since 29 September 2026 — are
     hardware, said so rather than left unmatched;
   * no room -> parts in Run order, spacing equal to the Run drawing's;
   * the scene call does not change the job;
@@ -121,10 +122,10 @@ def main():
             for q in it["parts"]:
                 if q["line"] is not None and q["line"] not in labels:
                     bad.append((it["number"], q["role"], q["line"]))
-                if q["role"] == "runner":
+                if q["role"] in ("runner_outer", "runner_inner"):
                     if q["line"] is not None or "hardware" not in q["reason"]:
-                        bad.append((it["number"], "runner", q["line"], q["reason"]))
-                    continue                  # bought, not cut: no line, and it says so
+                        bad.append((it["number"], q["role"], q["line"], q["reason"]))
+                    continue                  # runner parts: bought, not cut; no line, and they say so
                 if q["line"] is None and c.template != "none" and c.corner_kind != "ell":
                     unmatched_template.append((it["number"], q["role"], q["reason"]))
         check(f"{name}: every line names a designation on that cabinet's cut list", bad, [])
