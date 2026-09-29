@@ -22,6 +22,8 @@ import time
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, ROOT)
+# the checks print "≤"; a Windows console on cp1252 cannot, and died on it
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 try:
     from playwright.sync_api import sync_playwright

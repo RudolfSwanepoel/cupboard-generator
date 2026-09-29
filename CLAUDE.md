@@ -36,7 +36,9 @@ the UI restructure (tab order, Room -> Plan / Elevation, the Cabinets tab's 3D,
 the attached-panel drag, placing from the unplaced list, export by wall), with
 screenshots into `output/_checks/ui_check_restructure/`, and `python tools/ui_check_drawers.py`
 the drawers / runners / supports brief (Supports' counts, Catalogue -> Boards |
-Runners, the runner library and swap, drawer boxes in 3D), screenshots into
+Runners, the runner library and swap, drawer boxes in 3D) and the Drawers
+section redo (stages `layout`, `lock`, `auto`; `3d` measures the runner's
+inner member sliding), screenshots into
 `output/_checks/ui_check_drawers/`. All four are optional —
 Playwright is the only third-party package anywhere near this app, and only
 those scripts need it — and each says so and exits 0 when it is not installed.
@@ -62,6 +64,93 @@ line, and `regen_check` says so rather than failing. Every other figure in this
 list comes out of the engine and is checked on any machine.
 
 ## Status
+
+**The Drawers section redone (29 September 2026, brief
+`Claude outputs/drawers-section-redo-brief-2026-09-29.md`, agreed with
+Rudolf).** Built Parts 1 to 8 in order, one commit each, `check_all` 23 of 23
+at every one. Benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6,
+R28,363.50). `snapshot.py --compare` against the tree before this work:
+**identical on every job** — Test.json's re-point (Part 6) moved no line.
+`ui_check_drawers.py` (every stage), `ui_check_3d.py` and `ui_check_attached.py`
+pass; `ui_check_restructure.py` passes except three lines — see below. What it is:
+
+1. **The model.** `Drawer.box_edge_kind` (R1: PVC / 1mm / 2mm off what the
+   board offers, None = PVC — **replaces the same day's "always PVC"**, which
+   was Claude's proposal for that build only). `Drawer.base` Optional (None =
+   the cabinet's). `Drawer.box_height` None = **Auto** (R2). The section's own
+   defaults on the cabinet — `drawer_carcass_board` / `drawer_face_board`
+   (offered again), and new `drawer_box_edge_board`, `drawer_box_edge_kind`,
+   `drawer_base` — each written only when set (`store.LATE_CABINET_FIELDS`;
+   per drawer `store.DRAWER_SET_ONLY`), `drawer_box_edge_board` a board slot
+   (and in `boards.CABINET_BOARD_FIELDS`). Resolution per drawer: its own
+   value -> the section's -> the fallback (box: carcass; face: exterior; box
+   edging: exterior + PVC; bottom: board), each through ONE resolver on
+   `Cabinet`: `box_board_of`, `face_board_of`, `box_edge_board_of`,
+   `box_edge_kind_of`, `base_of`, `box_height_of`. Engine, room, validator,
+   3D bands and `needs_back_board` read them. `Runner.inner_height` /
+   `inner_thickness` (R3); SEED and LEGACY carry **estimates** (height - 8 =
+   37, 6) until Rudolf reads Gelmar drawing 04227 and edits the record; a
+   record not stating them reads the estimate (`inner_h` / `inner_t`) and the
+   Runners tab says **estimated: confirm** (`Runner.estimated`). **R4:**
+   `api.runner_save` refuses a record missing — or not sending — any of name,
+   a length, height, side clearance, rail thickness, lift, setback, inner
+   height, inner thickness (each > 0), naming every one (`missing`); the
+   Runners form marks them required and lights those refused. A record's
+   unstated inner fields are left out of the file (`hardware.to_record`), so
+   `hardware.json` does not grow nulls.
+2. **The section** — see **The UI → Drawers**. Setup (type, runner and ONE
+   status line, bottom, box board · face board, box edging, face edging),
+   the stack (five columns), a `differs…` sub-row per drawer. The three
+   paragraphs of prose are gone; the brief's help lines are verbatim.
+   **Found on the way, fixed:** the editor's repaint skipped the FOCUSED
+   element whatever it was, so a button just clicked (differs…, a lock, Auto)
+   kept its old label; only value controls (input, select, textarea) are
+   skipped now (`morphNode`). Structure's "backing board" need reads the
+   engine's `needs_back_board` instead of the rows.
+3. **The runner in 3D is two members a side** (R3): `runner_outer` (rail
+   thickness x height x length, on the carcass, does not slide) and
+   `runner_inner` (inner thickness x inner height, against the box side,
+   centred in the channel, from `setback` behind the box front to the
+   channel's back, slides with the box by the travel); both off the record,
+   both hardware, both under **Runners**, the inner a lighter grey
+   (`PAPER.runnerInner`). Roles use underscores like every other role (the
+   brief wrote `runner-outer`).
+4. **Auto** is cut at `drawer_layout`'s `max_box` (face less offset) and
+   follows the face; `drawer-box-face` cannot fire on it; `drawer-runner-height`
+   still can and, for Auto, says the FACE is too short and how tall it must
+   be. The divider drag holds an Auto face to the runner's height over its
+   offset and writes faces only; making an Auto drawer inner writes down the
+   figure it came to. A new drawer row starts Auto.
+5. **Wording**: went in with Part 2 (and Part 7's Plan shape line).
+6. **Test.json onto Gelmar**: cabinets 4 and 7 through the Use-for-all path
+   (`api.runner_swap`, apply). **No drawer line moved** — both are 570 deep,
+   a 500 runner on either record, 13.5 a side on both; only the two `runner`
+   keys were written (setback 3 -> 2 moves the 3D only). Fixtures untouched;
+   the UI stages that needed the legacy runner read `Test_drawers.json`.
+7. **Outline is Plan shape**, shown only on a `template == "none"` cabinet or
+   one already carrying a footprint, the engine's readout kept.
+8. **Zoom speed**: a mouse notch 1.25x in 3D (`WHEEL_ZOOM` 0.0022, was
+   0.0011) and 1.35x on the plan / elevation (`ZOOM_WHEEL` 0.003, was
+   0.0015); a trackpad pinch has its own `PINCH_ZOOM` 0.01 in both — Chromium
+   sizes pinch steps so its page zoom is exp(-deltaY / 100), so 0.01 follows
+   the fingers one for one. A pinch step is told from a notch by size (under
+   50 px, pixel mode). **To be felt on the laptop.**
+
+A section default changed carries the drawers holding the OLD section value
+with it (they were not saying they differ; `drawerSectionSet`) — otherwise the
+typed `base: "board"` every saved drawer carries would make the Bottom control
+do nothing on every existing cabinet. What a drawer chose differently stays.
+
+**Seen and not touched:** `ui_check_restructure.py --stage attach` fails three
+lines ("dragging the across arrow wrote at_x…: -16, wanted 450") — the same
+on the tree BEFORE this work (203b675, checked in a worktree on port 8767), so
+not from this brief. And `ui_check_drawers.py` used to die on this laptop's
+cp1252 console printing `≤`; it writes UTF-8 now.
+
+**Report back — open, for Rudolf.** (a) The Gelmar inner member is an
+estimate (37 x 6): read drawing 04227 and edit the record (the Runners tab
+says "estimated: confirm" until then). (b) The pinch factor wants trying on
+the laptop's trackpad. (c) Nothing on Test.json moved with the runner.
 
 **One window, maximised, and a complete check (29 September 2026, brief
 `Claude outputs/launch-and-checks-brief-2026-09-29.md`, agreed with Rudolf).**
@@ -124,8 +213,9 @@ agreed with Rudolf).** Benchmark unchanged (272 / 59 / 30, 92 pot holes,
 scripts pass. What it is:
 
 1. **`Drawer.box_edge_board`** — the board a drawer box's sides (18) and
-   fronts (19) are edged in the colour of, always PVC, the name off the board
-   through `tape_for`. **Default (None): the cabinet's EXTERIOR board**, not
+   fronts (19) are edged in the colour of, ~~always PVC~~ — **PVC / 1mm / 2mm
+   since the Drawers redo (R1, the same day), `Drawer.box_edge_kind`, PVC by
+   default** — the name off the board through `tape_for`. **Default (None): the cabinet's EXTERIOR board**, not
    the box board (ruled, for every existing drawer, October included).
    `Cabinet.box_edge_board_of(d)` is the one answer; `drawer_box_tape_of`
    and the cabinet-level `drawer_box_tape` read it. Written to the job file
@@ -643,6 +733,18 @@ dirty. Nothing else about either changed.
 | 3D snapshots `<job>_3d_<n>.png` | `output/<job>/` | `output/<job>/snapshots/` — never touched by an export |
 | The last export, when a new one is written | overwritten in place (stale files lingered) | `output/<job>/_previous/`, one level |
 | Playwright screenshots | `output/ui_check_restructure/`, `output/ui_check_drawers/` | `output/_checks/<script>/` |
+| Runner dropdown, Catalogue…, the runner readout | Drawers, under the table | Drawers -> **Setup**, second row, ONE status line (Drawers redo, 29 Sept) |
+| Drawer Mode (Share / Fixed), Value and mm columns | Drawers table | the **lock** in the Face height cell: locked = Fixed (typed), unlocked = Share, mm greyed beside the weight |
+| Box h and its `≤` | Drawers table | **Box height**: `Auto (≤n)`, or the typed figure with `≤n` and an **Auto** button |
+| Off. | Drawers table | **Offset**, the same field |
+| Base per drawer | Drawers table | **Bottom** in Setup (the section's), and per drawer in its **differs…** sub-row |
+| Box mat. / Face mat. per drawer | Drawers table | **Box board · Face board** in Setup, and per drawer in **differs…** |
+| Box edging colour per drawer | the Box edging row under each drawer | **Box edging** (thickness + colour) in Setup, and per drawer in **differs…** |
+| Face edging | Drawers, under the table | **Face edging** in Setup |
+| The tape names beside the edging controls | printed beside them | the control's tooltip, the row's tooltip, and the cut list |
+| + Face | Drawers | **+ Drawer** (a new row: Share, box Auto) |
+| The three hint paragraphs | Drawers | **Gone**; one help line under each control |
+| Outline section | every cupboard | **Plan shape**, only on a `template "none"` cabinet or one with a footprint |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**
@@ -1299,7 +1401,9 @@ says so (`scene.NOT_DRAWN`). Shelves and supports have been drawn since 27
 September 2026, and **drawer boxes and runners since 28 September 2026**
 (`room.drawer_parts`, off `room.drawer_layout`: two sides, a front, a back and
 a base per drawer, tied to their cut-list lines; an inner drawer's face with
-its box; the runners' outer rails as grey blocks, role `runner`, board `''`,
+its box; each runner as two grey blocks a side since 29 September 2026 — the
+outer channel, role `runner_outer`, fixed, and the inner member,
+`runner_inner`, a lighter grey, sliding with the box — board `''`,
 "hardware — a runner is bought, not cut", behind the **Runners** toggle). A base unit therefore stands visibly on
 nothing at leg height where no plinth board was chosen; that is the truth.
 An ell, a bespoke cabinet or an entered non-rectangular outline is its
@@ -1586,7 +1690,8 @@ cabinetgen/standard.py     every construction constant. Start here.
 cabinetgen/boards.py       the board library: load, save, tape names, job usage
 boards.json                the library itself, shared through the repo
 cabinetgen/hardware.py     the hardware catalogue: runners (LEGACY, the Gelmar seed, load,
-                           save, resolve); hinges and handles later
+                           save, resolve; the inner member and its estimate; REQUIRED /
+                           missing, what a record must state); hinges and handles later
 hardware.json              the catalogue itself (`runners` list), shared through the repo
 cabinetgen/pictures.py     board pictures: Pictures/, what is stored, what is served
 Pictures/                  the board pictures themselves, shared through the repo
@@ -1649,12 +1754,15 @@ tools/check_supports.py    typed supports: the worked positions, what each cuts,
                            criticals, legacy rows unchanged, tape inside the size, the scene
 tools/check_runners.py     runners: the catalogue, LEGACY, the length and width a runner gives, the
                            swap, the delete guard; the drawer setting; the drawer checks;
-                           drawer box edging per drawer (29 Sept 2026)
+                           drawer box edging per drawer (29 Sept 2026); the Drawers redo:
+                           section defaults, overrides, box edging thickness, the inner
+                           member, R4, Auto, Test.json onto Gelmar (29 Sept 2026)
 tools/check_export.py      the Plazaboard CSV: columns, one number per panel, Boards-tab edging
                            names, and the October job against Plazaboard's own files
 Sample Plaza cutlist and quote/  Plazaboard's CSVs and quotation for the October job — the
                            reference check_export.py compares against
-tools/ui_check_drawers.py  the drawers / runners / supports brief in the running app (Playwright)
+tools/ui_check_drawers.py  the drawers / runners / supports brief, and the Drawers section
+                           redo (layout, lock, auto), in the running app (Playwright)
 tools/check_attached.py    attached panels: derived place, attach/detach round trip, moves with
                            the cabinet, the room checks in and tip-up out, delete, duplicate,
                            the job file; and a new cabinet's supports by kind
@@ -1805,9 +1913,12 @@ job written before them cuts exactly what it was quoted:
   sets now — one column each in the drawer table; the cabinet-level pair is no
   longer offered in the UI and is only read as a fallback from older job files.
   The engine groups drawers by board as well as size, so an odd drawer comes out
-  as its own line (`418a` / `418b`). Its box PVC follows its own **Box
-  edging** board (`box_edge_board`), the exterior board by default (29 Sept
-  2026) — no longer the box board.
+  as its own line (`418a` / `418b`). Its box edging follows its own **Box
+  edging** board and thickness (`box_edge_board`, `box_edge_kind`), then the
+  section's (`drawer_box_edge_board` / `_kind`), then the exterior board in
+  PVC (29 Sept 2026) — no longer the box board. Since the Drawers redo the
+  cabinet-level pair is offered again, as the section's Box board · Face
+  board, and a drawer's own choice is its **differs…** sub-row.
 - `door_boards[i]` — one per leaf, `""` for the exterior board. Two leaves cut
   from different boards come out as two cut-list lines, told apart by
   `born_distinct` because the material is part of the signature it reads
@@ -2225,7 +2336,7 @@ other banded edge takes the CARCASS board.**
 | `carcass_edge` | PVC in the **exterior** colour. Fronts of the sides, top, bottom, shelves, dividers and front-edged supports — shelf and divider fronts match the front, not the box (ruled 14 Sept 2026). Not selectable anywhere; it follows the exterior board. |
 | `door_edge` | `door_edge_kind` (1mm / 2mm) in `door_edge_board`'s colour. Doors and exposed ends. |
 | `drawer_face_edge` | `drawer_edge_kind` in `drawer_edge_board`'s colour. Drawer faces. |
-| `drawer_box_edge` | PVC in the drawer's **Box edging** board's colour (`Drawer.box_edge_board`), the **exterior** board by default (29 Sept 2026). Drawer sides and fronts only — supports carry their own Edging Colour. |
+| `drawer_box_edge` | The drawer's **Box edging** thickness (`box_edge_kind`, PVC / 1mm / 2mm — R1, 29 Sept 2026) in its board's colour (`box_edge_board`), each else the section's, else PVC in the **exterior** board. Drawer sides and fronts only — supports carry their own Edging Colour. |
 
 **Edging is one control per section, and it is called edging, not tape** (18
 September 2026). Doors and Drawers each carry a thickness dropdown and a colour
@@ -3093,12 +3204,21 @@ units**.
 - **Doors** is one or two leaves and no more. A pair is fixed, left and right; a
   single door is the choice. Each leaf names the board it is cut from, and the
   section carries one edging control.
-- **Drawers** carries the face table — with a box-material and a face-material
-  column per drawer, defaulting to Structure's Carcass and Exterior boards — and
-  one edging control for the whole section. Each box's PVC edging is chosen
-  per drawer on a **Box edging** row under the drawer (29 Sept 2026), the
-  exterior board when blank. The settings column is 560 wide to fit the
-  table's nine columns.
+- **Drawers** (redone 29 September 2026) is two headed blocks in its tint.
+  **Setup**: Drawer type (Outer | Inner), Runner (dropdown, Catalogue…, ONE
+  status line — `Gelmar 45 · 500 long · box 500 × 291 · pulls out 500`, or
+  `Legacy lengths (350 / 450 / 500), as quoted` with what to do), Bottom
+  (3 mm grooved sheet | 16 mm housed melamine), Box board · Face board, Box
+  edging and Face edging (thickness + colour each, the names in the tooltip).
+  **The stack**: `# · Face height · Box height · Offset · differs… ×` — the
+  lock (Fixed / Share and its weight), Box height `Auto (≤n)` or typed with
+  `≤n` and Auto, the readout `opening · faces + gaps · left`, and Equal ·
+  Graduated · + Drawer; inner drawers put Height where Offset is. A drawer's
+  **differs…** sub-row holds its own box board, face board, bottom and box
+  edging (a face's edging stays the section's, as Doors); a drawer naming any
+  shows it open with a dot, and **same as section** clears them all. One
+  help line under each control, the brief's words. The settings column stays
+  560 wide.
 - **Supports** is the support rows and nothing else. The **Decor** section is
   gone — added panels (exposed ends, code 08) come back with that work.
 - **Corner Unit** is the type, the hand and every dimension the unit has. A
