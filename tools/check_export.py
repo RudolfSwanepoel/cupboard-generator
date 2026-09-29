@@ -370,11 +370,12 @@ PLAZA_DIFFERENCES = {
 }
 
 # Inside KNOWN cabinets: Plazaboard keyed every MEL edging as PVC BROOKHILL,
-# including the white-edged supports and the drawer boxes our job edges WHITE.
-# The drawer sides (18) of cabinets 1, 4 and 30, cabinet 27's drawer front
-# (19), and the white-edged supports of 27-29.
+# including the white-edged supports of 27-29, which our job edges WHITE. The
+# drawer boxes (118, 119, 2719, 3019, 418, 419) dropped out on 29 September
+# 2026: a box is edged in the exterior board's PVC by default now, BROOKHILL,
+# which is what Plazaboard keyed. Supports keep their own Edging Colour.
 EDGE_MATS_IN_KNOWN = sorted(f"{lab}: ours PVC WHITE, theirs PVC BROOKHILL" for lab in (
-    "118", "119", "2704c", "2719", "2804c", "2904c", "3019", "418", "419"))
+    "2704c", "2804c", "2904c"))
 
 
 def october_vs_plazaboard():

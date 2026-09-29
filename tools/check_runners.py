@@ -18,7 +18,10 @@ The drawers / runners / supports brief of 28 September 2026. Holds:
     a swap names the drawer lines that move; the job file round-trips;
   * Part 3 — the drawer setting: `room.drawer_layout`, the one place a box is
     placed, with the sketch's worked numbers;
-  * Part 5 — the drawer checks, each with a stable id and worked numbers.
+  * Part 5 — the drawer checks, each with a stable id and worked numbers;
+  * drawer box edging (29 September 2026): `Drawer.box_edge_board`, the
+    exterior board by default, a chosen board winning, a board with no PVC an
+    EDGING critical, the job file, the board slot, the swap, the 3D band.
 
 Repo root is the parent of tools/.
 """
@@ -604,6 +607,93 @@ def scene_3d():
           "boxes and runners taken out", [a == b for a, b in zip(with_boxes, without)], [True] * len(with_boxes))
 
 
+def box_edging():
+    print("\ndrawer box edging, chosen per drawer (29 September 2026)")
+    from cabinetgen.room import interior_parts
+    edged = lambda job, role: sorted({(p.label, p.edge_material) for p in generate_job(job)
+                                      if p.role == role})
+    j = job_of(box())
+    check("nothing chosen: sides and fronts in the EXTERIOR board's PVC, not the box board's",
+          (edged(j, "Drawer Side"), edged(j, "Drawer Front")),
+          ([("118", "PVC BROOKHILL")], [("119", "PVC BROOKHILL")]))
+    pick = box(drawers=[Drawer(240, 150), Drawer(240, 150, box_edge_board="MEL"),
+                        Drawer(233, 150)])
+    jp = job_of(pick)
+    check("a chosen board wins, on that drawer only — its own line, lettered at birth",
+          edged(jp, "Drawer Side"), [("118a", "PVC BROOKHILL"), ("118b", "PVC WHITE")])
+    check("  and the qty splits 4 + 2 (two sides a box)",
+          sorted((p.label, p.qty) for p in generate_job(jp) if p.role == "Drawer Side"),
+          [("118a", 4), ("118b", 2)])
+    check("  the cost is priced by kind: the same PVC metres either way",
+          round(sum(summarise(jp, generate_job(jp), None)["edging"].get(k, 0)
+                    for k in ("PVC BROOKHILL", "PVC WHITE")), 3),
+          round(sum(summarise(j, generate_job(j), None)["edging"].get(k, 0)
+                    for k in ("PVC BROOKHILL", "PVC WHITE")), 3))
+    check("the bases (17) and faces (20) do not move",
+          lines(jp, ("Drawer Base",)) == lines(j, ("Drawer Base",)), True)
+
+    # a board with no PVC: the ordinary EDGING critical, naming the drawer
+    nopvc = job_of(box(drawers=[Drawer(240, 150), Drawer(473, 150, box_edge_board="BACK")]))
+    nopvc.materials["BACK"]["edging_kinds"] = ["1mm"]
+    got = [i.message for i in issues(nopvc, "edging-offered")]
+    check("a Box edging board offering no PVC is an EDGING critical naming the drawer",
+          [("drawer 2 box sides and fronts" in m, "Tick PVC" in m) for m in got], [(True, True)])
+    ext = job_of(box(drawers=[Drawer(240, 150), Drawer(473, 150)]))
+    ext.materials["BROOKHILL"]["edging_kinds"] = ["2mm"]
+    check("  and the default (the exterior) offering none names every drawer on it",
+          [("drawers 1, 2 box sides and fronts" in i.message)
+           for i in issues(ext, "edging-offered") if "drawer" in i.message], [True])
+
+    # the job file: written only when set
+    plain = job_to_dict(job_of(box()))["cabinets"][0]["drawers"]
+    check("never set: no box_edge_board key in the file",
+          any("box_edge_board" in d for d in plain), False)
+    back = job_from_dict(json.loads(json.dumps(job_to_dict(jp))))
+    check("set: written on that drawer alone, and read back",
+          ([d.box_edge_board for d in back.cabinets[0].drawers],
+           ["box_edge_board" in d for d in job_to_dict(jp)["cabinets"][0]["drawers"]]),
+          ([None, "MEL", None], [False, True, False]))
+    for name in ("Test_drawers", "Test_export"):
+        with open(job_file(name), encoding="utf-8") as f:
+            raw = f.read()
+        check(f"{name}.json round-trips its drawers unchanged",
+              [c["drawers"] for c in job_to_dict(job_from_dict(json.loads(raw)))["cabinets"]],
+              [c.get("drawers", []) for c in json.loads(raw)["cabinets"]])
+
+    # the one list of board fields, the swap, the rename
+    c = copy.deepcopy(pick)
+    check("in _board_slots as 'drawer 2 box edging board'",
+          [(b, lab) for b, lab in c.board_refs() if "edging" in lab],
+          [("MEL", "drawer 2 box edging board")])
+    from cabinetgen.boards import cabinet_board_ids
+    check("  and the library scan of a saved job finds it (boards.cabinet_board_ids)",
+          "MEL" in cabinet_board_ids({"drawers": [{"box_edge_board": "MEL"}]}), True)
+    swapped = api.board_swap({"job": job_to_dict(job_of(copy.deepcopy(pick))),
+                              "from": "MEL", "to": "BROOKHILL", "apply": True})
+    check("a swap moves it with every other use of the board",
+          [d.box_edge_board for d in job_from_dict(swapped["job"]).cabinets[0].drawers],
+          [None, "BROOKHILL", None])
+
+    # 3D: the band on each box's top edges, in the edging board
+    bands = sorted({(q.role, tp.side, tp.board, tp.kind)
+                    for q, tapes in interior_parts(pick, STANDARD, jp.materials)
+                    if q.index == 1 for tp in tapes})
+    check("3D: drawer 2's sides, front and back banded on the top edge in its Box edging board",
+          bands, [("drawer_back", "z1", "MEL", "pvc"), ("drawer_front", "z1", "MEL", "pvc"),
+                  ("drawer_side", "z1", "MEL", "pvc")])
+    check("  drawer 1's in the exterior board, and no band on a base",
+          sorted({(q.role, tp.board) for q, tapes in interior_parts(pick, STANDARD, jp.materials)
+                  if q.index == 0 for tp in tapes}),
+          [("drawer_back", "BROOKHILL"), ("drawer_front", "BROOKHILL"),
+           ("drawer_side", "BROOKHILL")])
+
+    # the October job: its boxes move from PVC WHITE to PVC BROOKHILL, the total does not
+    oct_box = sorted({p.edge_material for p in generate_job(OCT)
+                      if p.role in ("Drawer Side", "Drawer Front")})
+    check("October: every drawer box edged PVC BROOKHILL (Plazaboard's keying)",
+          oct_box, ["PVC BROOKHILL"])
+
+
 def main():
     catalogue()
     legacy_holds()
@@ -612,6 +702,7 @@ def main():
     inner_drawers()
     drawer_checks()
     scene_3d()
+    box_edging()
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + "; ".join(FAILS))

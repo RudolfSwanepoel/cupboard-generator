@@ -356,6 +356,13 @@ class Drawer:
     # face's height (`drawer-box-face`). Not read on an inner drawer, whose face
     # is its box. Written to the job file only when set.
     offset: Optional[int] = None
+    # Which board this drawer's box sides (18) and fronts (19) are EDGED in the
+    # colour of (29 September 2026, ruled by Rudolf). None is the default, the
+    # cabinet's EXTERIOR board — not the box board — for every drawer, the
+    # October job's included, because that is what Plazaboard keyed and cut.
+    # Always PVC; the name comes off the board's record through `tape_for`.
+    # Written to the job file only when set.
+    box_edge_board: Optional[str] = None
 
 
 @dataclass
@@ -947,8 +954,9 @@ class Cabinet:
                           lambda i=i: self.door_boards[i] or "",
                           lambda v, i=i: self.door_boards.__setitem__(i, v), False))
         for i, d in enumerate(self.drawers or []):
-            for attr, what in (("box_board", "box"), ("face_board", "face")):
-                slots.append((f"drawer {i + 1} {what} board",
+            for attr, what in (("box_board", "box board"), ("face_board", "face board"),
+                               ("box_edge_board", "box edging board")):
+                slots.append((f"drawer {i + 1} {what}",
                               lambda d=d, a=attr: getattr(d, a, "") or "",
                               lambda v, d=d, a=attr: setattr(d, a, v), False))
         for i, r in enumerate(self.support_rows or []):
@@ -1030,6 +1038,12 @@ class Cabinet:
     def box_board_of(self, d: "Drawer") -> str:
         """The board one drawer's box is cut from: its own, or the cabinet's."""
         return d.box_board or self.drawer_carcass
+
+    def box_edge_board_of(self, d: "Drawer") -> str:
+        """The board one drawer's box sides and fronts are edged in the colour
+        of: its own choice, or the cabinet's exterior board (ruled 29 September
+        2026 — not the box board, which is what it followed before)."""
+        return d.box_edge_board or self.exterior_board
 
     def face_board_of(self, d: "Drawer") -> str:
         """The board one drawer's face is cut from: its own, or the cabinet's."""
@@ -1262,10 +1276,10 @@ class Cabinet:
                 or self.exterior_board)
 
     def drawer_box_tape(self, materials: dict) -> str:
-        """PVC in the DRAWER CARCASS board's colour: drawer sides and fronts, and
-        the white-edged supports. With no drawer carcass chosen that is the
-        cabinet's carcass board, which is what it always was."""
-        return tape_for(materials, self.drawer_carcass, "pvc")
+        """PVC in the cabinet's default drawer-box edging colour — its EXTERIOR
+        board (29 September 2026) — for a drawer that names no box edging board
+        of its own. Drawer sides and fronts only; supports have their own."""
+        return tape_for(materials, self.exterior_board, "pvc")
 
     def support_row_cut_board(self, row: "Support") -> str:
         """What the rail itself is cut from.
@@ -1335,9 +1349,9 @@ class Cabinet:
         return self.support_row_tape(materials, Support(edge=edge, qty=1))
 
     def drawer_box_tape_of(self, materials: dict, d: "Drawer") -> str:
-        """PVC in one drawer's own box board colour — the same rule as
-        drawer_box_tape, for a drawer whose box may differ from the cabinet's."""
-        return tape_for(materials, self.box_board_of(d), "pvc")
+        """PVC on one drawer's box sides and fronts, in the colour of its box
+        edging board (`box_edge_board_of`: its own, else the exterior board)."""
+        return tape_for(materials, self.box_edge_board_of(d), "pvc")
 
     @property
     def needs_back_board(self) -> bool:

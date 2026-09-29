@@ -367,7 +367,13 @@ def _geometry_info(job, cab, std):
                                      or cab.exterior_board),
                            "name": cab.drawer_face_tape(job.materials)},
                 "carcass": {"name": cab.carcass_tape(job.materials)},
-                "drawer_box": {"name": cab.drawer_box_tape(job.materials)},
+                # a drawer box's sides and fronts: PVC in the drawer's own Box
+                # edging board, the exterior board by default (29 Sept 2026);
+                # `rows` is each drawer's name, in the order of `drawers`
+                "drawer_box": {"board": cab.exterior_board,
+                               "name": cab.drawer_box_tape(job.materials),
+                               "rows": [cab.drawer_box_tape_of(job.materials, d)
+                                        for d in cab.drawers]},
             },
             # The tapes in force and where each came from. Derived values are the
             # engine's answer read back, never worked out in the browser.

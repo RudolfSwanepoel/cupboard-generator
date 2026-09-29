@@ -167,15 +167,16 @@ def main() -> int:                                                  # noqa: C901
     c = box()
     check("carcass edge is PVC in the exterior colour", c.carcass_tape(MATERIALS), "PVC BROOKHILL")
     check("door edge is 2 mm in the exterior colour", c.door_tape(MATERIALS), "2mm BROOKHILL")
-    check("drawer box edge is PVC in the carcass colour",
-          c.drawer_box_tape(MATERIALS), "PVC WHITE")
+    check("drawer box edge is PVC in the EXTERIOR colour by default (29 Sept 2026)",
+          c.drawer_box_tape(MATERIALS), "PVC BROOKHILL")
     d = by_code(generate_cabinet(c))
     check("shelf and divider fronts match the front, not the box (ruled 14 Sept 2026)",
           (d["05"].edge_material, d["09"].edge_material), ("PVC BROOKHILL", "PVC BROOKHILL"))
     check("drawer sides and fronts take the box tape",
-          (d["18"].edge_material, d["19"].edge_material), ("PVC WHITE", "PVC WHITE"))
-    check("a Brookhill carcass takes its drawer boxes in the Brookhill PVC",
-          box(carcass_board="BROOKHILL").drawer_box_tape(MATERIALS), "PVC BROOKHILL")
+          (d["18"].edge_material, d["19"].edge_material), ("PVC BROOKHILL", "PVC BROOKHILL"))
+    check("a white exterior takes its drawer boxes in the white PVC, whatever the carcass",
+          box(carcass_board="BROOKHILL", exterior_board="MEL").drawer_box_tape(MATERIALS),
+          "PVC WHITE")
 
     print("\na board with nothing to generate from is named, never guessed at")
     nameless = {"MEL": {"name": "", "tape": "", "thickness": 16, "grain": "plain"},
@@ -202,7 +203,8 @@ def main() -> int:                                                  # noqa: C901
     check("the carcass edging is the exterior board's Edging Name",
           got["01"].edge_material, "PVC BROOKHILL")
     check("the doors' likewise", got["07"].edge_material, "2mm BROOKHILL")
-    check("the drawer boxes' the carcass board's", got["18"].edge_material, "PVC WHITE")
+    check("the drawer boxes' the exterior board's (29 Sept 2026)", got["18"].edge_material,
+          "PVC BROOKHILL")
     check("and the file still carries all three, untouched",
           {k: cabinet_to_dict(over)[k] for k in ("carcass_edge", "door_edge",
                                                  "drawer_box_edge")},
@@ -211,7 +213,7 @@ def main() -> int:                                                  # noqa: C901
 
     print("\nthe October job derives exactly what it was quoted with")
     stated = {"carcass_edge": "PVC BROOKHILL", "door_edge": "2mm BROOKHILL",
-              "drawer_box_edge": "PVC WHITE"}
+              "drawer_box_edge": "PVC BROOKHILL"}   # the exterior, 29 Sept 2026
     mismatches = [(c.number, f, c.tapes(JOB.materials)[f], v)
                   for c in JOB.cabinets if c.template != "none"
                   for f, v in stated.items() if c.tapes(JOB.materials)[f] != v]
@@ -350,9 +352,9 @@ def main() -> int:                                                  # noqa: C901
     check("its face likewise, while the same-size face beside it keeps the exterior",
           [(x[1], x[2], x[4]) for x in lines(odd, "20")],
           [("BROOKHILL", 200, 1), ("MEL", 200, 1), ("BROOKHILL", 300, 1)])
-    check("the box's PVC follows that drawer's box board",
+    check("the box's PVC does NOT follow its box board: the exterior's (29 Sept 2026)",
           sorted({p.edge_material for p in generate_cabinet(odd, S, MATERIALS)
-                  if p.code[:2] == "18"}), ["PVC BROOKHILL", "PVC WHITE"])
+                  if p.code[:2] == "18"}), ["PVC BROOKHILL"])
     check("nothing else on the cabinet moves",
           lines(odd, "01") == lines(plain, "01") and lines(odd, "07") == lines(plain, "07"),
           True)

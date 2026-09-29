@@ -75,6 +75,64 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
+**Drawer box edging chosen per drawer; above the ceiling acceptable (29
+September 2026, brief `Claude outputs/drawer-edging-ceiling-accept-brief-2026-09-29.md`,
+agreed with Rudolf).** Benchmark unchanged (272 / 59 / 30, 92 pot holes,
+18 / 9 / 6, R28,363.50); every `check_*.py` green; all four Playwright
+scripts pass. What it is:
+
+1. **`Drawer.box_edge_board`** — the board a drawer box's sides (18) and
+   fronts (19) are edged in the colour of, always PVC, the name off the board
+   through `tape_for`. **Default (None): the cabinet's EXTERIOR board**, not
+   the box board (ruled, for every existing drawer, October included).
+   `Cabinet.box_edge_board_of(d)` is the one answer; `drawer_box_tape_of`
+   and the cabinet-level `drawer_box_tape` read it. Written to the job file
+   only when set. In `_board_slots` as "drawer N box edging board" and in
+   `boards.DRAWER_BOARD_FIELDS`, so swap, un-select, rename and the library
+   scan find it. The engine emits the sides and fronts once per edging board
+   inside a box group (`118a` / `118b`, lettered at birth); the base (17) is
+   not edged and stays one line. An edging board offering no PVC is the
+   ordinary `EDGING` critical (`edging-offered`), naming the drawers ("drawers
+   1, 2 box sides and fronts (Box edging)"). **Supports are not touched.**
+   In 3D each box's sides, front and back carry a band on their top edge in
+   that board (`room._drawer_tapes`, off `drawer_layout`'s `box_edge_board`).
+2. **The editor: a Box edging row UNDER each drawer row**, not a tenth column
+   — the table already filled the 560 px column (the two material columns are
+   69 px, measured), so a column would have squeezed them (hard rule 9). The
+   dropdown lists the project's boards offering PVC by their Edging Name, blank
+   = "(the exterior's name)", with the engine's name beside it
+   (`edging.drawer_box.rows` on `/api/compute`). Inner drawers the same.
+   **Proposed, not ruled — change it if Rudolf wants it elsewhere.**
+3. **What moved.** October: 118, 119, 418, 419, 2718, 2719, 3018, 3019
+   `PVC WHITE` -> `PVC BROOKHILL` (PVC BROOKHILL 167.082 -> 199.152 m, PVC
+   WHITE 33.484 -> 1.414 m — the white-edged supports of 27-29 only); the
+   total does not move (edging priced by kind; the per-name metre round-up
+   comes to 202 m either way). `check_export.py`'s edging-names-inside-KNOWN
+   list drops 118, 119, 2719, 3019, 418, 419 and keeps 2704c / 2804c / 2904c
+   (supports). Test.json: 418a-d / 419a-d -> `PVC Grey`, 718, 719,
+   1518a-c, 1519a-c -> `PVC BROOKHILL`; its total **R11,257.50 -> R11,250.75**
+   (the same PVC metres, one metre less of round-up across the names).
+   Test_Build: 418 / 419 -> `PVC BROOKHILL`, total unchanged. No issue moved
+   on any job; October's elevation legend line ("drawer boxes") moved.
+4. **`above-ceiling` is acceptable** (Rudolf, 29 September 2026, changing the
+   22 September ruling). `validate.ACCEPTABLE["above-ceiling"]`, fingerprinted
+   over `room.ceiling_inputs` — underside (`carcass_z`), height (`geometry`)
+   and the ceiling — which `above_ceiling` itself compares, so it lapses when
+   any of them moves. `ceiling-measured`, `panel-fits-board` and every other
+   critical still block; `/api/accept` refuses them. The "Assembled in place"
+   preset is offered on tip-up only. Pinned in `check_accept.py`
+   (`above_ceiling_accepted`: accepted, exported into `<job>_accepted.txt`,
+   lapsing on the ceiling and on the height; `ceiling-measured` refused).
+5. Pinned in `check_runners.py` `box_edging()` (default exterior, a choice
+   wins, no PVC is `EDGING`, the file round trip, the slot, the scan, the swap,
+   the 3D band, October's boxes) and `ui_check_drawers.py --stage boxedge`.
+
+**Report back — open, for Rudolf.** (a) The Box edging dropdown sits on its
+own row under each drawer rather than as a column — confirm. (b) Test.json's
+total moves R6.75 through the per-name metre round-up. (c) An exterior board
+with no PVC now raises two EDGING criticals on a drawer cabinet (carcass
+fronts, and the drawer boxes) — both are real and name different parts.
+
 **The Plazaboard CSV: right columns, right numbers, right edging names (28
 September 2026, brief `Claude outputs/plaza-csv-columns-brief-2026-09-28.md`,
 agreed with Rudolf; reference: Plazaboard's own files for the October job in
@@ -769,7 +827,7 @@ only Test.json's drawings, which is the point of items 3 and 4.
    rule since 21 September). Panels are still not dragged in the plan — the
    existing ruling — and drag in the elevation, checked the same way.
 2. **Accepting a site-dependent critical.** See **Accepting a critical** below.
-   Tip-up only.
+   Tip-up only (above-ceiling too since 29 September 2026).
 3. **Every wall drawn by one rule.** See **Per-wall elevations**. The "white box
    labelled side on the return wall" was a MITRE's own open-face side, drawn by
    `_corner_interior` with that label; the label is gone and the side stays in
@@ -790,7 +848,8 @@ and the check now skips it the same way.
 **Ruled on these results the same day:** the classification of criticals is
 accepted as proposed — **tip-up is the only acceptable critical**, and every
 other one blocks, above-ceiling, ceiling-measured, wall-length and room-closure
-included. And **`shelf-fouls-back` on a mitre stays as it is**: Rudolf ruled
+included. **Changed 29 September 2026: above-ceiling is acceptable too** (see
+**Accepting a critical**); ceiling-measured still blocks. And **`shelf-fouls-back` on a mitre stays as it is**: Rudolf ruled
 against skipping it when no back panel is cut. Do not change it.
 
 Rulings recorded with this brief: **blind corners are intended mainly for base
@@ -1533,7 +1592,8 @@ tools/check_scene.py       the 3D scene: ids, parts vs geometry, to_world, carca
 tools/check_supports.py    typed supports: the worked positions, what each cuts, the three
                            criticals, legacy rows unchanged, tape inside the size, the scene
 tools/check_runners.py     runners: the catalogue, LEGACY, the length and width a runner gives, the
-                           swap, the delete guard; the drawer setting; the drawer checks
+                           swap, the delete guard; the drawer setting; the drawer checks;
+                           drawer box edging per drawer (29 Sept 2026)
 tools/check_export.py      the Plazaboard CSV: columns, one number per panel, Boards-tab edging
                            names, and the October job against Plazaboard's own files
 Sample Plaza cutlist and quote/  Plazaboard's CSVs and quotation for the October job — the
@@ -1689,7 +1749,9 @@ job written before them cuts exactly what it was quoted:
   sets now — one column each in the drawer table; the cabinet-level pair is no
   longer offered in the UI and is only read as a fallback from older job files.
   The engine groups drawers by board as well as size, so an odd drawer comes out
-  as its own line (`418a` / `418b`), and its box PVC follows its own box board.
+  as its own line (`418a` / `418b`). Its box PVC follows its own **Box
+  edging** board (`box_edge_board`), the exterior board by default (29 Sept
+  2026) — no longer the box board.
 - `door_boards[i]` — one per leaf, `""` for the exterior board. Two leaves cut
   from different boards come out as two cut-list lines, told apart by
   `born_distinct` because the material is part of the signature it reads
@@ -2107,7 +2169,7 @@ other banded edge takes the CARCASS board.**
 | `carcass_edge` | PVC in the **exterior** colour. Fronts of the sides, top, bottom, shelves, dividers and front-edged supports — shelf and divider fronts match the front, not the box (ruled 14 Sept 2026). Not selectable anywhere; it follows the exterior board. |
 | `door_edge` | `door_edge_kind` (1mm / 2mm) in `door_edge_board`'s colour. Doors and exposed ends. |
 | `drawer_face_edge` | `drawer_edge_kind` in `drawer_edge_board`'s colour. Drawer faces. |
-| `drawer_box_edge` | PVC in the **drawer box** board's colour. Drawer sides and fronts, and white-edged supports. |
+| `drawer_box_edge` | PVC in the drawer's **Box edging** board's colour (`Drawer.box_edge_board`), the **exterior** board by default (29 Sept 2026). Drawer sides and fronts only — supports carry their own Edging Colour. |
 
 **Edging is one control per section, and it is called edging, not tape** (18
 September 2026). Doors and Drawers each carry a thickness dropdown and a colour
@@ -2977,9 +3039,10 @@ units**.
   section carries one edging control.
 - **Drawers** carries the face table — with a box-material and a face-material
   column per drawer, defaulting to Structure's Carcass and Exterior boards — and
-  one edging control for the whole section. Each box's own PVC edging follows
-  that drawer's box board and is not chosen. The settings column is 560 wide to
-  fit the table's nine columns.
+  one edging control for the whole section. Each box's PVC edging is chosen
+  per drawer on a **Box edging** row under the drawer (29 Sept 2026), the
+  exterior board when blank. The settings column is 560 wide to fit the
+  table's nine columns.
 - **Supports** is the support rows and nothing else. The **Decor** section is
   gone — added panels (exposed ends, code 08) come back with that work.
 - **Corner Unit** is the type, the hand and every dimension the unit has. A
@@ -3241,8 +3304,12 @@ panel, and a warning — the safe way round.
 
 **Ruled 22 September 2026.** Some criticals depend on the SITE, not on the cut
 list; the operator can accept one with a reason and the export goes ahead. A
-critical that protects the cut list always blocks. **Today only tip-up is
-acceptable**, and the mitre door swing is deliberately not.
+critical that protects the cut list always blocks. **Today tip-up and
+above-ceiling are acceptable** — above-ceiling since 29 September 2026
+(Rudolf), changing the 22 September "tip-up only". **Still blocking:**
+`ceiling-measured` (no ceiling measured — a missing site figure),
+`panel-fits-board` (a panel can never be longer than the board), the mitre door
+swing (deliberately), and every other critical.
 
 - Every critical carries a stable **check id** (`Issue.check`, e.g. `tip-up`,
   `overlap`, `mitre-door-swing`). Never rename one: acceptances are stored
@@ -3251,7 +3318,9 @@ acceptable**, and the mitre door swing is deliberately not.
   else — its id and the function that FINGERPRINTS exactly the inputs it read.
   Tip-up's is `room.tip_inputs`, the same dict `tip_problems` works from:
   height and depth off `geometry` (never declared), legs, setback, underside and
-  ceiling, written readably into the job file.
+  ceiling, written readably into the job file. Above-ceiling's is
+  `room.ceiling_inputs` — underside (`carcass_z`), height (`geometry`) and the
+  ceiling — the same dict `above_ceiling` compares, attached panels included.
 - `Job.acceptances` holds `{check, where, reason, fingerprint}`, written only
   when there is one, so every job on disk round-trips byte for byte.
 - `validate` marks each critical `acceptable`, `accepted` (the reason) or
@@ -3261,7 +3330,7 @@ acceptable**, and the mitre door swing is deliberately not.
   not acceptable is lapsed by definition — it can never unblock anything.
 - `/api/accept` hands back the fingerprint and refuses any check not in
   `ACCEPTABLE`. The reason is required; "Assembled in place" is a one-click
-  preset.
+  preset on tip-up only.
 - Accepted items stay in the Validation list greyed with an Undo, show on the
   cut list, and go into the export folder as `<job>_accepted.txt`. **Never into
   the Plazaboard CSV.**

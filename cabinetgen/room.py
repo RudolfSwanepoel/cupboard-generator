@@ -1695,7 +1695,11 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
                 "rail": (y0, y0 + length, bz0 - rr.lift, bz0 - rr.lift + rr.height),
                 "inner_y0": y0 + rr.setback,
                 "travel": rr.travel(length) if length else 0,
-                "base": d.base, "box_board": cab.box_board_of(d)}
+                "base": d.base, "box_board": cab.box_board_of(d),
+                # the board the box's top edges are banded in the colour of
+                # (29 September 2026), '' when that resolves to no edging
+                "box_edge_board": (cab.box_edge_board_of(d)
+                                   if cab.drawer_box_tape_of(mats, d) else "")}
 
     # the face stack, exactly as it always was
     at = 0
@@ -1800,7 +1804,7 @@ def interior_parts(cab, std: Standard = STANDARD, materials: dict = None) -> Lis
     shelves = shelf_layout(cab, std, mats)
     drawers = drawer_parts(cab, std, mats)
     if not lay and not shelves:
-        return [(q, []) for q in drawers]
+        return _drawer_tapes(cab, drawers, std, mats)
     g = geometry(cab, std, mats)
     xs = [x for x, _ in g.footprint]
     W, D, t = max(xs) - min(xs), g.depth, std.board_t
@@ -1825,7 +1829,25 @@ def interior_parts(cab, std: Standard = STANDARD, materials: dict = None) -> Lis
                     sh["z0"], sh["z1"], "x", "fixed" if sh["fixed"] else "")
         tapes = [Tape("y1", cab.exterior_board, "pvc")] if cab.carcass_tape(mats) else []
         out.append((part, tapes))
-    return out + [(q, []) for q in drawers]
+    return out + _drawer_tapes(cab, drawers, std, mats)
+
+
+def _drawer_tapes(cab, drawers: List[Part], std: Standard, mats: dict):
+    """Each drawer part with its bands: a box's sides, front and back are
+    banded on their TOP long edge (edge_l 1 on lines 18 and 19) in the colour
+    of the drawer's box edging board (29 September 2026); nothing else is."""
+    try:
+        edge = {u["index"]: u["box_edge_board"] for u in drawer_layout(cab, std, mats)}
+    except ValueError:
+        edge = {}
+    out = []
+    for q in drawers:
+        board = edge.get(q.index, "")
+        tapes = ([Tape("z1", board, "pvc")]
+                 if board and q.role in ("drawer_side", "drawer_front", "drawer_back")
+                 else [])
+        out.append((q, tapes))
+    return out
 
 
 # The parts of a drawer that slide out with its face when the fronts open.
@@ -3158,25 +3180,55 @@ def above_ceiling(job, std: Standard = STANDARD) -> List[Tuple[int, int, int]]:
 
     Nothing is compared against a ceiling that was never measured — that is its
     own critical in the validator, not a comparison against a made-up figure.
+    Every figure is `ceiling_inputs`', which is also what an accepted
+    above-ceiling critical is fingerprinted with.
     """
     rm = job.room
     if rm is None or not rm.ceiling:
         return []
     out = []
-    for cab, p, _lay in placed(job):
-        top = carcass_z(cab, p, std) + geometry(cab, std).height
+    for t in _ceiling_items(job, std):
+        top = t["underside"] + t["height"]
         if top > rm.ceiling:
-            out.append((cab.number, top, rm.ceiling))
+            out.append((t["number"], top, rm.ceiling))
+    return out
+
+
+def _ceiling_items(job, std: Standard = STANDARD) -> List[dict]:
+    rm = job.room
+    out = []
+    for cab, p, _lay in placed(job):
+        out.append(ceiling_inputs(cab, p, rm.ceiling, std))
     # An attached panel is part of its cabinet's geometry (spec B6): one that
     # runs up past the ceiling cannot be fitted any more than the carcass
     # could. A standalone panel is not compared — it stays exactly as it was.
     for cab, p in placed_panels(job):
-        if not cab.is_attached:
-            continue
-        top = carcass_z(cab, p, std) + geometry(cab, std, job.materials).height
-        if top > rm.ceiling:
-            out.append((cab.number, top, rm.ceiling))
+        if cab.is_attached:
+            out.append(ceiling_inputs(cab, p, rm.ceiling, std, job.materials))
     return out
+
+
+def ceiling_inputs(cab, p, ceiling, std: Standard = STANDARD, materials: dict = None) -> dict:
+    """Every figure the above-ceiling check reads, and nothing else: where the
+    carcass stands (`carcass_z`), its height off the panel set (`geometry`,
+    never the declared figure) and the ceiling. The fingerprint of an accepted
+    above-ceiling critical is this (29 September 2026), so the acceptance
+    lapses when, and only when, one of them moves."""
+    g = geometry(cab, std, materials) if materials is not None else geometry(cab, std)
+    return {"number": cab.number, "underside": carcass_z(cab, p, std),
+            "height": g.height, "ceiling": ceiling}
+
+
+def ceiling_inputs_for(job, number, std: Standard = STANDARD):
+    """`ceiling_inputs` for the item numbered `number`, or None where the
+    check reads nothing (no room, no measured ceiling, not placed)."""
+    rm = job.room
+    if rm is None or not rm.ceiling:
+        return None
+    for t in _ceiling_items(job, std):
+        if str(t["number"]) == str(number):
+            return t
+    return None
 
 
 def gap_outline(rm: Room, g: "Gap") -> List[Tuple[int, int]]:

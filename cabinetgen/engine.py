@@ -357,12 +357,17 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
             group = [d for d in stack
                      if (d.box_height, d.base, box_of(d), length_of(d)) == key]
             count = len(group)
-            row_tape = cab.drawer_box_tape_of(mats, group[0])
             box_grain = grain_of(mats, box_board)
-            P.append(Panel(n, "18", "Drawer Side", box_board, length, box_h, 2 * count,
-                           edge_l=1, edge_material=row_tape, grain=box_grain))
-            P.append(Panel(n, "19", "Drawer Front", box_board, front_len, box_h, 2 * count,
-                           edge_l=1, edge_material=row_tape, grain=box_grain))
+            # the sides and fronts once per box EDGING board within the group
+            # (29 September 2026): two boxes edged in different colours are two
+            # lines; the base is not edged, so it stays one line
+            for edge_board in _dedupe([R(cab.box_edge_board_of(d)) for d in group]):
+                edged = [d for d in group if R(cab.box_edge_board_of(d)) == edge_board]
+                row_tape = cab.drawer_box_tape_of(mats, edged[0])
+                P.append(Panel(n, "18", "Drawer Side", box_board, length, box_h, 2 * len(edged),
+                               edge_l=1, edge_material=row_tape, grain=box_grain))
+                P.append(Panel(n, "19", "Drawer Front", box_board, front_len, box_h, 2 * len(edged),
+                               edge_l=1, edge_material=row_tape, grain=box_grain))
             bl, bwid = std.drawer_base(front_len, length, base_mat)
             # a grooved base is the same thin sheet as the back; a housed one is
             # 16 mm, cut from the drawer box's own board

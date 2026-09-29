@@ -235,7 +235,7 @@ CABINET_BOARD_FIELDS = ("carcass_board", "exterior_board", "back_board",
                         "drawer_carcass_board", "drawer_face_board",
                         "door_edge_board", "drawer_edge_board", "blind_board",
                         "decor")          # the pre-library name for the exterior
-DRAWER_BOARD_FIELDS = ("box_board", "face_board")
+DRAWER_BOARD_FIELDS = ("box_board", "face_board", "box_edge_board")
 
 
 def cabinet_board_ids(cab: dict) -> set:

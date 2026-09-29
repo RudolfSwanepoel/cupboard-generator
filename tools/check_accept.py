@@ -4,21 +4,29 @@
 
 Ruled 22 September 2026. Some criticals say something about the SITE, not the
 cut list, and the operator can accept one with a reason; the export then goes
-ahead. Today that is the tip-up check alone. Everything held here:
+ahead. Today that is tip-up and, since 29 September 2026, above-ceiling.
+Everything held here:
 
-  * every critical carries a stable check id, and only tip-up is acceptable;
+  * every critical carries a stable check id, and only tip-up and
+    above-ceiling are acceptable — no ceiling measured, a panel longer than
+    the board and every other critical still block;
   * an accepted tip-up stops blocking and says why, and every other critical
     blocks exactly as before — the mitre door swing above all, which was ruled
     blocking on purpose;
   * the acceptance is stored with a fingerprint of exactly what the check read,
     and LAPSES when the cabinet or the ceiling changes: change the height and
     it blocks again;
+  * above-ceiling (29 September 2026): accepted, it no longer blocks, the
+    export goes ahead and writes it into <job>_accepted.txt, and it lapses when
+    the ceiling or the cabinet height moves;
   * a job with no acceptances writes no key, so every job file on disk still
     round-trips byte for byte.
 """
 import json
 import os
+import shutil
 import sys
+import tempfile
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 from fixture_jobs import job_file  # noqa: E402  (jobs/ for Test.json, tools/fixtures/ for the rest)
@@ -71,7 +79,10 @@ def main():
     crits = [i for j in jobs for i in issues(j) if i.level == CRITICAL]
     check("criticals seen across the fixtures", len(crits) > 0, True)
     check("not one without an id", [str(i) for i in crits if not i.check], [])
-    check("only tip-up is acceptable", sorted(ACCEPTABLE), ["tip-up"])
+    check("only tip-up and above-ceiling are acceptable (29 Sept 2026)",
+          sorted(ACCEPTABLE), ["above-ceiling", "tip-up"])
+    check("no ceiling measured is not", "ceiling-measured" in ACCEPTABLE, False)
+    check("a panel longer than the board is not", "panel-fits-board" in ACCEPTABLE, False)
     check("and the mitre door swing is not",  "mitre-door-swing" in ACCEPTABLE, False)
 
     print("\nthe tip-up critical, before anything is accepted")
@@ -137,6 +148,8 @@ def main():
     check("a stored acceptance for a blocking check is dropped as lapsed",
           [a.check for a in lapsed_acceptances(j)], ["mitre-door-swing"])
 
+    above_ceiling_accepted()
+
     print("\nwritten only when present")
     j = tall_job()
     check("no acceptances, no key", "acceptances" in job_to_dict(j), False)
@@ -160,6 +173,77 @@ def main():
         print(f"{len(FAILS)} FAILED: " + "; ".join(FAILS))
         sys.exit(1)
     print("ALL OK")
+
+
+def above(j):
+    return [i for i in issues(j) if i.check == "above-ceiling"]
+
+
+def above_ceiling_accepted():
+    """Ruled by Rudolf, 29 September 2026: a carcass top above the MEASURED
+    ceiling is a site matter and may be accepted; no ceiling at all may not."""
+    print("\nabove the ceiling: acceptable since 29 September 2026")
+    j = tall_job(height=2500)                 # on its legs: stands 2600 under 2540
+    a = above(j)
+    check("one above-ceiling critical, acceptable, blocking",
+          [(i.level, i.where, i.acceptable) for i in a] + [blocking(issues(j))],
+          [(CRITICAL, "1", True), True])
+    check("not also a tip-up (one critical per cabinet)", tip(j), [])
+    wire = job_to_dict(j)
+    r = api.accept({"job": wire, "check": "above-ceiling", "where": "1"})
+    check("/api/accept hands back the fingerprint of exactly what it read",
+          (r["ok"], r.get("fingerprint")),
+          (True, "underside 100 · height 2500 · ceiling 2540"))
+    j.acceptances = [Acceptance("above-ceiling", "1", "bulkhead cut back on site",
+                                r["fingerprint"])]
+    a = above(j)
+    check("accepted, with its reason, and no longer blocks",
+          ([i.accepted for i in a], blocking(issues(j))),
+          (["bulkhead cut back on site"], False))
+
+    out = tempfile.mkdtemp(prefix="cupboard_accept_")
+    was = api.OUT_DIR
+    try:
+        api.OUT_DIR = out
+        j.name = "acc"
+        r = api.export({"job": job_to_dict(j)})
+        check("the export goes ahead", (r["ok"], r.get("error", "")), (True, ""))
+        txt = os.path.join(out, "acc", "cutlist", "acc_accepted.txt")
+        body = open(txt, encoding="utf-8").read() if os.path.exists(txt) else ""
+        check("and writes it into acc_accepted.txt with the reason",
+              ("above the 2540 mm ceiling" in body, "bulkhead cut back on site" in body),
+              (True, True))
+        csvs = [f for f in os.listdir(os.path.join(out, "acc", "cutlist")) if f.endswith(".csv")]
+        check("never into the Plazaboard CSV",
+              [f for f in csvs if "bulkhead" in open(os.path.join(out, "acc", "cutlist", f),
+                                                     encoding="utf-8").read()], [])
+    finally:
+        api.OUT_DIR = was
+        shutil.rmtree(out, ignore_errors=True)
+
+    j.room.ceiling = 2550
+    check("a new ceiling lapses it, and it blocks again",
+          ([i.lapsed for i in above(j)], blocking(issues(j))), ([True], True))
+    j.room.ceiling = 2540
+    j.cabinets[0].height = 2480
+    check("a new cabinet height lapses it too",
+          ([i.lapsed for i in above(j)], blocking(issues(j))), ([True], True))
+    check("  and compute hands it to the browser to drop",
+          [(x["check"], x["where"]) for x in api.compute({"job": job_to_dict(j)})["lapsed"]],
+          [("above-ceiling", "1")])
+
+    none = tall_job(height=2500, ceiling=None)
+    measured = [i for i in issues(none) if i.check == "ceiling-measured"]
+    check("no ceiling measured: its own critical, not acceptable, blocking",
+          [(i.level, i.acceptable) for i in measured] + [blocking(issues(none))],
+          [(CRITICAL, False), True])
+    refused = api.accept({"job": job_to_dict(none), "check": "ceiling-measured",
+                          "where": measured[0].where if measured else ""})
+    check("/api/accept refuses ceiling-measured", refused["ok"], False)
+    refused = api.accept({"job": job_to_dict(none), "check": "panel-fits-board", "where": "101"})
+    check("/api/accept refuses a panel longer than the board", refused["ok"], False)
+    check("with no ceiling there is nothing to fingerprint an above-ceiling against",
+          fingerprint(none, "above-ceiling", "1"), None)
 
 
 if __name__ == "__main__":

@@ -458,6 +458,10 @@
   #drawerbox td [data-maxbox].over{color:var(--crit);font-weight:600}
   #drawerbox td input[data-dk="box_height"]{width:44px}
   #drawerbox col.c-z{width:62px}
+  #drawerbox tr.dsub td{padding-top:0;border-top:none}
+  #drawerbox tr.dsub label{display:inline;margin-right:6px;color:var(--muted)}
+  #drawerbox tr.dsub select{width:auto;max-width:190px}
+  #drawerbox tr.dsub b{margin-left:6px;font-size:11px}
   #drawerbox col.c-read{width:64px}
   #elevation{position:relative}
   #elevation svg{user-select:none;-webkit-user-select:none}
@@ -1955,7 +1959,8 @@ $("editor").addEventListener("input", (e) => {
   if (dk === "mode") { d.mode = e.target.value; renderDrawers(); return; }
   if (dk === "base") d.base = e.target.value;
   // "" is not a board: it hands this drawer back to the cabinet's
-  else if (dk === "box_board" || dk === "face_board") d[dk] = e.target.value || null;
+  else if (dk === "box_board" || dk === "face_board" || dk === "box_edge_board")
+    d[dk] = e.target.value || null;
   else if (dk === "share") d.share = parseFloat(e.target.value) || 0;
   // blank is the default offset (21): stored as nothing, not as 0
   else if (dk === "offset") d.offset = e.target.value === "" ? null : (parseInt(e.target.value, 10) || 0);
@@ -2656,6 +2661,27 @@ $("editor").addEventListener("change", (e) => {
   }
 });
 
+// A drawer box's sides and fronts are edged in PVC in the colour of the board
+// its Box edging names (29 September 2026), the Exterior board when blank. The
+// list is every project board that offers PVC, shown by its Edging Name like
+// every other edging-colour dropdown; the name beside it is the engine's. A
+// row of its own under the drawer, so the nine columns above keep their room.
+function boxEdgeRow(c, i, d, span) {
+  const keys = ((S.res && S.res.boards) || []).filter((k) => boardOffers(k, "pvc"));
+  const v = d.box_edge_board || "";
+  const def = c.exterior_board || "";
+  const lost = v && keys.indexOf(v) < 0;
+  return `<tr class="dsub"><td></td><td colspan="${span}">
+      <label>Box edging</label>
+      <select data-d="${i}" data-dk="box_edge_board"
+        title="the PVC colour on this drawer's box sides and fronts — blank follows the Exterior board (${esc(edgeLabel(def) || "—")})">
+        <option value=""${v ? "" : " selected"}>(${esc(edgeLabel(def) || "—")})</option>
+        ${lost ? `<option value="${esc(v)}" selected>${esc(edgeLabel(v))} (no PVC)</option>` : ""}
+        ${keys.map((k) => `<option value="${esc(k)}"${k === v ? " selected" : ""}>${
+          esc(edgeLabel(k))}</option>`).join("")}</select>
+      <b data-boxedgerow="${i}">…</b></td><td></td></tr>`;
+}
+
 function renderDrawers() {
   const box = slot($("drawerbox"));
   if (!box) return;
@@ -2714,7 +2740,7 @@ function renderDrawers() {
       ${boardCell(i, "face_board", d.face_board || "", faceDefault,
                   "what this drawer's face is cut from")}
       <td><button data-drm="${i}" title="Remove this face">x</button></td>
-    </tr>`;
+    </tr>${boxEdgeRow(c, i, d, 8)}`;
   }).join("");
 
   box.innerHTML = `${drawerTypeHTML(c)}<table class="rows">
@@ -2749,9 +2775,8 @@ function renderDrawers() {
       just that drawer a different finish.</p>
     ${runnerHTML(c)}
     ${edgingHTML(c, "drawer")}
-    <p class="hint">Each box is edged in PVC in its own box material's colour —
-      <b data-boxedge="1">—</b> for the default. It follows the box and is not
-      chosen here.</p>`;
+    <p class="hint">Each box's sides and fronts are edged in PVC in its <b>Box edging</b>
+      colour — left in brackets, the Exterior board's: <b data-boxedge="1">—</b>.</p>`;
   refreshEdging();
   solveStack();
 }
@@ -2853,7 +2878,7 @@ function renderInnerDrawers(box, c) {
       <td class="note mono" data-innerread="${i}" title="the face (width × height) and the box top, off the engine">${
         u ? `${u.face_w}×${u.face[1] - u.face[0]}<br>top ${u.box[5]}` : "…"}</td>
       <td><button data-drm="${i}" title="Remove this drawer">x</button></td>
-    </tr>`;
+    </tr>${boxEdgeRow(c, i, d, 6)}`;
   }).join("");
   box.innerHTML = `${drawerTypeHTML(c)}
     <div class="f"><label>Number of drawers</label>
@@ -3865,6 +3890,12 @@ function refreshEdging() {
   });
   const boxEdge = document.querySelector("#editor [data-boxedge]");
   if (boxEdge) boxEdge.textContent = (g.edging.drawer_box || {}).name || "no edging";
+  const rows = (g.edging.drawer_box || {}).rows || [];
+  document.querySelectorAll("#editor [data-boxedgerow]").forEach((b) => {
+    const name = rows[+b.dataset.boxedgerow];
+    b.textContent = name || "PVC not offered";
+    b.className = name ? "" : "over";
+  });
 }
 
 /* ---------- the board library ----------------------------------------------
@@ -4432,6 +4463,7 @@ $("boards").addEventListener("click", async (e) => {
         .concat(c.door_boards || [])
         .concat((c.drawers || []).map((d) => d.box_board))
         .concat((c.drawers || []).map((d) => d.face_board))
+        .concat((c.drawers || []).map((d) => d.box_edge_board))
         .indexOf(from) >= 0).map((c) => c.number);
     const ok = window.confirm(
       `Rename ${from} to ${board.id}?\n\n` +
@@ -6414,7 +6446,8 @@ function renderValidation() {
       acts = S.acceptOpen === key ? "" : `<button data-accept="${esc(key)}">Accept…</button>`;
       if (S.acceptOpen === key) {
         why = `<span class="acceptform">
-          <button data-acceptpreset="${esc(key)}">Assembled in place</button>
+          ${i.check === "tip-up"
+            ? `<button data-acceptpreset="${esc(key)}">Assembled in place</button>` : ""}
           <input id="acceptreason" placeholder="or type the reason (required)"
                  value="${esc(S.acceptDraft || "")}">
           <button data-acceptok="${esc(key)}">Accept</button>

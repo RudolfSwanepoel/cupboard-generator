@@ -2,7 +2,7 @@
 with a real browser (Playwright, optional).
 
     python run_app.py --no-window --port 8766      # in another window
-    python tools/ui_check_drawers.py [--port 8766] [--stage supports|catalogue|runners|drawers|3d|all]
+    python tools/ui_check_drawers.py [--port 8766] [--stage supports|catalogue|runners|drawers|3d|offset|boxedge|all]
 
 Drives what the check_*.py scripts cannot: the Supports section's new words and
 its Long / Short edge counts (Part 1), Catalogue -> Boards | Runners and the
@@ -411,8 +411,50 @@ def stage_offset(pw):
     browser.close()
 
 
+def stage_boxedge(pw):
+    print("\ndrawer box edging, per drawer (29 Sept) — the Box edging row under each drawer")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    load_fixture(page, "Test_drawers")
+    select(page, 4)                          # GREY exterior, WHITEMEL boxes, four drawers
+    page.wait_for_selector('#drawerbox select[data-dk="box_edge_board"]', timeout=5000)
+    sel = '#drawerbox select[data-d="1"][data-dk="box_edge_board"]'
+    check("a Box edging dropdown per drawer",
+          page.evaluate("() => document.querySelectorAll('#drawerbox select[data-dk=\"box_edge_board\"]').length"), 4)
+    check("the nine columns above keep their room (a row of its own, not a tenth column)",
+          page.evaluate("() => [...document.querySelectorAll('#drawerbox thead th')].length"), 10)
+    opts = page.evaluate(f"() => [...document.querySelector({json.dumps(sel)}).options].map((o) => [o.value, o.textContent.trim()])")
+    check("blank follows the exterior, shown by its Edging Name", opts[0], ["", "(Grey)"])
+    check("  and the boards offering PVC, by Edging Name",
+          sorted(o for o in opts[1:] if o[0] in ("WHITEMEL", "BROOKHILL")),
+          [["BROOKHILL", "BROOKHILL"], ["WHITEMEL", "WHITE (WHITEMEL)"]])
+    side = lambda: page.evaluate("() => S.res.panels.filter((p) => p.cabinet === 4 && p.role === 'Drawer Side').map((p) => [p.label, p.edge_material, p.qty])")
+    check("by default every box is edged in the exterior's PVC",
+          sorted({x[1] for x in side()}), ["PVC Grey"])
+    page.select_option(sel, "WHITEMEL")
+    computed(page)
+    check("drawer 2 set to WHITE (WHITEMEL): stored on that drawer alone",
+          page.evaluate("() => S.job.cabinets[S.sel].drawers.map((d) => d.box_edge_board || null)"),
+          [None, "WHITEMEL", None, None])
+    check("  the cut list: drawer 2's sides are their own line in PVC WHITE",
+          sorted((x[1], x[2]) for x in side()), [("PVC Grey", 2), ("PVC Grey", 2), ("PVC Grey", 2), ("PVC WHITE", 2)])
+    check("  the row reads the engine's name",
+          text(page, '#drawerbox [data-boxedgerow="1"]').strip(), "PVC WHITE")
+    shot(page, "box_edging", "#drawerbox")
+    page.select_option(sel, "")
+    computed(page)
+    check("back to blank: stored as nothing, the exterior again",
+          (page.evaluate("() => S.job.cabinets[S.sel].drawers[1].box_edge_board"), sorted({x[1] for x in side()})),
+          (None, ["PVC Grey"]))
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 STAGES = {"supports": stage_supports, "catalogue": stage_catalogue, "runners": stage_runners,
-          "drawers": stage_drawers, "3d": stage_3d, "offset": stage_offset}
+          "drawers": stage_drawers, "3d": stage_3d, "offset": stage_offset,
+          "boxedge": stage_boxedge}
 
 with sync_playwright() as pw:
     for key, fn in STAGES.items():

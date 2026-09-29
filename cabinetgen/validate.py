@@ -20,6 +20,7 @@ from .room import (above_ceiling, arm_shelf_depth, arm_shelf_max_depth,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
                    panel_clashes as room_panel_clashes, placed,
                    plinth_choice_for, run_key, runs as room_runs, tip_inputs,
+                   ceiling_inputs_for,
                    tip_problems,
                    triangulate)
 from .engine import mitre_door_width
@@ -85,8 +86,12 @@ class Issue:
 # fingerprint is what makes an acceptance lapse — it was given for one cabinet
 # in one room, and if either changes it no longer holds.
 #
-# Today that is the tip-up check alone. The mitre door-swing critical was ruled
-# blocking on purpose and is deliberately NOT here.
+# Today that is tip-up and, since 29 September 2026 (Rudolf), above-ceiling —
+# a carcass top above the MEASURED ceiling, which is a site matter (a bulkhead
+# to be cut, a ceiling measured low). Everything else blocks: no ceiling
+# measured (`ceiling-measured`) is a missing site figure, a panel longer than
+# the board can never be cut, and the mitre door-swing critical was ruled
+# blocking on purpose. None of those is here, deliberately.
 
 def _tip_fingerprint(job: Job, where: str):
     """The tip-up check's inputs for one cabinet: its geometry off the panel set
@@ -103,8 +108,19 @@ def _tip_fingerprint(job: Job, where: str):
     return None
 
 
+def _ceiling_fingerprint(job: Job, where: str):
+    """The above-ceiling check's inputs for one item: where it stands, its
+    height off the panel set (never declared) and the measured ceiling —
+    `room.ceiling_inputs`, exactly what `above_ceiling` compares."""
+    t = ceiling_inputs_for(job, where, job.std)
+    if t is None:
+        return None
+    return f"underside {t['underside']} · height {t['height']} · ceiling {t['ceiling']}"
+
+
 ACCEPTABLE = {
     "tip-up": _tip_fingerprint,
+    "above-ceiling": _ceiling_fingerprint,
 }
 
 
@@ -716,9 +732,17 @@ def _boards_and_tapes(job: Job):
         # of these is asked of its board.
         wants = [("carcass_edge", c.exterior_board, "pvc",
                   "the fronts of its sides, top, bottom, shelves and dividers")]
-        if c.drawer_list:
-            wants.append(("drawer_box_edge", c.carcass_board, "pvc",
-                          "its drawer boxes"))
+        # Drawer box sides and fronts, per drawer (29 September 2026): each is
+        # edged in its own box edging board, the exterior board by default.
+        # Drawers sharing one board are named together — one problem, one message.
+        by_edge = {}
+        for i, d in enumerate(c.drawer_list, start=1):
+            by_edge.setdefault(c.box_edge_board_of(d), []).append(i)
+        for board, nums in by_edge.items():
+            which = (f"drawer {nums[0]}" if len(nums) == 1 else
+                     f"drawers {', '.join(map(str, nums))}")
+            wants.append(("drawer_box_edge", board, "pvc",
+                          f"{which} box sides and fronts (Box edging)"))
         if c.door_count or c.exposed_sides:
             wants.append(("door_edge",
                           c.door_edge_board or c.exterior_board,
