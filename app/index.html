@@ -435,6 +435,8 @@
   .tape .leaf select{flex:1;min-width:0}
   .tape .leaf b{min-width:96px;font-variant-numeric:tabular-nums}
   .tape .leaf b.over{color:var(--crit)}
+  .req{color:var(--crit);font-weight:700}
+  .f.bad input{border-color:var(--crit);box-shadow:0 0 0 2px var(--crit-soft)}
   /* a board with no edging at all: grey, because that is a setting, not a fault */
   .tape .leaf b.off{color:var(--muted);font-weight:400}
   .tape .note{display:block;margin-top:2px;line-height:1.3}
@@ -4556,7 +4558,8 @@ function drawRunners() {
            style="width:auto" title="use this runner in this project"></td>
       <td><b>${esc(x.name)}</b><div class="note">id ${esc(x.id)}${x.supplier ? " · " + esc(x.supplier) : ""}${
         x.sku ? " · SKU " + esc(x.sku) : ""} · ${esc(x.type)}</div></td>
-      <td class="n">${x.height} · ${x.side_clearance}</td>
+      <td class="n">${x.height} · ${x.side_clearance}<div class="note">inner ${x.inner_h} × ${x.inner_t}${
+        (x.estimated || []).length ? ` <span class="over" title="not stated on the record: the estimate (height − 8, 6 thick) is read until the record is edited and saved">estimated: confirm</span>` : ""}</div></td>
       <td class="note" style="max-width:150px;white-space:normal">${(x.lengths || []).join(" · ")}</td>
       <td>${extText(x.extension)}${x.capacity_kg ? `<div class="note">${x.capacity_kg} kg</div>` : ""}</td>
       <td class="n">${runnerMoney(x.price)}</td>
@@ -4622,8 +4625,15 @@ function drawRunnerEditor() {
   const x = S.rEdit;
   if (!x) { box.innerHTML = ""; return; }
   const types = S.def.runner_types || ["side-mount ball-bearing"];
-  const num = (id, label, v, step, note) => `<div class="f"><label>${label}</label>
-      <input type="number" step="${step}" id="rf-${id}" value="${v === undefined || v === null ? "" : v}">
+  // R4 (29 September 2026): the figures a record cannot be saved without are
+  // marked required, and a refused save lights the ones the server named.
+  const miss = S.rMissing || [];
+  const est = x.estimated || [];
+  const num = (id, label, v, step, note, req) => `<div class="f${miss.indexOf(id) >= 0 ? " bad" : ""}">
+      <label>${label}${req ? ' <b class="req" title="required">*</b>' : ""}</label>
+      <input type="number" step="${step}" id="rf-${id}" ${req ? "required" : ""}
+             value="${v === undefined || v === null ? "" : v}">
+      ${est.indexOf(id) >= 0 ? `<span class="note over">estimated: confirm</span>` : ""}
       ${note ? `<span class="note">${note}</span>` : ""}</div>`;
   box.innerHTML = `<div class="card" style="margin:12px">
     <h2>${x.id ? "Edit runner — " + esc(x.id) : "New runner"}</h2>
@@ -4633,7 +4643,7 @@ function drawRunnerEditor() {
           <input id="rf-id" value="${esc(x.id || "")}" ${x.id ? "readonly" : ""}
                  placeholder="from the name">
           <span class="note">what a cabinet names; fixed once saved</span></div>
-        <div class="f wide" style="grid-column:2/-1"><label>Name</label>
+        <div class="f wide${miss.indexOf("name") >= 0 ? " bad" : ""}" style="grid-column:2/-1"><label>Name <b class="req" title="required">*</b></label>
           <input id="rf-name" value="${esc(x.name || "")}"
                  placeholder="e.g. Gelmar 45 mm full-extension ball-bearing"></div>
         <div class="f"><label>Supplier</label><input id="rf-supplier" value="${esc(x.supplier || "")}"></div>
@@ -4641,11 +4651,16 @@ function drawRunnerEditor() {
         ${num("price", "Price per pair", x.price || 0, "0.01", "captured into a project when it is ticked")}
         <div class="f"><label>Type</label><select id="rf-type">${types.map((t) =>
           `<option${t === x.type ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
-        ${num("height", "Height (mm)", x.height, "0.1", "the outer rail")}
+        ${num("height", "Height (mm)", x.height, "0.1", "the outer channel", true)}
         ${num("side_clearance", "Side clearance (mm each side)", x.side_clearance, "0.1",
-              "box width = opening − 2 × this")}
-        ${num("rail_thickness", "Rail thickness (mm)", x.rail_thickness, "0.1", "information: drawn in 3D")}
-        <div class="f wide" style="grid-column:1/-1"><label>Lengths available (mm)</label>
+              "box width = opening − 2 × this", true)}
+        ${num("rail_thickness", "Rail thickness (mm)", x.rail_thickness, "0.1",
+              "the outer channel, fixed to the carcass: drawn in 3D", true)}
+        ${num("inner_height", "Inner member height (mm)",
+              x.inner_height || x.inner_h, "0.1", "fixed to the drawer side: drawn in 3D", true)}
+        ${num("inner_thickness", "Inner member thickness (mm)",
+              x.inner_thickness || x.inner_t, "0.1", "travels with the box", true)}
+        <div class="f wide${miss.indexOf("lengths") >= 0 ? " bad" : ""}" style="grid-column:1/-1"><label>Lengths available (mm) <b class="req" title="required">*</b></label>
           <input id="rf-lengths" value="${esc((x.lengths || []).join(" "))}" placeholder="300 350 400 450 500">
           <span class="note">the box length is the longest of these that leaves
             ${(S.def.standard || {}).runner_clearance || 40} mm behind it</span></div>
@@ -4654,8 +4669,8 @@ function drawRunnerEditor() {
                  placeholder="full, or a fraction like 0.75">
           <span class="note">full: travel = length</span></div>
         ${num("capacity_kg", "Capacity (kg)", x.capacity_kg, "1", "")}
-        ${num("lift", "Lift (mm)", x.lift, "0.1", "drawer side bottom above the rail bottom")}
-        ${num("setback", "Setback (mm)", x.setback, "0.1", "inner member behind the box front")}
+        ${num("lift", "Lift (mm)", x.lift, "0.1", "drawer side bottom above the rail bottom", true)}
+        ${num("setback", "Setback (mm)", x.setback, "0.1", "inner member behind the box front", true)}
       </div>
       <div class="presets">
         <button id="rf-save" class="primary">Save to the library</button>
@@ -4668,6 +4683,7 @@ $("runners").addEventListener("click", async (e) => {
   const ed = e.target.closest("[data-redit]");
   if (ed) {
     S.rEdit = Object.assign({}, S.rlib.runners.find((x) => x.id === ed.dataset.redit));
+    S.rMissing = [];
     drawRunnerEditor();
     $("runneredit").scrollIntoView({block: "nearest"});
     return;
@@ -4679,12 +4695,16 @@ $("runners").addEventListener("click", async (e) => {
                type: (S.def.runner_types || [])[0], height: seed.height || 45,
                side_clearance: seed.side_clearance || 13.5, rail_thickness: seed.rail_thickness || 12.7,
                lengths: [], extension: "full", capacity_kg: 0, lift: seed.lift || 5,
-               setback: seed.setback || 3};
+               setback: seed.setback || 3, inner_height: seed.inner_h || null,
+               inner_thickness: seed.inner_t || null,
+               // the seed's inner member is an estimate until it is confirmed
+               estimated: ["inner_height", "inner_thickness"]};
+    S.rMissing = [];
     drawRunnerEditor();
     $("runneredit").scrollIntoView({block: "nearest"});
     return;
   }
-  if (e.target.id === "rf-cancel") { S.rEdit = null; drawRunnerEditor(); return; }
+  if (e.target.id === "rf-cancel") { S.rEdit = null; S.rMissing = []; drawRunnerEditor(); return; }
   if (e.target.id === "rf-save") {
     const v = (id) => $("rf-" + id).value;
     const runner = {id: v("id").trim().toUpperCase(), name: v("name").trim(),
@@ -4692,9 +4712,18 @@ $("runners").addEventListener("click", async (e) => {
       type: v("type"), height: v("height"), side_clearance: v("side_clearance"),
       rail_thickness: v("rail_thickness"), lengths: v("lengths"),
       extension: v("extension"), capacity_kg: v("capacity_kg"), lift: v("lift"),
-      setback: v("setback")};
+      setback: v("setback"), inner_height: v("inner_height"),
+      inner_thickness: v("inner_thickness")};
     const r = await post("/api/runner-save", {runner: runner, from: S.rEdit.id || "", job: S.job});
-    if (!r.ok) { toast(r.error, true); return; }
+    if (!r.ok) {
+      toast(r.error, true);
+      // keep what was typed, and light the fields the server named
+      S.rEdit = Object.assign({}, S.rEdit, runner, {lengths: String(runner.lengths).split(/[\s,]+/)});
+      S.rMissing = r.missing || (runner.name ? [] : ["name"]);
+      drawRunnerEditor();
+      return;
+    }
+    S.rMissing = [];
     if (r.job) { S.job = r.job; markDirty(true); }
     toast(`Saved ${r.id} to the library` + (r.project_follows
       ? " — this project's copy follows it (its captured price is kept); saved jobs keep theirs." : "."));

@@ -99,8 +99,8 @@ def main():
     declared = sorted(f.name for f in fields(Cabinet) if f.name.endswith("_board"))
     check("the _board fields", declared,
           ["back_board", "blind_board", "carcass_board", "door_edge_board",
-           "drawer_carcass_board", "drawer_edge_board", "drawer_face_board",
-           "exterior_board"])
+           "drawer_box_edge_board", "drawer_carcass_board", "drawer_edge_board",
+           "drawer_face_board", "exterior_board"])
 
     print("\nand every one of them comes back from board_refs()")
     reported = {key for key, _ in cab.board_refs()}

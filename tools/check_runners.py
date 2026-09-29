@@ -244,7 +244,9 @@ def checks_and_api():
         check("  a runner nobody uses deletes", api.runner_delete({"id": "SPARE"})["ok"], True)
         check("  and is gone", [x.id for x in H.load()], [H.SEED_ID])
         r = api.runner_save({"runner": {"name": "Blum Tandem", "lengths": "450 300, 500", "height": 40,
-                                        "side_clearance": 12, "price": "120"}})
+                                        "side_clearance": 12, "price": "120", "rail_thickness": 12,
+                                        "lift": 4, "setback": 2, "inner_height": 32,
+                                        "inner_thickness": 6}})
         check("runner-save makes an id off the name and cleans the lengths",
               (r["id"], H.find(H.load(), r["id"]).lengths, H.find(H.load(), r["id"]).price),
               ("BLUMTANDEM", [300, 450, 500], 120))
@@ -694,6 +696,113 @@ def box_edging():
           oct_box, ["PVC BROOKHILL"])
 
 
+def section_defaults():
+    print("\nthe Drawers section's defaults and the per-drawer overrides (29 September 2026)")
+    c = box()
+    d = c.drawers[0]
+    check("nothing set: box carcass, face exterior, box edging exterior + PVC, bottom board",
+          (c.box_board_of(d), c.face_board_of(d), c.box_edge_board_of(d),
+           c.box_edge_kind_of(d), c.base_of(d)),
+          ("MEL", "BROOKHILL", "BROOKHILL", "pvc", "board"))
+    c = box(drawer_carcass_board="BROOKHILL", drawer_face_board="MEL",
+            drawer_box_edge_board="MEL", drawer_box_edge_kind="1mm", drawer_base="melamine")
+    d = c.drawers[0]
+    check("the section's defaults win over the fallback",
+          (c.box_board_of(d), c.face_board_of(d), c.box_edge_board_of(d),
+           c.box_edge_kind_of(d), c.base_of(d)),
+          ("BROOKHILL", "MEL", "MEL", "1mm", "melamine"))
+    d = Drawer(240, 150, base="board", box_board="MEL", face_board="BROOKHILL",
+               box_edge_board="BROOKHILL", box_edge_kind="2mm")
+    check("  and the drawer's own value wins over the section's",
+          (c.box_board_of(d), c.face_board_of(d), c.box_edge_board_of(d),
+           c.box_edge_kind_of(d), c.base_of(d)),
+          ("MEL", "BROOKHILL", "BROOKHILL", "2mm", "board"))
+
+    # R1: the thickness is a choice, and it reaches the cut list
+    j = job_of(box(drawers=[Drawer(240, 150), Drawer(240, 150, box_edge_kind="1mm"),
+                            Drawer(233, 150)]))
+    check("R1: a drawer edged 1mm is its own line, 1mm in the board's name",
+          sorted({(p.label, p.edge_material, p.qty) for p in generate_job(j)
+                  if p.role == "Drawer Side"}),
+          [("118a", "PVC BROOKHILL", 4), ("118b", "1mm BROOKHILL", 2)])
+    j2 = job_of(box(drawer_box_edge_kind="2mm"))
+    check("  the section's thickness reaches every drawer naming none",
+          sorted({p.edge_material for p in generate_job(j2)
+                  if p.role in ("Drawer Side", "Drawer Front")}),
+          ["2mm BROOKHILL"])
+    j3 = job_of(box(drawer_box_edge_kind="1mm"))
+    j3.materials["BROOKHILL"]["edging_kinds"] = ["pvc", "2mm"]
+    check("  a thickness the board does not offer is the EDGING critical",
+          [("box sides and fronts" in i.message, "Tick 1mm" in i.message)
+           for i in issues(j3, "edging-offered") if "Box edging" in i.message], [(True, True)])
+    from cabinetgen.room import interior_parts
+    check("  the 3D band says the thickness",
+          sorted({tp.kind for q, tapes in interior_parts(j2.cabinets[0], STANDARD, j2.materials)
+                  for tp in tapes if q.role == "drawer_side"}), ["2mm"])
+    jb = job_of(box(drawer_base="melamine"))
+    check("the section's bottom reaches every drawer: a housed 16 mm base in the box board",
+          sorted({p.material for p in generate_job(jb) if p.role == "Drawer Base"}), ["MEL"])
+    check("  and needs_back_board follows it (no back, every base melamine)",
+          box(back="none", drawer_base="melamine").needs_back_board, False)
+
+    # the file: every new field written only when set
+    raw = job_to_dict(job_of(box()))["cabinets"][0]
+    check("never set: no section default and no per-drawer key in the file",
+          ([k for k in ("drawer_box_edge_board", "drawer_box_edge_kind", "drawer_base") if k in raw],
+           sorted({k for d in raw["drawers"] for k in ("box_edge_kind", "base") if k in d})),
+          ([], []))
+    set_ = box(drawer_box_edge_board="MEL", drawer_box_edge_kind="1mm", drawer_base="melamine",
+               drawers=[Drawer(240, 150), Drawer(473, 150, base="board", box_edge_kind="2mm")])
+    back = job_from_dict(json.loads(json.dumps(job_to_dict(job_of(set_))))).cabinets[0]
+    check("set: written, and read back",
+          (back.drawer_box_edge_board, back.drawer_box_edge_kind, back.drawer_base,
+           [(d.base, d.box_edge_kind) for d in back.drawers]),
+          ("MEL", "1mm", "melamine", [(None, None), ("board", "2mm")]))
+    for name in ("Test_drawers", "Test_export", "Test_legacy_supports"):
+        with open(job_file(name), encoding="utf-8") as f:
+            raw = f.read()
+        check(f"{name}.json round-trips unchanged",
+              job_to_dict(job_from_dict(json.loads(raw))) == json.loads(raw), True)
+
+    # the board slot, found by the swap and the library scan
+    from cabinetgen.boards import cabinet_board_ids
+    check("the section's box edging board is a board slot",
+          [lab for b, lab in box(drawer_box_edge_board="MEL").board_refs() if "edging" in lab],
+          ["drawer box edging board"])
+    check("  and the raw scan of a saved job finds it",
+          "MEL" in cabinet_board_ids({"drawer_box_edge_board": "MEL"}), True)
+
+    # R3 / R4: the runner's inner member, and a record cannot be saved short
+    print("\nthe runner's inner member, and what a record must state (R3, R4)")
+    check("SEED and LEGACY carry the estimated inner member: height - 8, 6 thick",
+          [(r.inner_height, r.inner_thickness) for r in (H.SEED, H.LEGACY)], [(37, 6), (37, 6)])
+    old = H.runner_from_dict({"id": "OLD", "name": "Old", "height": 45, "lengths": [500]})
+    check("a record saved before the inner member reads the estimates, and says so",
+          (old.inner_h, old.inner_t, old.estimated), (37, 6, ["inner_height", "inner_thickness"]))
+    check("  the runner payload carries the estimated list for the Runners tab",
+          api._runner_payload(old)["estimated"], ["inner_height", "inner_thickness"])
+    full = dict(H.to_record(H.SEED), id="", name="Full")
+    tmp = tempfile.mkdtemp()
+    keep = H.LIBRARY
+    try:
+        H.LIBRARY = os.path.join(tmp, "hardware.json")
+        H.save([])
+        got = []
+        names = ("lift", "setback", "inner_height", "inner_thickness", "rail_thickness")
+        for k in names:
+            r = api.runner_save({"runner": {kk: v for kk, v in full.items() if kk != k}})
+            got.append((r["ok"], r.get("missing"), k.replace("_", " ") in r.get("error", "")))
+        check("R4: leaving out lift, setback, inner height / thickness or rail thickness is "
+              "refused, naming the field", got, [(False, [k], True) for k in names])
+        r = api.runner_save({"runner": dict(full, lift=0, lengths=[])})
+        check("  a 0 and no lengths are both named in one reply",
+              (r["ok"], r.get("missing")), (False, ["lengths", "lift"]))
+        check("  the full record saves", api.runner_save({"runner": full})["ok"], True)
+    finally:
+        H.LIBRARY = keep
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     catalogue()
     legacy_holds()
@@ -703,6 +812,7 @@ def main():
     drawer_checks()
     scene_3d()
     box_edging()
+    section_defaults()
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + "; ".join(FAILS))

@@ -269,6 +269,23 @@ def stage_runners(pw):
     page.click('#runners [data-rdel="CHECKRUNNER"]')
     page.wait_for_function("() => S.rlib && !S.rlib.runners.some((r) => r.id === 'CHECKRUNNER')", timeout=10000)
     check("  and Del takes it out again", True, True)
+    # R4 (29 Sept 2026): a record cannot be saved without its dimensions
+    page.click("#rnew")
+    check("the form marks the dimensions required, the inner member among them",
+          page.evaluate("() => ['height','side_clearance','rail_thickness','lift','setback',"
+                        "'inner_height','inner_thickness'].every((k) => $('rf-' + k).required)"), True)
+    page.fill("#rf-name", "Short runner")
+    page.fill("#rf-lengths", "400")
+    page.fill("#rf-lift", "")
+    page.fill("#rf-inner_thickness", "")
+    page.click("#rf-save")
+    page.wait_for_selector("#runneredit .f.bad #rf-lift", timeout=5000)
+    check("  a record with no lift and no inner thickness is refused, both fields lit",
+          sorted(page.evaluate("() => [...document.querySelectorAll('#runneredit .f.bad input')].map((i) => i.id)")),
+          ["rf-inner_thickness", "rf-lift"])
+    check("  and nothing reached the library",
+          page.evaluate("() => S.rlib.runners.some((r) => r.name === 'Short runner')"), False)
+    page.click("#rf-cancel")
     # the per-cabinet control: back onto nothing but GELMAR45 is offered
     select(page, 7)
     page.wait_for_selector("#drawerbox select[data-runner]", timeout=5000)

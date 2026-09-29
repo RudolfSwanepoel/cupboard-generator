@@ -1594,7 +1594,7 @@ def drawer_rise(cab, std: Standard = STANDARD) -> int:
     bottom panel (t) plus the runner's lift — 16 + 5 = 21. The bottom box sits
     on a runner standing on the bottom panel, and every box above hangs off its
     own face by the same figure (drawer setting, 28 September 2026)."""
-    return std.board_t + int(round(cab.runner_or_legacy.lift))
+    return cab.drawer_rise_of(std)
 
 
 def inner_drawer_z(cab, std: Standard = STANDARD, materials: dict = None,
@@ -1684,7 +1684,7 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
     out = []
 
     def one(i, d, fz0, fz1, bz0, y0, length, face_x, face_y):
-        bh = int(d.box_height or 0)
+        bh = cab.box_height_of(d, std)          # Auto: the tallest that fits
         return {"n": i + 1, "index": i, "inner": bool(d.inner),
                 "face": (fz0, fz1), "offset": bz0 - fz0,
                 # the tallest box this face takes at this offset (rule 5)
@@ -1695,11 +1695,13 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
                 "rail": (y0, y0 + length, bz0 - rr.lift, bz0 - rr.lift + rr.height),
                 "inner_y0": y0 + rr.setback,
                 "travel": rr.travel(length) if length else 0,
-                "base": d.base, "box_board": cab.box_board_of(d),
+                "box_h": bh, "auto": d.box_height is None,
+                "base": cab.base_of(d), "box_board": cab.box_board_of(d),
                 # the board the box's top edges are banded in the colour of
                 # (29 September 2026), '' when that resolves to no edging
                 "box_edge_board": (cab.box_edge_board_of(d)
-                                   if cab.drawer_box_tape_of(mats, d) else "")}
+                                   if cab.drawer_box_tape_of(mats, d) else ""),
+                "box_edge_kind": cab.box_edge_kind_of(d)}
 
     # the face stack, exactly as it always was
     at = 0
@@ -1723,7 +1725,7 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
         ft = _front_t(mats, cab.face_board_of(d), std)
         z = int(d.z) if d.z is not None else auto[k]
         length = std.pick_runner(cab.depth - ft, rr.lengths) or 0
-        out.append(one(i, d, z, z + int(d.box_height or 0), z, ft, length,
+        out.append(one(i, d, z, z + cab.box_height_of(d, std), z, ft, length,
                        (t + clear, W - t - clear), (0, ft)))
     return sorted(out, key=lambda u: u["n"])
 
@@ -1837,13 +1839,14 @@ def _drawer_tapes(cab, drawers: List[Part], std: Standard, mats: dict):
     banded on their TOP long edge (edge_l 1 on lines 18 and 19) in the colour
     of the drawer's box edging board (29 September 2026); nothing else is."""
     try:
-        edge = {u["index"]: u["box_edge_board"] for u in drawer_layout(cab, std, mats)}
+        edge = {u["index"]: (u["box_edge_board"], u["box_edge_kind"])
+                for u in drawer_layout(cab, std, mats)}
     except ValueError:
         edge = {}
     out = []
     for q in drawers:
-        board = edge.get(q.index, "")
-        tapes = ([Tape("z1", board, "pvc")]
+        board, kind = edge.get(q.index, ("", ""))
+        tapes = ([Tape("z1", board, kind)]
                  if board and q.role in ("drawer_side", "drawer_front", "drawer_back")
                  else [])
         out.append((q, tapes))

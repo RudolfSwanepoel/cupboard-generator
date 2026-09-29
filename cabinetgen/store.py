@@ -32,7 +32,14 @@ LATE_CABINET_FIELDS = (
     "corner_hand", "blind_width", "blind_board", "blind_edge_kind",
     "arm_shelves", "arm_shelf_arm", "arm_shelf_depth", "mitred_shelves",
     "corner_door_width", "runner",
+    "drawer_box_edge_board", "drawer_box_edge_kind", "drawer_base",
 )
+
+
+# Drawer fields written only when they are set: None means "follow the
+# cabinet" (or the default offset), and a drawer saved before the field existed
+# must write back byte for byte.
+DRAWER_SET_ONLY = ("offset", "box_edge_board", "box_edge_kind", "base")
 
 
 # The panel-record fields that say a panel is attached to a cabinet, and where.
@@ -47,10 +54,12 @@ def cabinet_to_dict(c: Cabinet) -> dict:
         if d.get(name) == defaults[name]:
             d.pop(name, None)
     # `inner` and `z` only on an inner drawer (28 September 2026), so every
-    # drawer written before inner drawers round-trips byte for byte.
+    # drawer written before inner drawers round-trips byte for byte. `offset`,
+    # `box_edge_board`, `box_edge_kind` and `base` only when set (None follows
+    # the cabinet); `box_height` always, as `null` when it is Auto.
     d["drawers"] = [{k: v for k, v in asdict(x).items()
                      if (x.inner or k not in ("inner", "z"))
-                     and (k not in ("offset", "box_edge_board") or v is not None)}
+                     and (k not in DRAWER_SET_ONLY or v is not None)}
                     for x in c.drawers]
     # `board` and `kind` are written only when a row actually names them, so a
     # job saved before the control round-trips byte for byte and is still read

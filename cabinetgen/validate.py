@@ -3,6 +3,7 @@
 Every rule here exists because a real job got it wrong. The finding reference
 in each message points at docs/RULES.md so the reason is never lost.
 """
+import math
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from typing import List
@@ -498,9 +499,21 @@ def _drawer_setting(job: Job):
                                  f"{std.inner_drawer_min_gap} is needed", check="drawer-inner-gap"))
         for u in lay:
             d = drawers[u["index"]]
-            if d.box_height < rr.height:
+            bh = c.box_height_of(d, std)
+            if bh >= rr.height:
+                continue
+            if d.box_height is None and not d.inner:
+                # an Auto box is the tallest its face takes: the FACE is short
                 out.append(Issue(CRITICAL, str(c.number),
-                                 f"drawer {u['n']}: box {d.box_height} is lower than its "
+                                 f"drawer {u['n']}: its face is too short for the "
+                                 f"{rr.height:g} mm runner ({rr.name or 'runner'}) — at an "
+                                 f"offset of {u['offset']} the tallest box it takes (Auto) is "
+                                 f"{bh}. The face needs to be at least "
+                                 f"{u['offset'] + math.ceil(rr.height)}, or the offset lower",
+                                 check="drawer-runner-height"))
+            else:
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"drawer {u['n']}: box {bh} is lower than its "
                                  f"{rr.height:g} mm runner ({rr.name or 'runner'}) — the "
                                  f"runner cannot be fixed to it", check="drawer-runner-height"))
     return out
@@ -735,13 +748,16 @@ def _boards_and_tapes(job: Job):
         # Drawer box sides and fronts, per drawer (29 September 2026): each is
         # edged in its own box edging board, the exterior board by default.
         # Drawers sharing one board are named together — one problem, one message.
+        # The thickness is chosen too since R1 (29 September 2026), PVC by
+        # default, so the question is asked per board AND kind.
         by_edge = {}
         for i, d in enumerate(c.drawer_list, start=1):
-            by_edge.setdefault(c.box_edge_board_of(d), []).append(i)
-        for board, nums in by_edge.items():
+            by_edge.setdefault((c.box_edge_board_of(d), c.box_edge_kind_of(d)),
+                               []).append(i)
+        for (board, kind), nums in by_edge.items():
             which = (f"drawer {nums[0]}" if len(nums) == 1 else
                      f"drawers {', '.join(map(str, nums))}")
-            wants.append(("drawer_box_edge", board, "pvc",
+            wants.append(("drawer_box_edge", board, kind,
                           f"{which} box sides and fronts (Box edging)"))
         if c.door_count or c.exposed_sides:
             wants.append(("door_edge",
@@ -811,6 +827,11 @@ def _thin_boards(job: Job):
         for i, b in enumerate(c.door_boards or []):
             if b:
                 wants.append((b, f"door leaf {i + 1} board"))
+        if c.drawer_list:
+            for attr, what in (("drawer_carcass_board", "drawers' box board"),
+                               ("drawer_face_board", "drawers' face board")):
+                if getattr(c, attr):
+                    wants.append((getattr(c, attr), what))
         for i, d in enumerate(c.drawer_list or []):
             if d.box_board:
                 wants.append((d.box_board, f"drawer {i + 1} box board"))

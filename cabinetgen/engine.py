@@ -349,20 +349,31 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
                     f"behind the face for the shortest {rr.name or 'runner'}, {rr.shortest})")
             return got
 
+        # The box height as CUT: a typed figure, or Auto — the tallest box its
+        # face takes at its offset (29 September 2026) — and the bottom as the
+        # drawer, else the section, says.
+        def box_h_of(d):
+            return cab.box_height_of(d, std)
+
         # group identical drawers so the cut list stays short — the board, and
         # the runner length the box is cut to, are part of what makes two
         # drawers identical
-        for key in _dedupe([(d.box_height, d.base, box_of(d), length_of(d)) for d in stack]):
+        def key_of(d):
+            return (box_h_of(d), cab.base_of(d), box_of(d), length_of(d))
+
+        for key in _dedupe([key_of(d) for d in stack]):
             box_h, base_mat, box_board, length = key
-            group = [d for d in stack
-                     if (d.box_height, d.base, box_of(d), length_of(d)) == key]
+            group = [d for d in stack if key_of(d) == key]
             count = len(group)
             box_grain = grain_of(mats, box_board)
-            # the sides and fronts once per box EDGING board within the group
-            # (29 September 2026): two boxes edged in different colours are two
-            # lines; the base is not edged, so it stays one line
-            for edge_board in _dedupe([R(cab.box_edge_board_of(d)) for d in group]):
-                edged = [d for d in group if R(cab.box_edge_board_of(d)) == edge_board]
+            # the sides and fronts once per box EDGING (board and thickness)
+            # within the group (29 September 2026): two boxes edged differently
+            # are two lines; the base is not edged, so it stays one line
+            def edge_of(d):
+                return (R(cab.box_edge_board_of(d)), cab.box_edge_kind_of(d))
+
+            for edge_key in _dedupe([edge_of(d) for d in group]):
+                edged = [d for d in group if edge_of(d) == edge_key]
                 row_tape = cab.drawer_box_tape_of(mats, edged[0])
                 P.append(Panel(n, "18", "Drawer Side", box_board, length, box_h, 2 * len(edged),
                                edge_l=1, edge_material=row_tape, grain=box_grain))
@@ -388,9 +399,9 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
         # up the height, as every drawer face (hard rule 7).
         inner = [d for d in stack if d.inner]
         box_w = std.drawer_box_width(cab.width, rr.side_clearance)
-        for key in _dedupe([(d.box_height, face_of(d)) for d in inner]):
+        for key in _dedupe([(box_h_of(d), face_of(d)) for d in inner]):
             face_h, face_board = key
-            count = sum(1 for d in inner if (d.box_height, face_of(d)) == key)
+            count = sum(1 for d in inner if (box_h_of(d), face_of(d)) == key)
             P.append(Panel(n, "20", "Drawer Face", face_board, face_h, box_w, count,
                            edge_l=2, edge_w=2, edge_material=face_tape,
                            grain=grain_of(mats, face_board), note="inner"))

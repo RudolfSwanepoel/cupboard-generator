@@ -56,6 +56,29 @@ class Runner:
     capacity_kg: float = 0
     lift: float = 5                  # drawer side bottom above the rail's bottom
     setback: float = 3               # inner member starts this far behind the box front
+    # The runner is two members a side (R3, 29 September 2026): the outer
+    # channel fixed to the carcass (`rail_thickness` x `height`) and the inner
+    # member fixed to the drawer side, nested in it when closed and travelling
+    # with the box. None is a record saved before these existed: it reads the
+    # estimate (`inner_h` / `inner_t`) and the Runners tab says "estimated:
+    # confirm" beside it. A record cannot be SAVED without them (R4).
+    inner_height: Optional[float] = None
+    inner_thickness: Optional[float] = None
+
+    @property
+    def inner_h(self) -> float:
+        """The inner member's height: the record's, else the estimate."""
+        return self.inner_height or estimated_inner_height(self.height)
+
+    @property
+    def inner_t(self) -> float:
+        """The inner member's thickness: the record's, else the estimate."""
+        return self.inner_thickness or ESTIMATED_INNER_T
+
+    @property
+    def estimated(self) -> List[str]:
+        """The fields this record does not state and reads an estimate for."""
+        return [k for k in ("inner_height", "inner_thickness") if not getattr(self, k)]
 
     def travel(self, length: int) -> int:
         """How far a drawer on this runner pulls out, for a runner `length`."""
@@ -87,6 +110,39 @@ class Runner:
         return min(self.lengths) if self.lengths else None
 
 
+# The inner member's size is ESTIMATED until Rudolf reads it off Gelmar drawing
+# 04227 and edits the record (brief of 29 September 2026): height 8 less than
+# the outer channel's, 6 thick. Drawing only — no cut size reads either.
+ESTIMATED_INNER_T = 6
+
+
+def estimated_inner_height(height) -> float:
+    """The estimate for a record that does not state its inner member."""
+    h = float(height or 0) - 8
+    return int(h) if h == int(h) else h
+
+
+# Every figure a runner record must carry to be saved (R4, 29 September
+# 2026): each more than 0. Name and at least one length are asked separately.
+REQUIRED = ("height", "side_clearance", "rail_thickness", "lift", "setback",
+            "inner_height", "inner_thickness")
+
+
+def missing(r: "Runner") -> List[str]:
+    """What stops `r` being saved: a name, a length, and every REQUIRED figure
+    more than 0. [] when it can be saved."""
+    out = []
+    if not str(r.name or "").strip():
+        out.append("name")
+    if not r.lengths:
+        out.append("lengths")
+    for k in REQUIRED:
+        v = getattr(r, k)
+        if not isinstance(v, (int, float)) or v <= 0:
+            out.append(k)
+    return out
+
+
 # The runner every job saved before the catalogue was quoted on: the three
 # lengths `Standard.runner_lengths` used to hold, and the clearance
 # `drawer_front_deduct` 59 was (13.5 a side + two 16 mm box sides). Its id is
@@ -94,7 +150,8 @@ class Runner:
 LEGACY = Runner(id="", name="Legacy runners (as quoted)", supplier="",
                 height=45, side_clearance=13.5, rail_thickness=12.7,
                 lengths=[350, 450, 500], extension="full", capacity_kg=0,
-                lift=5, setback=3)
+                lift=5, setback=3,
+                inner_height=37, inner_thickness=6)     # inner: ESTIMATED (height - 8, 6)
 
 # The seed record (drawing 04227.XXX-58B, SKU family 7011-7017). Gelmar's rule:
 # drawer width = opening - 27, which with 16 mm drawer sides is exactly the old
@@ -105,10 +162,11 @@ SEED = Runner(id=SEED_ID, name="Gelmar 45 mm full-extension ball-bearing",
               supplier="Gelmar", sku="7011-7017", price=0.0,
               type=RUNNER_TYPES[0], height=45, side_clearance=13.5,
               rail_thickness=12.7, lengths=[300, 350, 400, 450, 500, 550, 600],
-              extension="full", capacity_kg=35, lift=5, setback=2)
+              extension="full", capacity_kg=35, lift=5, setback=2,
+              inner_height=37, inner_thickness=6)       # inner: ESTIMATED (height - 8, 6)
 
 _NUM = ("price", "height", "side_clearance", "rail_thickness", "capacity_kg",
-        "lift", "setback")
+        "lift", "setback", "inner_height", "inner_thickness")
 
 
 def _num(v, default=0.0):
@@ -153,7 +211,9 @@ def runner_from_dict(d: dict) -> Runner:
     d.setdefault("id", "")
     for k in _NUM:
         if k in d:
-            d[k] = _num(d[k])
+            # an inner member not stated stays None: it reads the estimate
+            d[k] = (None if k in ("inner_height", "inner_thickness")
+                    and d[k] in (None, "") else _num(d[k]))
     if "lengths" in d:
         d["lengths"] = clean_lengths(d["lengths"])
     if "extension" in d:
@@ -163,8 +223,14 @@ def runner_from_dict(d: dict) -> Runner:
 
 def to_record(r: Runner) -> dict:
     """The copy a job keeps once it selects this runner: a snapshot, price
-    included, never a pointer at the library."""
-    return asdict(r)
+    included, never a pointer at the library. An inner member the record does
+    not state is left out rather than written as null, so a record saved
+    before the field existed writes back exactly as it was."""
+    d = asdict(r)
+    for k in ("inner_height", "inner_thickness"):
+        if d.get(k) is None:
+            d.pop(k, None)
+    return d
 
 
 def builtin(runner_id: str) -> Optional[Runner]:
@@ -217,7 +283,7 @@ def save(runners: List[Runner], path: Optional[str] = None):
                    "committed to the repo, like boards.json. A job does not point "
                    "at this file: selecting a runner copies its record into the "
                    "job, which is what keeps a quoted job quoted.")
-    raw["runners"] = [asdict(r) for r in runners]
+    raw["runners"] = [to_record(r) for r in runners]
     order = ["version", "note", "runners"]
     out = {k: raw[k] for k in order}
     out.update({k: v for k, v in raw.items() if k not in order})

@@ -284,6 +284,8 @@ def _runner_info(job, cab, std):
     rr = cab.runner_rec
     rec = rr or H.LEGACY
     info = {"id": cab.runner, "name": rec.name, "legacy": not cab.runner,
+            # what the section's one status line calls it: "Gelmar 45"
+            "short": (f"{rec.supplier} {rec.height:g}" if rec.supplier else rec.name),
             "selected": (not cab.runner) or cab.runner in (job.runners or {}),
             "known": rr is not None, "lengths": list(rec.lengths),
             "height": rec.height, "side_clearance": rec.side_clearance,
@@ -335,6 +337,8 @@ def _geometry_info(job, cab, std):
             # editor reads an inner drawer's face size and box top off it
             "drawer_layout": [{"n": u["n"], "inner": u["inner"], "face": list(u["face"]),
                                "offset": u["offset"], "max_box": u["max_box"],
+                               # the box as cut, and whether that is Auto
+                               "box_h": u["box_h"], "auto": u["auto"],
                                "face_w": round(u["face_x"][1] - u["face_x"][0], 1),
                                "box": [round(v, 1) for v in u["box"]],
                                "travel": u["travel"]}
@@ -354,6 +358,13 @@ def _geometry_info(job, cab, std):
             "drawer_face": cab.drawer_face,
             "drawer_carcass_set": cab.drawer_carcass_board,
             "drawer_face_set": cab.drawer_face_board,
+            # the Drawers section's defaults, resolved: what a drawer whose
+            # row names nothing of its own takes (29 September 2026)
+            "drawer_defaults": {"box_board": cab.drawer_carcass,
+                                "face_board": cab.drawer_face,
+                                "box_edge_board": cab.drawer_box_edge_board or cab.exterior_board,
+                                "box_edge_kind": cab.drawer_box_edge_kind or "pvc",
+                                "base": cab.drawer_base or "board"},
             # Edging, as the engine resolves it: a thickness, a colour board and
             # the name those two generate. The browser shows these; it builds no
             # tape name of its own.
@@ -370,7 +381,8 @@ def _geometry_info(job, cab, std):
                 # a drawer box's sides and fronts: PVC in the drawer's own Box
                 # edging board, the exterior board by default (29 Sept 2026);
                 # `rows` is each drawer's name, in the order of `drawers`
-                "drawer_box": {"board": cab.exterior_board,
+                "drawer_box": {"board": cab.drawer_box_edge_board or cab.exterior_board,
+                               "kind": cab.drawer_box_edge_kind or "pvc",
                                "name": cab.drawer_box_tape(job.materials),
                                "rows": [cab.drawer_box_tape_of(job.materials, d)
                                         for d in cab.drawers]},
@@ -811,6 +823,10 @@ DRAWER_BOX_ROLES = ("Drawer Side", "Drawer Front", "Drawer Base")
 def _runner_payload(r, usage=None):
     d = H.to_record(r)
     d["shortest"] = r.shortest
+    # a record saved before the inner member: the estimates it reads, and which
+    # fields they are, so the Runners tab can say "estimated: confirm"
+    d["estimated"] = r.estimated
+    d["inner_h"], d["inner_t"] = r.inner_h, r.inner_t
     d["travel_at"] = {str(n): r.travel(n) for n in r.lengths}
     if usage is not None:
         d["used_by"] = list(usage.get(r.id, []))
@@ -845,11 +861,19 @@ def runner_save(payload):
     r = H.runner_from_dict(d)
     if r.type not in H.RUNNER_TYPES:
         return {"ok": False, "error": f"only {', '.join(H.RUNNER_TYPES)} runners are built"}
-    if not r.lengths:
-        return {"ok": False, "error": "a runner needs at least one length"}
-    for k in ("height", "side_clearance"):
-        if not getattr(r, k) or getattr(r, k) <= 0:
-            return {"ok": False, "error": f"{k.replace('_', ' ')} must be more than 0"}
+    # R4 (29 September 2026): every dimension the drawers and the 3D read is
+    # stated, more than 0 — nothing silently defaults any more. The reply
+    # names every field missing, not only the first.
+    # A figure the form did not send at all is missing too: the dataclass
+    # default (lift 5, setback 3) is not the record saying so.
+    short = H.missing(r)
+    gaps = [k for k in ("lengths",) + H.REQUIRED
+            if k in short or (k != "lengths" and d.get(k) in (None, ""))]
+    if gaps:
+        said = {"lengths": "at least one length"}
+        return {"ok": False, "missing": gaps,
+                "error": "a runner needs " + ", ".join(
+                    said.get(k, k.replace("_", " ") + " more than 0") for k in gaps)}
     out = [x for x in lib if x.id != rid]
     at = next((i for i, x in enumerate(lib) if x.id == rid), len(out))
     out.insert(at, r)
@@ -2135,6 +2159,12 @@ def inner_drawers(payload):
     job, cab = _cabinet_of(payload)
     make_inner = bool(payload.get("inner"))
     ds = [replace(d) for d in cab.drawers]
+    if make_inner:
+        # an inner drawer's face IS its box, so an Auto box (the tallest its
+        # outer face took) is written down as the figure it came to
+        for d, was in zip(ds, cab.drawers):
+            if d.box_height is None and not was.inner:
+                d.box_height = cab.box_height_of(was, STANDARD)
     if not make_inner:
         for d in ds:
             d.inner, d.z = False, None

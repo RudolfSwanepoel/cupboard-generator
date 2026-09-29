@@ -323,8 +323,16 @@ class Drawer:
     loads as 'fixed' at the heights it already carried.
     """
     face_height: int
-    box_height: int
-    base: str = "board"          # 'board' (3 mm, grooved) | 'melamine' (16 mm, housed)
+    # None is AUTO (29 September 2026, ruled by Rudolf): the tallest box that
+    # fits its face at its offset — `drawer_layout`'s `max_box`, face less
+    # offset — read through `Cabinet.box_height_of`, so it follows the face when
+    # Share or a preset moves it. A typed figure is kept as typed; every job
+    # saved before Auto carries one. Written as `null` only when Auto.
+    box_height: Optional[int]
+    # 'board' (3 mm, grooved) | 'melamine' (16 mm, housed). None follows the
+    # cabinet's `drawer_base`, then 'board' (29 September 2026); every saved
+    # job's typed base stays as typed. None is written as nothing.
+    base: Optional[str] = None
     mode: str = "fixed"          # 'fixed' (height as typed) | 'share' (a slice of the rest)
     share: float = 1.0           # the slice's weight, when mode is 'share'
     # Which board this one drawer's box and face are cut from, so one drawer in a
@@ -360,9 +368,15 @@ class Drawer:
     # colour of (29 September 2026, ruled by Rudolf). None is the default, the
     # cabinet's EXTERIOR board — not the box board — for every drawer, the
     # October job's included, because that is what Plazaboard keyed and cut.
-    # Always PVC; the name comes off the board's record through `tape_for`.
-    # Written to the job file only when set.
+    # None follows the cabinet's `drawer_box_edge_board`, then the exterior
+    # board. The name comes off the board's record through `tape_for`. Written
+    # to the job file only when set.
     box_edge_board: Optional[str] = None
+    # How thick that edging is: 'pvc' | '1mm' | '2mm', from what the board
+    # offers (29 September 2026, ruled by Rudolf, REVERSING the same day's
+    # "always PVC"). None follows the cabinet's `drawer_box_edge_kind`, then
+    # PVC, so nothing quoted moves. Written to the job file only when set.
+    box_edge_kind: Optional[str] = None
 
 
 @dataclass
@@ -711,6 +725,13 @@ class Cabinet:
     # box takes the carcass board, the face takes the exterior board.
     drawer_carcass_board: Optional[str] = None
     drawer_face_board: Optional[str] = None
+    # The Drawers section's own defaults (29 September 2026): what every drawer
+    # takes unless its row says it differs. The box edging's colour board and
+    # thickness (None: the exterior board, PVC) and the bottom (None: 'board',
+    # the grooved 3 mm sheet). Each written to the job file only when set.
+    drawer_box_edge_board: Optional[str] = None
+    drawer_box_edge_kind: Optional[str] = None
+    drawer_base: Optional[str] = None
 
     # ---- retired typed edging names (28 September 2026) --------------------
     # A job file may still carry a flat edging string here ("PVC WOOD", "2mm
@@ -947,6 +968,7 @@ class Cabinet:
         simple("blind_board", "blind panel board")
         simple("drawer_carcass_board", "drawer carcass board")
         simple("drawer_face_board", "drawer face board")
+        simple("drawer_box_edge_board", "drawer box edging board")
         simple("door_edge_board", "door edging board")
         simple("drawer_edge_board", "drawer edging board")
         for i in range(len(self.door_boards or [])):
@@ -1041,9 +1063,44 @@ class Cabinet:
 
     def box_edge_board_of(self, d: "Drawer") -> str:
         """The board one drawer's box sides and fronts are edged in the colour
-        of: its own choice, or the cabinet's exterior board (ruled 29 September
-        2026 — not the box board, which is what it followed before)."""
-        return d.box_edge_board or self.exterior_board
+        of: its own choice, the section's (`drawer_box_edge_board`), or the
+        cabinet's exterior board (ruled 29 September 2026 — not the box board,
+        which is what it followed before)."""
+        return d.box_edge_board or self.drawer_box_edge_board or self.exterior_board
+
+    def box_edge_kind_of(self, d: "Drawer") -> str:
+        """How thick one drawer's box edging is: its own choice, the section's
+        (`drawer_box_edge_kind`), or PVC — what every drawer was edged in
+        before the choice existed (R1, 29 September 2026)."""
+        return d.box_edge_kind or self.drawer_box_edge_kind or "pvc"
+
+    def base_of(self, d: "Drawer") -> str:
+        """How one drawer's bottom is held: its own `base`, the section's
+        (`drawer_base`), or 'board' — the grooved 3 mm sheet."""
+        return d.base or self.drawer_base or "board"
+
+    def drawer_rise_of(self, std: Standard = STANDARD) -> int:
+        """The default box offset over its face bottom: the bottom panel plus
+        the runner's lift (16 + 5 = 21). `room.drawer_rise` is this."""
+        return std.board_t + int(round(self.runner_or_legacy.lift))
+
+    def box_offset_of(self, d: "Drawer", std: Standard = STANDARD) -> int:
+        """One outer drawer's box bottom above its own face bottom: its
+        `offset`, or the default rise."""
+        return self.drawer_rise_of(std) if d.offset is None else int(d.offset)
+
+    def box_height_of(self, d: "Drawer", std: Standard = STANDARD) -> int:
+        """The box height one drawer is CUT at. A typed figure as typed; AUTO
+        (None) the tallest box its face takes at its offset — face less offset,
+        which is exactly `room.drawer_layout`'s `max_box` — so an Auto box lies
+        within its face by construction and follows the face when it moves.
+        An inner drawer's face IS its box, so there is no face to fill: an
+        Auto inner box reads the standard new-row height."""
+        if d.box_height is not None:
+            return int(d.box_height)
+        if d.inner:
+            return int(std.box_height_default)
+        return max(int(d.face_height or 0) - self.box_offset_of(d, std), 0)
 
     def face_board_of(self, d: "Drawer") -> str:
         """The board one drawer's face is cut from: its own, or the cabinet's."""
@@ -1276,10 +1333,12 @@ class Cabinet:
                 or self.exterior_board)
 
     def drawer_box_tape(self, materials: dict) -> str:
-        """PVC in the cabinet's default drawer-box edging colour — its EXTERIOR
-        board (29 September 2026) — for a drawer that names no box edging board
-        of its own. Drawer sides and fronts only; supports have their own."""
-        return tape_for(materials, self.exterior_board, "pvc")
+        """The section's drawer-box edging — its own board and thickness, else
+        PVC in the EXTERIOR board's colour (29 September 2026) — what a drawer
+        naming none of its own is edged in. Drawer sides and fronts only;
+        supports have their own."""
+        return tape_for(materials, self.drawer_box_edge_board or self.exterior_board,
+                        self.drawer_box_edge_kind or "pvc")
 
     def support_row_cut_board(self, row: "Support") -> str:
         """What the rail itself is cut from.
@@ -1349,15 +1408,17 @@ class Cabinet:
         return self.support_row_tape(materials, Support(edge=edge, qty=1))
 
     def drawer_box_tape_of(self, materials: dict, d: "Drawer") -> str:
-        """PVC on one drawer's box sides and fronts, in the colour of its box
-        edging board (`box_edge_board_of`: its own, else the exterior board)."""
-        return tape_for(materials, self.box_edge_board_of(d), "pvc")
+        """The edging on one drawer's box sides and fronts: its thickness
+        (`box_edge_kind_of`, PVC by default) in the colour of its box edging
+        board (`box_edge_board_of`: its own, the section's, else the exterior
+        board)."""
+        return tape_for(materials, self.box_edge_board_of(d), self.box_edge_kind_of(d))
 
     @property
     def needs_back_board(self) -> bool:
         """Whether anything on this cabinet is actually cut from the back board:
         a back, or a drawer on a grooved 3 mm base."""
-        return self.back != "none" or any(d.base == "board" for d in self.drawer_list)
+        return self.back != "none" or any(self.base_of(d) == "board" for d in self.drawer_list)
 
     def tapes(self, materials: dict) -> dict:
         return {"carcass_edge": self.carcass_tape(materials),
