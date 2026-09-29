@@ -15,30 +15,18 @@ the failure this app exists to prevent.
 ## Check before you commit
 
 ```
-python tools/regen_check.py
-python tools/check_examples.py
-python tools/check_room.py
-python tools/check_fillers.py
-python tools/check_plinth.py
-python tools/check_drag.py
-python tools/check_elevation.py
-python tools/check_fronts.py
-python tools/check_boards.py
-python tools/check_edging.py
-python tools/check_library.py
-python tools/check_single_source.py
-python tools/check_swap.py
-python tools/check_colour.py
-python tools/check_panels.py
-python tools/check_pictures.py
-python tools/check_accept.py
-python tools/check_scene.py
-python tools/check_supports.py
-python tools/check_attached.py
-python tools/check_runners.py
-python tools/check_export.py
+python tools/check_all.py
 python tools/snapshot.py --compare baseline.json
 ```
+
+`check_all.py` runs `regen_check.py` and then every `tools/check_*.py` in name
+order, each in its own process, and ends on a PASS / FAIL line per script and a
+count; it exits non-zero if any failed. **There is no hand-kept list**: a new
+`check_*.py` in `tools/` is run the next time. `Check It Still Works.bat` calls
+it. It does not run the Playwright scripts (they need the app running) or the
+snapshot compare (`baseline.json` is per-machine and known stale); it says so.
+`regen_check` is a report, not a pass/fail — it fails there only by crashing —
+so its benchmark lines are repeated in the summary to be read.
 
 And, with the app running (`python run_app.py --no-window --port 8766`) and
 Playwright installed, `python tools/ui_check_3d.py` drives the 3D view with a
@@ -74,6 +62,60 @@ line, and `regen_check` says so rather than failing. Every other figure in this
 list comes out of the engine and is checked on any machine.
 
 ## Status
+
+**One window, maximised, and a complete check (29 September 2026, brief
+`Claude outputs/launch-and-checks-brief-2026-09-29.md`, agreed with Rudolf).**
+Nothing in `cabinetgen/` changed. Benchmark unchanged (272 / 59 / 30, 92 pot
+holes, 18 / 9 / 6, R28,363.50); `check_all.py` 23 of 23.
+
+1. **`tools/check_all.py`** replaces the hand-kept lists. `Check It Still
+   Works.bat` had stopped running `check_room`, `check_fillers`,
+   `check_plinth`, `check_fronts` and `check_export`, and this file's list had
+   dropped `check_boards`. **Every `check_*.py` already exits non-zero on a
+   failed check** — proved by running each with its first and then its last
+   `check()` forced to fail (`check_examples` read by eye: `return 1 if bad`);
+   none needed fixing.
+2. **No console: the desktop shortcut runs `pythonw run_app.py`.** Under pythonw
+   `sys.stdout` / `sys.stderr` are None; `main()` holds output in memory until
+   the port is ours, then writes **`output/app.log`**, overwritten each start,
+   line-buffered. (`api.Handler.log_message` was already silenced, so requests
+   log nothing; what the redirect catches is a traceback from a thread.) Under
+   `python.exe` nothing changes.
+3. **A failure to start is seen**: the traceback goes to the log and, with no
+   console, a message box says it did not start and where the log is. **A port
+   already taken is "The Cupboard App is already running, or port 8765 is in
+   use"** — and a refused second launch APPENDS to the log, so the running
+   app's log is not wiped. No second port is tried.
+4. **Found on the way, fixed: a second launch used to start a second server on
+   8765.** `HTTPServer` sets SO_REUSEADDR, which on Windows lets two sockets
+   bind one port, so the "already running" case could never have been reached.
+   `run_app.Server` binds with `allow_reuse_address = False` and
+   SO_EXCLUSIVEADDRUSE; it is refused against a plain socket, an old-style
+   server and itself (pinned).
+5. **Maximised**: `webview.create_window(..., width=1360, height=900,
+   maximized=True)` (`run_app.WINDOW`) — maximised, not full screen. pywebview
+   6.2.1's WinForms backend sets `FormWindowState.Maximized` from it; checked on
+   this laptop through Explorer (IsZoomed, the rect the work area). Started from
+   a tool's own background process the window can come up minimised instead —
+   the parent's show-state, not the app.
+6. **`Make Desktop Shortcut.bat`**, once per laptop: `Cupboard App.lnk` on the
+   desktop, target the `pythonw.exe` beside the `python` that `where python`
+   finds first (so the same interpreter and pywebview as the console launch),
+   argument the full path of `run_app.py`, start in the repo, icon
+   `app/cupboard.ico` (drawn in Python, 16-256 px). Through PowerShell's
+   `WScript.Shell`; no new package. Pin it to the taskbar by hand.
+7. **`Start Cupboard App.bat`** is the console launch for when something breaks;
+   it gains the maximised window and one line saying normal use is the shortcut.
+   `--no-window` and the browser fallback are unchanged.
+8. **`tools/check_launch.py`** pins 2-5 (a child with the streams None; the port
+   held three ways; a stand-in `webview` module reading the window call). It
+   never writes the real `output/app.log`.
+
+**Tested by hand, 29 September 2026, on this laptop:** the shortcut gives one
+`pythonw` process, one window, maximised, no console; a second launch while it
+is open shows the "already running" box, and dismissing it leaves the first app
+serving; `Start Cupboard App.bat` shows its console and the app, maximised.
+Rudolf to run `Make Desktop Shortcut.bat` once on the other laptop.
 
 **Drawer box edging chosen per drawer; above the ceiling acceptable (29
 September 2026, brief `Claude outputs/drawer-edging-ceiling-accept-brief-2026-09-29.md`,
@@ -1559,7 +1601,16 @@ cabinetgen/scene.py        the 3D scene, built here from room.solid_parts and on
 cabinetgen/room.py         walls, corners, to_world. The only trigonometry.
 cabinetgen/store.py        job files: JSON save / load
 cabinetgen/export_plaza.py Plazaboard CSV + costing off the real rate card
-run_app.py                 starts the local server, opens the window
+run_app.py                 starts the local server, opens the window (maximised); under
+                           pythonw logs to output/app.log and says in a message box
+                           when it cannot start or is already running
+output/app.log             the last pythonw run's output (a refused second launch
+                           appends). Not in git — output/ is ignored
+Make Desktop Shortcut.bat  run once per laptop: Cupboard App.lnk on the desktop,
+                           pythonw run_app.py, no console
+Start Cupboard App.bat     the console launch, for when something breaks
+Check It Still Works.bat   python tools\check_all.py, then the 22-cabinets reminder
+app/cupboard.ico           the shortcut's icon
 app/api.py                 request handlers. Thin — they call cabinetgen.
 app/index.html             the whole UI. Vanilla JS, no build step.
 app/view3d.js              the 3D view: a module loaded the first time a 3D view is shown;
@@ -1572,6 +1623,10 @@ jobs/                      the live job folder: Test.json (the working file; its
                            wardrobe_oct2025.py, the benchmark. Nothing else the
                            checks read lives here — see tools/fixtures/.
                            _deleted/ is the app's bin.
+tools/check_all.py         runs regen_check then every tools/check_*.py, found not
+                           listed; a PASS / FAIL summary; non-zero if any failed
+tools/check_launch.py      the launcher: no-console logging, "already running", the
+                           exclusive bind, the maximised window call
 tools/regen_check.py       the regression check above
 tools/check_examples.py    verifies the worked examples in docstrings are true
 tools/check_room.py        room geometry: closure, corners, to_world

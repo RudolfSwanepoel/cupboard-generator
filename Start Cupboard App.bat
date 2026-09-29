@@ -2,6 +2,7 @@
 title Cupboard App
 cd /d "%~dp0"
 echo Starting the Cupboard App...
+echo (Normal use is the Cupboard App shortcut on the desktop. This window is for when something breaks.)
 echo.
 python run_app.py
 if errorlevel 1 (
