@@ -24,7 +24,9 @@
       "extension": "full",
       "capacity_kg": 35,
       "lift": 5,
-      "setback": 2
+      "setback": 2,
+      "inner_height": 37,
+      "inner_thickness": 6
     }
   ]
 }
