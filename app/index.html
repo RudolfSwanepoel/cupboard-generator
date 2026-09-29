@@ -486,6 +486,8 @@
   #drawerbox td [data-maxbox]{font-size:10.5px;color:var(--muted)}
   #drawerbox td [data-maxbox].over{color:var(--crit);font-weight:600}
   #drawerbox .dautob{padding:0 5px;line-height:16px;font-size:10.5px;box-shadow:none}
+  #drawerbox input.dbox.over{border-color:var(--crit)}
+  #drawerbox input.dbox.over::placeholder{color:var(--crit);font-weight:600}
   #drawerbox td.dend{text-align:right;white-space:nowrap}
   #drawerbox .dlink{background:none;border:0;box-shadow:none;padding:0 4px;color:var(--accent);
                     font-size:11px;text-decoration:underline;cursor:pointer}
@@ -3036,7 +3038,9 @@ function drawerStackHTML(c) {
     const share = (d.mode || "fixed") === "share";
     const u = lay[i + 1];
     const auto = !isSet(d.box_height);
-    const over = u && !u.inner && (u.box[5] > u.face[1] || u.box[4] < u.face[0]);
+    // red when the box does not keep to its face (by the 2 mm clear) or to a
+    // support band above — the engine's answer (drawer_layout's `fits`)
+    const over = u && !u.inner && u.fits === false;
     const max = u ? u.max_box : "";
     const face = share
       ? `<span class="mono dmm" data-mm="${i}" title="shared out of what the fixed rows leave">${d.face_height}</span>
@@ -3044,7 +3048,7 @@ function drawerStackHTML(c) {
            value="${d.share === undefined || d.share === null ? 1 : d.share}" title="share weight">`
       : `<input type="number" step="1" data-d="${i}" data-dk="face_height" value="${d.face_height}">`;
     const boxCell = auto
-      ? `<input type="number" step="1" class="dbox" data-d="${i}" data-dk="box_height" value=""
+      ? `<input type="number" step="1" class="dbox${over ? " over" : ""}" data-d="${i}" data-dk="box_height" value=""
            placeholder="Auto (≤${max})" title="${esc(DTIP.max)} — type a height to fix it">`
       : `<input type="number" step="1" class="dbox" data-d="${i}" data-dk="box_height"
            value="${d.box_height}"><span class="note mono${over ? " over" : ""}" data-maxbox="${i}"

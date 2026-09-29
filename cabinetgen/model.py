@@ -1102,12 +1102,32 @@ class Cabinet:
             at += int(x.face_height or 0) + std.stack_gap
         return at
 
+    def support_band_underside(self, std: Standard = STANDARD) -> Optional[int]:
+        """The underside of the 16 mm band a typed Top Front / Top Rear makes
+        across the top of a base unit, above the carcass underside: H - t,
+        exactly `room.support_layout`'s flat rails less their thickness (the
+        `under` the support-drawer-foul check reads; `check_runners.py` holds the
+        two equal on every job it knows). None where there is no such band — no
+        typed flat support, or a carcass `support_layout` does not place."""
+        if (self.is_panel or self.template == "none"
+                or self.corner_kind in ("mitre", "ell") or not self.supports_typed):
+            return None
+        if not any(r.qty > 0 and r.type in ("front", "top_rear") for r in self.support_list):
+            return None
+        return int(self.height) - std.board_t
+
     def box_top_limit_of(self, d: "Drawer", std: Standard = STANDARD) -> int:
         """The highest one outer drawer's box top may reach: its face's top less
         `drawer_box_clear` — a box never sits flush in its face (ruled 29
-        September 2026)."""
-        return (self.face_bottom_of(d, std) + int(d.face_height or 0)
-                - std.drawer_box_clear)
+        September 2026) — and no higher than a Top Front / Top Rear band's
+        underside less the same clear, so an Auto box, which fills to this,
+        never runs into the band on its own (29 September 2026)."""
+        limit = (self.face_bottom_of(d, std) + int(d.face_height or 0)
+                 - std.drawer_box_clear)
+        band = self.support_band_underside(std)
+        if band is not None:
+            limit = min(limit, band - std.drawer_box_clear)
+        return limit
 
     def box_height_of(self, d: "Drawer", std: Standard = STANDARD) -> int:
         """The box height one drawer is CUT at. A typed figure as typed; AUTO

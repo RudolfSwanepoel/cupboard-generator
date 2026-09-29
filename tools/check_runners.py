@@ -873,7 +873,7 @@ def auto_box():
     short = job_of(box(drawers=[Drawer(60, None), Drawer(655, 150)]))
     got = [i.message for i in issues(short, "drawer-runner-height")]
     check("drawer-runner-height still can: a face too short for the runner, and says so",
-          [("face is too short" in m, "Auto" in m, "at least 66" in m) for m in got], [(True, True, True)])
+          [("face is too short" in m, "Auto" in m, "at least 68" in m) for m in got], [(True, True, True)])
     typed = job_of(box(drawers=[Drawer(60, 40), Drawer(655, 150)]))
     check("  a TYPED short box keeps the old wording",
           ["box 40 is lower than" in i.message for i in issues(typed, "drawer-runner-height")], [True])
@@ -908,6 +908,57 @@ def auto_box():
           [d["box_height"] for d in inn["drawers"]], [217])
 
 
+def support_band():
+    print("\nAuto stays under a Top Front / Top Rear band (fixes brief, Part 3, 29 Sept 2026)")
+    from cabinetgen.room import drawer_layout, support_layout
+    from app import api as A
+    # the model's band and support_layout's, on every drawer cabinet the checks know
+    pairs = []
+    for name in ("Test_drawers", "Test_export", "Test_legacy_supports", "Test_Build"):
+        job = load(job_file(name))
+        for c in job.cabinets:
+            if not c.drawer_list:
+                continue
+            flats = [u for u in support_layout(c, job.std, job.materials)
+                     if u["type"] in ("front", "top_rear")]
+            want = (max(u["z1"] for u in flats) - STANDARD.board_t
+                    if flats and c.supports_typed else None)
+            pairs.append((name, c.number, c.support_band_underside(job.std), want))
+    check("Cabinet.support_band_underside is support_layout's band on every drawer cabinet the checks know",
+          [p for p in pairs if p[2] != p[3]], [])
+    check("  and at least one of them has a band (Test_drawers cabinet 4: H 780, band at 764)",
+          [(p[0], p[1], p[2]) for p in pairs if p[0] == "Test_drawers" and p[1] == 4], [("Test_drawers", 4, 764)])
+
+    # Test_drawers cabinet 4: every box Auto, then Equal
+    test = load(job_file("Test_drawers"))
+    c = next(x for x in test.cabinets if x.number == 4)
+    for d in c.drawers:
+        d.box_height, d.mode, d.share = None, "share", 1.0
+    solved = A.drawer_solve({"height": c.height, "door_height": 0,
+                             "rows": [{"mode": "share", "value": 1} for _ in c.drawers]})
+    for d, h in zip(c.drawers, solved["heights"]):
+        d.face_height = h
+    lay = {u["n"]: u for u in drawer_layout(c, test.std, test.materials)}
+    check("Equal on cabinet 4 (faces " + " / ".join(str(h) for h in solved["heights"]) + "): the top face "
+          "runs to 777, but its Auto box stops 2 under the band at 764 — 762",
+          (lay[1]["face"][1], lay[1]["box"][5], lay[1]["max_box"], lay[1]["fits"]), (777, 762, 762 - lay[1]["box"][4], True))
+    got = {i.check for i in validate(test, generate_job(test)) if i.where == "4"}
+    check("  every box Auto after Equal raises no support-drawer-foul and no drawer-box-face",
+          got & {"support-drawer-foul", "drawer-box-face"}, set())
+    # a typed box: within 2 of the band is the foul too, and its <= says the limit
+    c.drawers[0].box_height = lay[1]["max_box"] + 1
+    got = [i.message for i in validate(test, generate_job(test))
+           if i.where == "4" and i.check == "support-drawer-foul"]
+    check("a typed box 1 over that (top 763): support-drawer-foul, within 2 mm of the band",
+          [("reaches 763" in m, "within 2 mm" in m) for m in got], [(True, True)])
+    check("  and drawer_layout says it does not fit (the red <=)",
+          [u["fits"] for u in drawer_layout(c, test.std, test.materials) if u["n"] == 1], [False])
+    # no band: a tall or a legacy carcass is limited by its face alone
+    tall = box(kind="tall", height=2000, drawers=[Drawer(400, None), Drawer(400, None)])
+    check("no band on a carcass with a top: Auto is the face's (400 - 21 - 2)",
+          (tall.support_band_underside(), [tall.box_height_of(d) for d in tall.drawers]), (None, [377, 377]))
+
+
 def main():
     catalogue()
     legacy_holds()
@@ -919,6 +970,7 @@ def main():
     box_edging()
     section_defaults()
     auto_box()
+    support_band()
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + "; ".join(FAILS))

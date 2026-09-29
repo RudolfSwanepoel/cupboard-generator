@@ -1690,8 +1690,14 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
         return {"n": i + 1, "index": i, "inner": bool(d.inner),
                 "face": (fz0, fz1), "offset": bz0 - fz0,
                 # the tallest box this face takes at this offset (rule 5):
-                # up to the face top less drawer_box_clear on an outer drawer
+                # up to the face top less drawer_box_clear on an outer drawer,
+                # and under a Top Front / Top Rear band less the same
                 "max_box": (fz1 if limit is None else limit) - bz0,
+                # whether the box as it stands keeps to that: inside its face
+                # by the clear both ends, and under the band — what the
+                # editor's red <= says (an inner drawer's face is its box)
+                "fits": limit is None or (bz0 >= fz0 + std.drawer_box_clear
+                                          and bz0 + bh <= limit),
                 "face_x": face_x, "face_y": face_y,
                 "face_board": cab.face_board_of(d),
                 "box": (t + clear, W - t - clear, y0, y0 + length, bz0, bz0 + bh),

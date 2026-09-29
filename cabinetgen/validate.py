@@ -506,15 +506,23 @@ def _drawer_setting(job: Job):
             bh = c.box_height_of(d, std)
             if bh >= rr.height:
                 continue
-            if d.box_height is None and not d.inner:
+            if d.box_height is None and not d.inner and \
+                    c.box_top_limit_of(d, std) < u["face"][1] - std.drawer_box_clear:
+                # an Auto box held down by a Top Front / Top Rear band
+                out.append(Issue(CRITICAL, str(c.number),
+                                 f"drawer {u['n']}: the support band across the top leaves "
+                                 f"room for a box of only {bh} (Auto) — lower than its "
+                                 f"{rr.height:g} mm runner ({rr.name or 'runner'}). Lower the "
+                                 f"offset or drop the support", check="drawer-runner-height"))
+            elif d.box_height is None and not d.inner:
                 # an Auto box is the tallest its face takes: the FACE is short
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"drawer {u['n']}: its face is too short for the "
                                  f"{rr.height:g} mm runner ({rr.name or 'runner'}) — at an "
                                  f"offset of {u['offset']} the tallest box it takes (Auto) is "
                                  f"{bh}. The face needs to be at least "
-                                 f"{u['offset'] + math.ceil(rr.height)}, or the offset lower",
-                                 check="drawer-runner-height"))
+                                 f"{u['offset'] + math.ceil(rr.height) + std.drawer_box_clear}, "
+                                 f"or the offset lower", check="drawer-runner-height"))
             else:
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"drawer {u['n']}: box {bh} is lower than its "
@@ -965,13 +973,18 @@ def _support_layout(job: Job):
         if flats:
             band = std.board_t
             under = max(u["z1"] for u in flats) - band
+            clear = std.drawer_box_clear
             names = " / ".join(sorted({SUPPORT_TYPE_LABEL[u["type"]] for u in flats}))
+            # at least drawer_box_clear under the band, as under a face top
+            # (29 September 2026)
             for i, top in drawer_box_tops(c, std, job.materials):
-                if top > under:
+                if top > under - clear:
+                    where = (f"into the {band} mm band under the {names} support at {under}"
+                             if top > under else
+                             f"within {clear} mm of the {names} support's underside at {under}")
                     out.append(Issue(CRITICAL, str(c.number),
-                                     f"drawer {i} box reaches {top} up the carcass, into the "
-                                     f"{band} mm band under the {names} support at {under}. "
-                                     f"Lower the box side or drop the support",
+                                     f"drawer {i} box reaches {top} up the carcass, {where}. "
+                                     f"Lower the box side (the tallest is Auto) or drop the support",
                                      check="support-drawer-foul"))
             front = [u for u in flats if u["type"] == "front"]
             rear = [u for u in flats if u["type"] == "top_rear"]

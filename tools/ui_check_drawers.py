@@ -409,7 +409,7 @@ def stage_offset(pw):
           page.evaluate("() => [...document.querySelectorAll('#drawerbox input[data-dk=\"offset\"]')].map((x) => [x.value, x.placeholder])"),
           [["", "21"]] * 4)
     maxes = page.evaluate("() => [...document.querySelectorAll('#drawerbox [data-maxbox]')].map((x) => x.textContent)")
-    check("beside each Box h, the tallest box its face takes: face less 21, less the 2 clear", maxes, ["≤87", "≤142", "≤197", "≤253"])
+    check("beside each Box h, the tallest box its face takes: face less 21 less the 2 clear, and drawer 1 held 2 under the Top Front band at 764 (762 - 688)", maxes, ["≤74", "≤142", "≤197", "≤253"])
     crit = lambda cid: page.evaluate(f"() => S.res.issues.filter((i) => i.where === '4' && i.check === {json.dumps(cid)}).length")
     check("at the defaults, drawers 1-3 are outside their faces (Test_drawers.json)", crit("drawer-box-face"), 3)
     page.fill('#drawerbox input[data-d="1"][data-dk="box_height"]', "142")

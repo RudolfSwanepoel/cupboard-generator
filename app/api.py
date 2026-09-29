@@ -342,7 +342,7 @@ def _geometry_info(job, cab, std):
             "drawer_layout": [{"n": u["n"], "inner": u["inner"], "face": list(u["face"]),
                                "offset": u["offset"], "max_box": u["max_box"],
                                # the box as cut, and whether that is Auto
-                               "box_h": u["box_h"], "auto": u["auto"],
+                               "box_h": u["box_h"], "auto": u["auto"], "fits": u["fits"],
                                "face_w": round(u["face_x"][1] - u["face_x"][0], 1),
                                "box": [round(v, 1) for v in u["box"]],
                                "travel": u["travel"]}
