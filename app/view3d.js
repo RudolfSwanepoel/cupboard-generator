@@ -3221,6 +3221,24 @@ function pixel(clientX, clientY) {
   return [buf[0], buf[1], buf[2]];
 }
 
+// The MEAN colour drawn over a rectangle of the canvas, for the look check on
+// a board drawn in its picture: one pixel of a picture says nothing.
+function meanPixel(x0, y0, x1, y1) {
+  if (!V.renderer) return null;
+  draw();
+  const gl = V.renderer.getContext();
+  const r = V.renderer.domElement.getBoundingClientRect();
+  const pr = V.renderer.getPixelRatio();
+  const ax = Math.round((Math.min(x0, x1) - r.left) * pr), bx = Math.round((Math.max(x0, x1) - r.left) * pr);
+  const ay = Math.round((r.bottom - Math.max(y0, y1)) * pr), by = Math.round((r.bottom - Math.min(y0, y1)) * pr);
+  const w = Math.max(bx - ax, 1), hh = Math.max(by - ay, 1);
+  const buf = new Uint8Array(w * hh * 4);
+  gl.readPixels(ax, ay, w, hh, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+  const sum = [0, 0, 0];
+  for (let i = 0; i < buf.length; i += 4) { sum[0] += buf[i]; sum[1] += buf[i + 1]; sum[2] += buf[i + 2]; }
+  return sum.map((v) => Math.round(v / (w * hh) * 10) / 10);
+}
+
 // Try a lighting figure in the running view (the tuning harness only: browser
 // state, written nowhere): exposure, environment, key, and the environment's
 // turn about X in radians.
@@ -3292,5 +3310,5 @@ function dispose() {
   V.renderer = V.scene = V.camera = V.controls = null;
 }
 
-  return {mount, setVisible, update, select, setLayers, isolate, flyTo, idle, bounds, partInfo, debugCam, pickHandleAt, dragInfo, overlayInfo, groupIds, debugShell, memory, state, camera, project, unproject, dispose, resize, fitAll, viewHome, viewTop, viewWall, setProjection, setDisplay, wallAt, pixel, look, tune, frameTime};
+  return {mount, setVisible, update, select, setLayers, isolate, flyTo, idle, bounds, partInfo, debugCam, pickHandleAt, dragInfo, overlayInfo, groupIds, debugShell, memory, state, camera, project, unproject, dispose, resize, fitAll, viewHome, viewTop, viewWall, setProjection, setDisplay, wallAt, pixel, meanPixel, look, tune, frameTime};
 }

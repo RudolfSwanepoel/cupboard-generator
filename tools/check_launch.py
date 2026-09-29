@@ -15,11 +15,20 @@
 
 Nothing here writes the real output/app.log: the subprocess runs point LOG at a
 temporary file.
+
+Windows only: the launcher is a Windows launcher (pythonw, a message box off
+`ctypes.windll`, SO_EXCLUSIVEADDRUSE), so anywhere else this says "skipped:
+Windows only" and exits 0, and a cloud run's `check_all` can be green.
 """
 import os
 import socket
 import subprocess
 import sys
+
+if sys.platform != "win32":
+    print("skipped: Windows only")
+    sys.exit(0)
+
 import tempfile
 import textwrap
 import types

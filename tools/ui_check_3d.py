@@ -1374,7 +1374,66 @@ def look_fronts(page):
     page.evaluate("() => V3D.tune({ao: true})")
     seam("11:door:0", "11:door:1", "AO on, cabinet 11's pair (GREY)")
     page.evaluate("() => { V3D.tune({ao: false}); V3D.setDisplay('edges'); }")
+    look_picture(page, sc)
     look_room(page, sc)
+
+
+def look_picture(page, sc):
+    """Round 2, items 1 and 6 (29 September 2026): the swatch rule for a board
+    drawn in its PICTURE. The mean colour of a lit, face-on BROOKHILL door is
+    within 8 per channel of the mean colour of the picture itself; and the
+    picture is tiled at `tile_mm`, the elevation's tile, which is read off the
+    drawn door as the period its pattern repeats at."""
+    look = sc["looks"]["BROOKHILL"]
+    pic = page.evaluate("""async (url) => {
+      const img = new Image(); img.src = url; await img.decode();
+      const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, c.width, c.height).data;
+      const s = [0, 0, 0];
+      for (let i = 0; i < d.length; i += 4) { s[0] += d[i]; s[1] += d[i + 1]; s[2] += d[i + 2]; }
+      return s.map((v) => Math.round(v / (d.length / 4) * 10) / 10); }""", look["picture"])
+    door = next(p for i in sc["items"] if i["number"] == 1 for p in i["parts"] if p["id"] == "1:door:0")
+    check("cabinet 1's door is BROOKHILL, drawn in its picture",
+          (door["board"], page.evaluate("() => V3D.partInfo('1:door:0').map"),
+           page.evaluate("() => V3D.partInfo('1:door:0').tint")), ("BROOKHILL", True, "#ffffff"))
+    page.evaluate("() => { V3D.select(null); V3D.setDisplay('edges'); V3D.viewWall(1, false); }")
+    settle(page)
+    page.evaluate("() => V3D.flyTo(1)")
+    time.sleep(0.5)
+    settle(page)
+    time.sleep(0.4)
+    xs = [q[0] for q in door["outline"]]
+    ys = [q[1] for q in door["outline"]]
+    ox, oy = viewport_origin_of(page, "#v3dview canvas")
+    a = page.evaluate("([x, y, z]) => V3D.project(x, y, z)", [min(xs), min(ys), door["z1"]])
+    b = page.evaluate("([x, y, z]) => V3D.project(x, y, z)", [min(xs), max(ys), door["z0"]])
+    x0, x1 = sorted([a["x"], b["x"]])
+    y0, y1 = sorted([a["y"], b["y"]])
+    mean = page.evaluate("(r) => V3D.meanPixel(r[0], r[1], r[2], r[3])",
+                         [ox + x0 + 6, oy + y0 + 6, ox + x1 - 6, oy + y1 - 6])
+    diff = [round(mean[i] - pic[i], 1) for i in range(3)]
+    check_true("the door's mean colour, face on, is within 8 per channel of the picture's mean",
+               all(abs(v) <= 8 for v in diff), f"door {mean}, picture {pic}, off by {diff}")
+    # the tile: the pattern up the door repeats every tile_mm (rows of pixels, 4 px apart)
+    mm_px = (max(ys) - min(ys)) / (x1 - x0)
+    rows = page.evaluate("""([x0, x1, y0, y1]) => { const out = [];
+      for (let y = y0; y < y1; y += 1) out.push(V3D.meanPixel(x0, y, x1, y + 1)); return out; }""",
+                         [ox + x0 + 6, ox + x1 - 6, oy + y0 + 6, oy + y0 + 6 + min(y1 - y0 - 12, 3.2 * look["tile_mm"] / mm_px)])
+    lum = [0.2126 * r[0] + 0.7152 * r[1] + 0.0722 * r[2] for r in rows]
+    m = sum(lum) / len(lum)
+    z = [v - m for v in lum]
+    v0 = sum(v * v for v in z) / len(z) or 1
+    best = None
+    for k in range(int(100 / mm_px), min(int(300 / mm_px), len(z) - 8)):
+        ac = sum(z[i] * z[i + k] for i in range(len(z) - k)) / (len(z) - k) / v0
+        if best is None or ac > best[1]:
+            best = (k, ac)
+    period = best[0] * mm_px
+    check_true(f"and its pattern repeats every {look['tile_mm']} mm, the tile the elevation draws",
+               abs(period - look["tile_mm"]) <= 2 * mm_px + 2, f"{period:.0f} mm at {mm_px:.2f} mm a pixel")
+    page.evaluate("() => { V3D.setProjection(false, false); V3D.viewHome(false); }")
+    settle(page)
 
 
 def look_room(page, sc):

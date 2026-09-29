@@ -68,10 +68,107 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
+**The 3D view drawn realistically — Round 2 (29 September 2026, Rudolf's notes
+`Claude outputs/3d-realism-round2-notes-2026-09-29.md`, reference photo
+`Claude outputs/3d-realism-screenshots/reference-kitchen-brookhill-grey.jpg`).**
+`app/view3d.js`, vendored three.js addons and the checks only: nothing under
+`cabinetgen/` or in `app/api.py` changed, so `/api/scene` is byte-identical.
+Built 1 to 6, one commit each. Benchmark unchanged (272 / 59 / 30, 92 pot
+holes, 18 / 9 / 6, R28,363.50); `check_all` 23 of 23; `ui_check_3d`,
+`ui_check_attached`, `ui_check_drawers` pass, `ui_check_restructure` but for
+its three pre-existing `attach` lines. Screenshots `r2_after1_*`, `r2_after3_*`,
+`r2_after5_*` beside Round 1's in `Claude outputs/3d-realism-screenshots/`.
+Figures measured in headless Chromium (SwiftShader) unless they say otherwise.
+
+1. **BROOKHILL: colour and tile.** The picture was already tagged sRGB. The
+   orange came from the material's base colour — the board's fallback swatch
+   `#c6a65d` — MULTIPLYING the map: a board drawn in its picture takes white
+   now (`showPicture`), the swatch only while no picture has landed.
+   `partInfo().colour` is still the board's own colour; `tint` is what
+   multiplies the picture. And the tile is the elevation's: its `<pattern>`
+   holds the picture `xMidYMid slice` in a square, so the 3D cuts the
+   picture's middle square out once (`squareTile`) and tiles that at
+   `tile_mm`, where before the whole 1135 x 953 picture was stretched into
+   the square. **Measured face on to wall B, cabinet 1's left leaf** (the
+   notes name "cabinet 10's 600 door"; in Test.json 10 is an end panel, and
+   the 600 front beside it is cabinet 1's pair): picture mean **175.3 / 161.8
+   / 146.2**; 3D before 147.2 / 120.4 / 75.1, after item 1 174.2 / 160.9 /
+   145.5, after item 4's light **180.8 / 166.8 / 150.5** (+5.5 / +5.0 / +4.3);
+   elevation 174.7 / 161.3 / 145.7. Tile period: 3D **160 mm** (158-162
+   measured); the elevation's is 40 px at the wall's drawing scale, which on
+   BOTH of Test.json's walls is 0.2077 px / mm — **192.6 mm**, not 160.
+   `render.PICTURE_TILE_MM` says 160 "at its usual scale"; the two agree only
+   there. **For Rudolf:** the picture is about seven planks wide, so a 160 mm
+   tile draws planks of some 25 mm in both drawings; the wide planks of the
+   photo need the picture laid at its real width (about 1.3 m), which is a
+   figure on the Boards record and a `cabinetgen` change, outside this brief.
+2. **Door and drawer gaps read.** Every front (door, drawer face, blind panel:
+   `isFront`) draws its whole perimeter at `PAPER.edgeFront`, full strength,
+   in Shaded as well as Shaded + edges, as FAT lines (`frontLineMaterial`,
+   `LOOK.front` 1.25 px): a GL line on a front's face lost the depth test to
+   the face, which its polygon offset pulls forward. Carcass and interior
+   parts keep the 20 degree threshold at 0.55. At the 3D tab's Home the seams
+   of cabinets 1, 11, 4 and 7 stand 26 to 49 units off the nearer face.
+3. **The Cabinets-tab view draws no selection outline**: only the part PICKED
+   (`V.picked`, a click on it) takes the accent outline and the part under
+   the pointer the lighter one. An attached panel selected beside its cabinet
+   is still outlined as an item. The 3D tab is unchanged.
+4. **Light and depth.** The key stands above and in front of the fronts
+   (`LOOK.keyFrom`: 55 degrees up; along the inward normals of the walls
+   carrying something, each counted once; with no room +y turned 25 degrees)
+   and is stated as the IRRADIANCE it puts on a front (`LOOK.key` 1.4; the
+   light's intensity follows in `fitKey`), over an environment of 0.7. GREY
+   front **80 / 79 / 78 on wall A and on wall B** (swatch 80 / 79 / 78),
+   81 / 80 / 79 in the Cabinets 3D; a white carcass reads **top 247, side
+   208**. A room with runs on three walls lights the middle run's fronts and
+   leaves the two facing each other on the environment alone. **Shadows**:
+   three r186 has REMOVED `PCFSoftShadowMap` ("Using PCFShadowMap instead"),
+   so this is `PCFShadowMap` with radius 3, 2048 square, fitted to the scene
+   bounds on every rebuild, `autoUpdate` off and drawn when `shadowsDirty`
+   says the scene or the light changed; every board casts and receives, a
+   ghost and an x-ray cast nothing; a contact shadow under every item
+   standing within 200 mm of the floor (`buildContacts`). **AO**: three's
+   `GTAOPass`, vendored with what it imports, behind the **AO** button, off
+   under X-ray, **driven directly and not through `EffectComposer`**: a
+   composer tone-maps the whole frame in its output pass — paper lines and
+   background with it — and loses the canvas's antialiasing, so the
+   occlusion is multiplied over the frame already on screen. Its figures are
+   in mm (`LOOK.ao`), it is denoised three times (once leaves grain on pale
+   boards), and the paper lines are on their own layer and drawn after it.
+   **Frame time, Test.json's room at Home, this laptop's Intel graphics
+   (ANGLE D3D11): 11-13 ms with AO against 6-8 ms without at 882 x 768, 15-17
+   ms against 6-7 ms at 1323 x 1152** — kept, on by default. In software
+   (SwiftShader) 1.1 s against 0.2 s, so on a software renderer it starts
+   off (`softwareRendered`). Snapshot and the checks' pixel reads go through
+   the one `draw()`.
+5. **The room.** Shaded modes: pale 600 mm tiles with a faint joint (reads
+   225 / 228 / 222; `PAPER.floorTile` is stated darker than it reads, a floor
+   is lit from above), plaster walls (208 / 200 / 186), an off-white ceiling;
+   X-ray keeps the drawing's paper room. The drawing grid is on with edges
+   and in X-ray, off in Shaded, and the **Grid** button flips the one in
+   force (`V.gridOn`).
+6. `check_launch.py` prints "skipped: Windows only" and exits 0 off Windows;
+   `ui_check_3d.py --stage look` holds BROOKHILL's mean-colour rule, the tile
+   period, the seams, the form, the shadow map's updates, AO and the room.
+
+**`ui_check_3d.py` and `ui_shots_3d.py` read `tools/fixtures/Test_3d.json`**
+(Test.json at 14a5ea7), not the live file: on 29 September Test.json was
+edited and saved in the app while the checks ran (cabinet 4's drawer faces,
+panel 8's depth) and three lines failed. The fifth time for this lesson.
+`ui_check_restructure.py` reads the editor's 1.2 s flash before its
+screenshot. Seen once in three full runs and not touched:
+`ui_check_3d`'s "cube … animated" line, which asks whether a 300 ms fly is
+still running after the click returns.
+
+**For Rudolf:** (a) the plank width, above; (b) the elevation's tile is 193 mm
+on Test.json's walls against the 160 the 3D is told; (c) white on a front is
+still 241, Round 1's trade-off; (d) AO, the key and the plaster want looking
+at on the laptop; (e) `jobs/Test.json` and a new `jobs/Liam_Room.json` were
+saved in the app during this work and are left uncommitted.
+
 **The 3D view drawn realistically — Round 1 of two (29 September 2026, brief
-`Claude outputs/3d-realism-brief-2026-09-29.md`, agreed with Rudolf; Round 2 —
-shadows, ambient occlusion, the snapshot carrying them — waits on his notes on
-this).** `app/view3d.js` and the vendored libraries only: nothing under
+`Claude outputs/3d-realism-brief-2026-09-29.md`, agreed with Rudolf; Round 2
+built since, above).** `app/view3d.js` and the vendored libraries only: nothing under
 `cabinetgen/` changed, `/api/scene` is byte-identical. Benchmark unchanged
 (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50); `check_all` 22 of 23 —
 `check_launch.py` fails on the cloud machine at HEAD too (its child stubs
@@ -1637,6 +1734,13 @@ and each cabinet's issues from `validate` with the check id.
 
 ### Light, surface, picture, selection (Round 1, 29 September 2026)
 
+**Round 2 (29 September 2026) re-balanced this**: environment 0.7, the key
+above and in front at `LOOK.key` 1.4 (the irradiance on a front), shadows,
+contact shadows, ambient occlusion, a board in its picture multiplied by
+white, fronts outlined in every mode, the Cabinets tab's view with no
+selection outline, and a room of tiles and plaster — see the Status entry.
+What follows is Round 1 as built.
+
 **Lighting is physical.** An image-based environment — a neutral grey box,
 ceiling 1.2, walls 1.0, floor 0.5 (`LOOK.sky`), pre-filtered once through
 `PMREMGenerator`, turned so its ceiling is our +Z — gives the diffuse light
@@ -1953,7 +2057,10 @@ app/vendor/three/          three.js 0.186.0 — three.module.js, three.core.js, 
 app/vendor/camera-controls/  camera-controls 3.1.2 — camera-controls.module.js, LICENSE
 app/vendor/three/addons/   three r186's own addons the view imports as `three/addons/…`
                            (the importmap): lines/ — LineSegments2, LineSegmentsGeometry,
-                           LineMaterial (the selection outline); LICENSE
+                           LineMaterial (the selection outline, the fronts' lines);
+                           postprocessing/ GTAOPass, Pass; shaders/ GTAOShader,
+                           PoissonDenoiseShader, CopyShader; math/ SimplexNoise
+                           (ambient occlusion, Round 2); LICENSE
 jobs/                      the live job folder: Test.json (the working file; its
                            cabinet 8 is the PLACED panel fixture) and
                            wardrobe_oct2025.py, the benchmark. Nothing else the
@@ -1962,7 +2069,8 @@ jobs/                      the live job folder: Test.json (the working file; its
 tools/check_all.py         runs regen_check then every tools/check_*.py, found not
                            listed; a PASS / FAIL summary; non-zero if any failed
 tools/check_launch.py      the launcher: no-console logging, "already running", the
-                           exclusive bind, the maximised window call
+                           exclusive bind, the maximised window call. Windows only:
+                           anywhere else "skipped: Windows only", exit 0
 tools/regen_check.py       the regression check above
 tools/check_examples.py    verifies the worked examples in docstrings are true
 tools/check_room.py        room geometry: closure, corners, to_world
@@ -2009,7 +2117,9 @@ tools/fixtures/            frozen job files the checks read. Never reachable fro
                            fixture) and Corner Unit Test.json since 28 September 2026,
                            beside Test_Build_pre_library.json and Test_legacy_supports.json;
                            Test_drawers.json (Test.json before f4d87b0) for check_runners;
-                           Test_export.json (Test.json at 201d360) for check_export.
+                           Test_export.json (Test.json at 201d360) for check_export;
+                           Test_3d.json (Test.json at 14a5ea7) for ui_check_3d and
+                           ui_shots_3d.
 tools/fixture_jobs.py      job_file(name): jobs/ for Test.json, tools/fixtures/ for the
                            rest. Every check and snapshot.py read job files through it.
 tools/snapshot.py          every panel, issue, cost and drawing hash, for --compare
