@@ -89,6 +89,12 @@ class Standard:
     closure_warn: int = 5       # mm the wall chain may miss closing by before it is queried
     closure_block: int = 20     # above this the measurements contradict each other
     corner_disagree: int = 5    # mm the two measurements of one corner may differ by
+    # Draw walls on Room -> Plan (29 September 2026): a drawn wall's direction
+    # snaps to this many degrees (Shift for a free angle), its length to this
+    # many mm. A sketch, not a measurement — a drawn wall is a critical until
+    # its length is typed or ticked as measured.
+    draw_angle_step: int = 15
+    draw_length_step: int = 10
 
     # ---- fillers and scribes ----------------------------------------------
     # Ruled by Rudolf, 14 September 2026.

@@ -1292,10 +1292,19 @@ function buildContacts(payload) {
   g.userData.noAO = true;
   for (const item of payload.items) {
     if (!item.parts.length) continue;
+    // Squared up to the item's own wall (29 September 2026): on a wall at an
+    // angle the patch turns with the cabinet instead of spanning its box. On a
+    // wall along an axis that is the box, exactly as before.
+    const wall = payload.room && item.wall ? payload.room.walls.find((w) => w.id === item.wall) : null;
+    const turned = wall && Math.abs(wall.dir[0]) > 1e-6 && Math.abs(wall.dir[1]) > 1e-6;
+    const [dx, dy] = turned ? wall.dir : [1, 0];
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, z0 = Infinity;
     for (const p of item.parts) {
       z0 = Math.min(z0, p.z0);
-      for (const [x, y] of p.outline) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      for (const [px, py] of p.outline) {
+        const x = px * dx + py * dy, y = -px * dy + py * dx;    // into the wall's frame
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      }
     }
     if (z0 > LOOK.contact.reach) continue;
     const m = LOOK.contact.margin;
@@ -1303,7 +1312,9 @@ function buildContacts(payload) {
       new THREE.MeshBasicMaterial({color: PAPER.contact, alphaMap: contactTexture(x1 - x0, y1 - y0, m), transparent: true,
                                    opacity: LOOK.contact.opacity, depthWrite: false, toneMapped: false,
                                    side: THREE.DoubleSide}));
-    mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, 0.6);         // room frame, in the root
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    mesh.position.set(cx * dx - cy * dy, cx * dy + cy * dx, 0.6);   // room frame, in the root
+    if (turned) mesh.rotation.z = Math.atan2(dy, dx);
     mesh.userData = {contact: item.number, noAO: true};
     mesh.renderOrder = 1;
     g.add(mesh);

@@ -575,6 +575,7 @@
      grabbed — and a panel's number sits beside it, over the next cabinet. Text
      that took the press left dead spots where a drag did nothing (22 Sept 2026). */
   #plan svg text{pointer-events:none}
+  #plan svg.drawing{cursor:crosshair;background:var(--surface)}
   #plan svg .front{transition:opacity .08s}
   #plan.showfronts svg .front{opacity:1 !important}
   #dragreadout{position:absolute;background:var(--ink);color:#fff;font-size:11px;
@@ -704,7 +705,10 @@
           <h2>Plan <span id="planzoombar" class="zoombar"><button data-zoom="0.8"
             title="zoom out">&minus;</button><button data-zoom="reset"
             id="planzoom" title="back to 100%">100%</button><button data-zoom="1.25"
-            title="zoom in">+</button></span> <span id="layers"></span></h2>
+            title="zoom in">+</button></span> <span id="layers"></span>
+            <button id="drawwalls" style="float:right"
+              title="sketch the walls with the mouse — lengths to be measured after">Draw walls</button></h2>
+          <div id="drawhint" class="note" hidden style="padding:6px 12px 0"></div>
           <div class="scroll" id="plan" style="padding:8px 12px"></div>
         </div>
         <!-- The wall elevations, moved here from the Cabinets tab unchanged
@@ -5664,9 +5668,47 @@ for (const [bar, id] of [["elevzoombar", "elevation"], ["planzoombar", "plan"]])
 // not interrupted by the compute that the typing triggered.
 let roomSig = null;
 
+// The Corner column's quick picks (29 September 2026): the interior angle of
+// the corner after each wall, inside the room between the two faces. Anything
+// else strictly between 0 and 360 is "custom", typed.
+const CORNER_PICKS = [[90, "90 inside"], [270, "270 outside"], [135, "135"], [225, "225"],
+                      [180, "180 in line"]];
+
+function cornerCell(rm, i) {
+  const w = rm.walls[i];
+  const last = i === rm.walls.length - 1;
+  if (last && !rm.closed) return `<td class="note" title="an open run's last wall just stops">—</td>`;
+  const nxt = rm.walls[(i + 1) % rm.walls.length];
+  const a = w.corner_end === undefined || w.corner_end === null ? 90 : w.corner_end;
+  const preset = CORNER_PICKS.some(([v]) => v === +a);
+  const opts = CORNER_PICKS.map(([v, t]) =>
+    `<option value="${v}"${preset && +a === v ? " selected" : ""}>${t}</option>`).join("") +
+    `<option value="custom"${preset ? "" : " selected"}>custom</option>`;
+  return `<td><div style="display:flex;gap:6px;align-items:center;white-space:nowrap">
+    <span class="note">${esc(w.id)}→${esc(nxt.id)}</span>
+    <select data-w="${i}" data-wk="corner_pick" style="width:auto">${opts}</select>
+    <input type="number" step="any" min="0" max="360" data-w="${i}" data-wk="corner_end"
+      value="${a}" style="width:72px${preset ? ";display:none" : ""}"
+      title="interior angle, degrees — strictly between 0 and 360"></div></td>`;
+}
+
+function drawnCell(w, i) {
+  return w.drawn
+    ? `<td><span class="pill warn" title="its length came off the mouse, not a tape">drawn</span>
+        <button data-wmeasured="${i}" title="the length shown is the measured one">measured</button></td>`
+    : `<td></td>`;
+}
+
+// Said under the wall table when an entry is refused, and cleared by the next
+// good one.
+function wallNote(text) {
+  const n = $("wallnote");
+  if (n) { n.textContent = text || ""; n.style.display = text ? "block" : "none"; }
+}
+
 function renderRoom(force) {
   const rm = S.job.room;
-  const sig = rm ? "r" + rm.walls.length : "none";
+  const sig = rm ? "r" + rm.walls.length + (rm.closed ? "c" : "o") : "none";
   if (!force && sig === roomSig) { renderClosure(); return; }
   roomSig = sig;
 
@@ -5682,6 +5724,8 @@ function renderRoom(force) {
     <td><input type="number" step="1" data-w="${i}" data-wk="length" value="${w.length}"></td>
     <td><input type="number" step="1" data-w="${i}" data-wk="offset_start" value="${w.offset_start}"></td>
     <td><input type="number" step="1" data-w="${i}" data-wk="offset_end" value="${w.offset_end}"></td>
+    ${cornerCell(rm, i)}
+    ${drawnCell(w, i)}
     <td class="n note">${w.openings.length || ""}</td>
     <td class="n note">${w.obstructions.length || ""}</td>
     <td><button data-wrm="${i}">×</button></td></tr>`).join("");
@@ -5704,18 +5748,25 @@ function renderRoom(force) {
     <div id="closure" style="margin:12px 0"></div>
     <table class="rows"><thead><tr>
       <th>Wall</th><th>Length</th><th>Offset start</th><th>Offset end</th>
+      <th>Corner</th><th></th>
       <th class="n">Op</th><th class="n">Obs</th><th></th>
     </tr></thead><tbody>${walls}</tbody></table>
+    <div id="wallnote" class="pill crit" style="display:none;margin-top:8px"></div>
     <div style="margin-top:9px">
       <button data-walladd="start">+ Wall before ${esc(rm.walls.length ? rm.walls[0].id : "the first")}</button>
       <button data-walladd="end">+ Wall after ${esc(rm.walls.length ? rm.walls[rm.walls.length - 1].id : "the last")}</button>
       <button id="roomdel" style="float:right">Remove room</button>
     </div>
     <p class="note" style="margin-top:14px;max-width:64ch">
-      Walls run clockwise, first to last. To build an L or a U run, set
-      <b>open run</b> and add walls before the first or after the last — each new
-      wall turns the corner at that end and starts square. A closed room is a
-      loop, so a wall added to it shows as a miss until the shape closes again.
+      Walls run clockwise, first to last. <b>Corner</b> is the angle inside the
+      room at the corner after each wall: 90 an inside corner, 270 an outside one
+      (a chimney breast, a nib), 135 or 225 a splay, 180 walls in line, or any
+      other angle typed. To build an L or a U run, set <b>open run</b> and add
+      walls before the first or after the last — each new wall starts at 90, and
+      its corner is then set here. A closed room is a loop, so a wall added to it
+      shows as a miss until the shape closes again. <b>Draw walls</b> on the plan
+      sketches them with the mouse; a drawn length is marked until it is typed
+      or ticked as measured.
       <b>Offsets</b> are the deviation from square at each
       corner, measured ${rm.offset_depth} mm out from the wall face — zero is
       square, positive means the return wall opens away from the room. Each
@@ -5847,6 +5898,7 @@ function refreshPlan() {
 }
 
 async function renderPlan() {
+  if (DRAW) { drawPaint(); return; }      // sketching walls: the canvas is the plan
   const rm = S.job.room;
   if (!rm) {
     $("plan").innerHTML = `<div class="empty">No room yet — add one below.</div>`;
@@ -5870,6 +5922,241 @@ async function renderPlan() {
   applyZoom("plan");
   markSelected();
 }
+
+/* ---------- Draw walls (29 September 2026) ----------------------------------
+   Sketching a room with the mouse. The canvas is an SVG whose viewBox IS world
+   plan millimetres, so a click is read straight into mm through the drawing's
+   own transform. Each click sets a corner; the rubber band shows the length
+   and the corner it would make. Direction snaps to Standard.draw_angle_step
+   (Shift for a free angle), length to draw_length_step. Clicking the first
+   corner closes the room; a double-click or Enter finishes an open run; Esc
+   cancels; Backspace takes the last corner off. The corners go to
+   /api/room-draw, which names the walls, measures them, works out every
+   corner angle and puts the chain clockwise: the browser does none of it.
+   The live readout is a sketch aid, and nothing reads it.                   */
+
+let DRAW = null;
+
+function drawStd(k, dflt) {
+  const v = (S.def.standard || {})[k];
+  return v > 0 ? v : dflt;
+}
+
+function startDraw() {
+  const rm = S.job.room;
+  if (rm && rm.walls.length) {
+    const ids = rm.walls.map((w) => w.id);
+    const n = places().length;
+    const ok = window.confirm(
+      `Replace walls ${ids[0]}–${ids[ids.length - 1]}?` +
+      (n ? `\n\n${n} item${n === 1 ? " is" : "s are"} placed. Placements keep their wall ` +
+           `letter; anything that no longer fits its wall is named by the checks.` : "") +
+      `\n\nThe walls' openings and obstructions go with them.`);
+    if (!ok) return;
+  }
+  // the room being replaced, faint under the new outline
+  const old = (S.job.room && S.res && S.res.room && S.res.room.corners) || [];
+  const xs = old.map((q) => q[0]).concat([0]), ys = old.map((q) => q[1]).concat([0]);
+  const pad = 1500;
+  const w = Math.max(Math.max(...xs) - Math.min(...xs) + 2 * pad, 12000);
+  const h = Math.max(Math.max(...ys) - Math.min(...ys) + 2 * pad, 8000);
+  DRAW = {pts: [], at: null, closing: false, old: old,
+          box: [Math.round(Math.min(...xs) - pad), Math.round(Math.min(...ys) - pad),
+                Math.round(w), Math.round(h)]};
+  $("drawwalls").textContent = "Cancel drawing";
+  $("drawhint").hidden = false;
+  $("drawhint").innerHTML = `Click to set each corner. Direction snaps to
+    ${drawStd("draw_angle_step", 15)}° — hold <b>Shift</b> for a free angle; length snaps
+    to ${drawStd("draw_length_step", 10)} mm. Click the first corner to close the room;
+    double-click or <b>Enter</b> finishes an open run. <b>Backspace</b> takes the last
+    corner off, <b>Esc</b> cancels. Drawn lengths are a sketch: measure each wall after.`;
+  $("layers").innerHTML = "";
+  drawPaint();
+  window.addEventListener("keydown", drawKey);
+}
+
+function endDraw() {
+  DRAW = null;
+  window.removeEventListener("keydown", drawKey);
+  $("drawwalls").textContent = "Draw walls";
+  $("drawhint").hidden = true;
+  renderPlan();
+}
+
+// The canvas, painted whole on every move: a few lines, and nothing to keep.
+function drawPaint() {
+  const box = $("plan");
+  if (!DRAW || !box) return;
+  const [x0, y0, w, h] = DRAW.box;
+  const pxW = Math.max(box.clientWidth - 28, 400);
+  const pxH = Math.round(pxW * h / w);
+  const mm = w / pxW;                       // mm per screen pixel, for line widths
+  const L = [];
+  for (let gx = Math.ceil(x0 / 500) * 500; gx <= x0 + w; gx += 500) {
+    L.push(`<line x1="${gx}" y1="${y0}" x2="${gx}" y2="${y0 + h}"
+      stroke="var(--rule)" stroke-width="${(gx % 1000 ? 0.4 : 0.8) * mm}"/>`);
+  }
+  for (let gy = Math.ceil(y0 / 500) * 500; gy <= y0 + h; gy += 500) {
+    L.push(`<line x1="${x0}" y1="${gy}" x2="${x0 + w}" y2="${gy}"
+      stroke="var(--rule)" stroke-width="${(gy % 1000 ? 0.4 : 0.8) * mm}"/>`);
+  }
+  if (DRAW.old.length > 1) {
+    L.push(`<polyline points="${DRAW.old.map((q) => q.join(",")).join(" ")}" fill="none"
+      stroke="var(--muted)" stroke-width="${1.5 * mm}" stroke-dasharray="${6 * mm} ${4 * mm}"/>`);
+  }
+  const pts = DRAW.pts;
+  const chain = pts.concat(DRAW.at && pts.length ? [DRAW.at] : []);
+  if (chain.length > 1) {
+    L.push(`<polyline class="drawn" points="${chain.map((q) => q.join(",")).join(" ")}"
+      fill="none" stroke="var(--ink)" stroke-width="${2.5 * mm}"/>`);
+    // each wall so far, lettered in the order it was drawn
+    for (let k = 0; k + 1 < chain.length; k++) {
+      const [ax, ay] = chain[k], [bx, by] = chain[k + 1];
+      const len = Math.round(Math.hypot(bx - ax, by - ay));
+      if (!len) continue;
+      // beside the line, not on it: off to one side, anchored away from it
+      const nx = -(by - ay) / len, ny = (bx - ax) / len;
+      const anchor = Math.abs(nx) > 0.5 ? (nx < 0 ? "end" : "start") : "middle";
+      L.push(`<text x="${(ax + bx) / 2 + nx * 10 * mm}" y="${(ay + by) / 2 + ny * 10 * mm + 4 * mm}"
+        font-size="${11 * mm}" text-anchor="${anchor}" fill="var(--ink)">${
+        String.fromCharCode(65 + k)} · ${len}</text>`);
+    }
+  }
+  pts.forEach((q, k) => L.push(`<circle cx="${q[0]}" cy="${q[1]}" r="${(k ? 3 : 6) * mm}"
+    fill="${k ? "var(--ink)" : (DRAW.closing ? "var(--accent)" : "var(--surface)")}"
+    stroke="var(--ink)" stroke-width="${1.2 * mm}"/>`));
+  if (DRAW.at) {
+    L.push(`<circle cx="${DRAW.at[0]}" cy="${DRAW.at[1]}" r="${3 * mm}" fill="var(--accent)"/>`);
+    const r = drawReadout();
+    if (r) L.push(`<text id="drawreadout" x="${DRAW.at[0] + 12 * mm}" y="${DRAW.at[1] - 12 * mm}"
+      font-size="${12 * mm}" fill="var(--accent)">${esc(r)}</text>`);
+  }
+  box.innerHTML = `<svg class="drw drawing" id="drawsvg" width="${pxW}" height="${pxH}"
+    viewBox="${x0} ${y0} ${w} ${h}" xmlns="http://www.w3.org/2000/svg">${L.join("")}</svg>`;
+}
+
+// The signed turn at b, from a->b to b->c, in degrees (-180, 180]: positive
+// the way wall A turns into wall B in a clockwise room.
+function drawTurn(a, b, c) {
+  let d = Math.atan2(c[1] - b[1], c[0] - b[0]) - Math.atan2(b[1] - a[1], b[0] - a[0]);
+  while (d <= -Math.PI) d += 2 * Math.PI;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  return d * 180 / Math.PI;
+}
+
+// "2400 mm · corner 90°" — the corner the rubber band would make, read the way
+// the outline has turned so far (the engine settles the winding at the end).
+function drawReadout() {
+  const pts = DRAW.pts, at = DRAW.at;
+  if (!pts.length) return "";
+  const last = pts[pts.length - 1];
+  const len = Math.round(Math.hypot(at[0] - last[0], at[1] - last[1]));
+  let text = `${len} mm`;
+  if (pts.length >= 2 && len) {
+    const chain = pts.concat([at]);
+    let sum = 0;
+    for (let k = 0; k + 2 < chain.length; k++) sum += drawTurn(chain[k], chain[k + 1], chain[k + 2]);
+    const t = drawTurn(pts[pts.length - 2], last, at);
+    const inside = sum < 0 ? 180 + t : 180 - t;
+    text += ` · corner ${Math.round(inside * 10) / 10}°`;
+  }
+  if (DRAW.closing) text += " · click to close";
+  return text;
+}
+
+// The point under the pointer in mm, snapped: the first corner to the length
+// step, each next one along a snapped direction (free with Shift) at a length
+// in whole steps. Within 12 px of the first corner, the first corner.
+function drawPointer(e) {
+  const svg = $("drawsvg");
+  const m = svg && svg.getScreenCTM();
+  if (!m) return null;
+  const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+  const step = drawStd("draw_length_step", 10);
+  const pts = DRAW.pts;
+  DRAW.closing = false;
+  if (pts.length >= 3) {
+    const [fx, fy] = pts[0];
+    const perPx = DRAW.box[2] / svg.getBoundingClientRect().width;
+    if (Math.hypot(p.x - fx, p.y - fy) <= 12 * perPx) {
+      DRAW.closing = true;
+      return [fx, fy];
+    }
+  }
+  if (!pts.length) return [Math.round(p.x / step) * step, Math.round(p.y / step) * step];
+  const [lx, ly] = pts[pts.length - 1];
+  let ang = Math.atan2(p.y - ly, p.x - lx);
+  if (!e.shiftKey) {
+    const a = drawStd("draw_angle_step", 15) * Math.PI / 180;
+    ang = Math.round(ang / a) * a;
+  }
+  const len = Math.round(Math.hypot(p.x - lx, p.y - ly) / step) * step;
+  return [lx + len * Math.cos(ang), ly + len * Math.sin(ang)];
+}
+
+$("plan").addEventListener("pointermove", (e) => {
+  if (!DRAW || !e.target.closest("#drawsvg")) return;
+  DRAW.at = drawPointer(e);
+  drawPaint();
+});
+
+$("plan").addEventListener("click", (e) => {
+  if (!DRAW || !e.target.closest("#drawsvg")) return;
+  const q = drawPointer(e);
+  if (!q) return;
+  if (DRAW.closing) { finishDraw(true); return; }
+  const last = DRAW.pts[DRAW.pts.length - 1];
+  // the second click of a double-click lands on the corner just set: no wall
+  if (last && Math.hypot(q[0] - last[0], q[1] - last[1]) < 1) return;
+  DRAW.pts.push(q);
+  DRAW.at = q;
+  drawPaint();
+});
+
+$("plan").addEventListener("dblclick", (e) => {
+  if (!DRAW || !e.target.closest("#drawsvg")) return;
+  e.preventDefault();
+  finishDraw(false);
+});
+
+function drawKey(e) {
+  if (!DRAW || S.tab !== "room" || S.roomSub !== "plan") return;
+  if (e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+  if (e.key === "Escape") { e.preventDefault(); endDraw(); }
+  else if (e.key === "Enter") { e.preventDefault(); finishDraw(false); }
+  else if (e.key === "Backspace") {
+    e.preventDefault();
+    DRAW.pts.pop();
+    drawPaint();
+  }
+}
+
+async function finishDraw(closed) {
+  const d = DRAW;
+  if (!d || d.busy) return;
+  if (d.pts.length < (closed ? 3 : 2)) {
+    toast(closed ? "a closed room needs at least three walls" : "draw at least one wall", true);
+    return;
+  }
+  d.busy = true;
+  const r = await post("/api/room-draw", {room: S.job.room, points: d.pts, closed: closed,
+                                          name: S.job.name});
+  d.busy = false;
+  if (!r.ok) { toast(r.error, true); return; }
+  if (DRAW !== d) return;
+  S.job.room = r.room;
+  places();
+  endDraw();
+  renderRoom(true);
+  schedule();
+  toast(`${r.room.walls.length} wall${r.room.walls.length === 1 ? "" : "s"} drawn — ` +
+        `measure each one and type its length.`);
+}
+
+$("drawwalls").addEventListener("click", () => {
+  if (DRAW) endDraw();
+  else startDraw();
+});
 
 /* ---------- drag placement ------------------------------------------------
    The engine hands over every position this drag is allowed to settle on, and
@@ -5902,10 +6189,14 @@ function offWall(track, px, py) {
 function project(track, px, py) {
   const sq = track.dx * track.dx + track.dy * track.dy;
   if (!sq) return null;
-  let t = ((px - track.x1) * track.dx + (py - track.y1) * track.dy) / sq;
+  const t = Math.max(0, Math.min(1,
+    ((px - track.x1) * track.dx + (py - track.y1) * track.dy) / sq));
+  // How far from the wall ITSELF, not from the line it lies on: in an L or any
+  // room with an outside corner a wall's line runs on through the room, and the
+  // nearest line is then not the nearest wall (29 September 2026).
   const offX = track.x1 + t * track.dx - px;
   const offY = track.y1 + t * track.dy - py;
-  return {mm: Math.round(Math.max(0, Math.min(1, t)) * track.len),
+  return {mm: Math.round(t * track.len),
           away: Math.hypot(offX, offY),
           pxPerMm: Math.sqrt(sq) / track.len};
 }
@@ -5919,6 +6210,7 @@ function svgPoint(evt) {
 }
 
 $("plan").addEventListener("pointerdown", async (e) => {
+  if (DRAW) return;                        // the drawing canvas takes its own clicks
   const poly = e.target.closest(".cab");
   // Empty canvas — a wall line, a gap, the paper — is how you get the room back.
   if (!poly && S.isolate !== null) { S.isolate = null; renderPlan(); return; }
@@ -6495,6 +6787,12 @@ $("room").addEventListener("click", async (e) => {
     renderRoom(true); schedule();
     return;
   }
+  const ms = e.target.closest("[data-wmeasured]");
+  if (ms) {
+    delete S.job.room.walls[+ms.dataset.wmeasured].drawn;
+    renderRoom(true); schedule();
+    return;
+  }
   const rm = e.target.closest("[data-wrm]");
   if (rm) {
     S.job.room.walls.splice(+rm.dataset.wrm, 1);
@@ -6518,10 +6816,63 @@ $("room").addEventListener("input", (e) => {
   const i = e.target.dataset.w;
   if (i === undefined) return;
   const wk = e.target.dataset.wk;
-  rm.walls[+i][wk] = wk === "id" ? e.target.value
+  const w = rm.walls[+i];
+  if (wk === "corner_pick") {
+    // a quick pick sets the angle; "custom" opens the number beside it
+    const num = e.target.parentElement.querySelector('[data-wk="corner_end"]');
+    if (e.target.value === "custom") {
+      if (num) { num.style.display = ""; num.focus(); num.select(); }
+      return;
+    }
+    if (num) { num.style.display = "none"; num.value = e.target.value; }
+    setCorner(w, +e.target.value);
+    wallNote("");
+    schedule();
+    return;
+  }
+  if (wk === "corner_end") {
+    const v = parseFloat(e.target.value);
+    if (!(v > 0 && v < 360)) {
+      wallNote("A corner angle is between 0 and 360 degrees — 90 inside, 270 outside.");
+      return;
+    }
+    setCorner(w, v);
+    wallNote("");
+    schedule();
+    return;
+  }
+  if (wk === "length") {
+    const v = parseInt(e.target.value, 10) || 0;
+    // A negative length runs the wall backwards; it does not turn it. Refused
+    // here, at the input — the critical stays for files that carry one.
+    if (v < 0) {
+      wallNote(`Wall ${w.id}: a length cannot be negative. To turn the other way, ` +
+               `set the corner angle to 270.`);
+      return;
+    }
+    wallNote("");
+    w.length = v;
+    // a length typed is a measured length (29 September 2026); the marker
+    // goes in place, so the field being typed in keeps its focus
+    if (w.drawn) {
+      delete w.drawn;
+      const b = e.target.closest("tr").querySelector("[data-wmeasured]");
+      if (b) b.closest("td").innerHTML = "";
+    }
+    schedule();
+    return;
+  }
+  w[wk] = wk === "id" ? e.target.value
     : (parseInt(e.target.value, 10) || 0);
   schedule();
 });
+
+// 90 is the default and is not stored, so a room nobody turned writes exactly
+// what it wrote before corners could turn.
+function setCorner(w, v) {
+  if (v === 90) delete w.corner_end;
+  else w.corner_end = v;
+}
 
 /* ---------- gaps ---------------------------------------------------------- */
 
@@ -7365,6 +7716,7 @@ async function refreshJobs() {
 }
 
 function adopt(job) {
+  if (DRAW) endDraw();       // a sketch belongs to the job it was started on
   S.job = job;
   places();                  // a file saved with no room has no placements key
   markDirty(false);          // what is on screen is what is on disk

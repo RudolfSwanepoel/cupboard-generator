@@ -70,6 +70,8 @@ class Wall:
     offset_end: int = 0     # deviation from square at the end corner
     openings: List[Opening] = field(default_factory=list)
     obstructions: List[Obstruction] = field(default_factory=list)
+    corner_end: float = 90  # nominal interior angle of the corner after it (29 Sept 2026)
+    drawn: bool = False     # length drawn with the mouse, not yet measured (29 Sept 2026)
 
 @dataclass
 class Room:
@@ -102,6 +104,11 @@ from the wall face. Zero means square. Positive means the return wall opens
 away from the room; negative means it closes in.
 
 The corner angle at each end follows from `atan(offset / offset_depth)`.
+
+**Since 29 September 2026 that is the deviation from a NOMINAL angle, not from
+90.** Each corner has a nominal interior angle (`Wall.corner_end`, on the wall
+before the corner), and the offsets are the fine correction on top of it,
+measured exactly as before. See **Ruled — 29 Sept 2026 (walls at any angle)**.
 
 The app chains the walls around the room and reports the **closure error** in
 mm. A room that does not close means the measurements disagree with each other.
@@ -876,3 +883,106 @@ cut list is worse than a form that produces a right one.
     A return run reaching between B and B + t clears the opening and still stops
     the door opening, so measuring against the opening would be wrong in the
     unsafe direction.
+
+## Ruled — 29 Sept 2026 (walls at any angle, Draw walls)
+
+Brief `Claude outputs/room-walls-any-angle-brief-2026-09-29.md`, ruled by
+Rudolf. Found on Liam_Room: every corner turned the same way (90 inside,
+clockwise), so a wall could not turn back out, and a negative length was the
+only way to "turn" one — which runs the wall backwards and turns nothing.
+
+**The 22 September hold on outside corners is lifted — for the walls.** Outside
+corners and any other angle are in scope for walls. Corner units are not (4).
+
+1. **Corner entry = nominal angle + the existing offsets.** `Wall.corner_end`
+   is the interior angle of the corner after the wall, measured inside the
+   room between the two wall faces: 90 an inside corner, 270 an outside one
+   (chimney breast, step, nib), 135 / 225 a splay in and out, 180 walls in
+   line; any value strictly between 0 and 360, decimals allowed. On a closed
+   room the last wall's is the corner back to the first; on an open run the
+   last wall's is not read. Default 90, written to the job file only when it
+   is not 90 (`store.LATE_WALL_FIELDS`), so every room saved before it
+   round-trips byte for byte. The offsets are unchanged and still the fine
+   correction; the open item on the `offset_depth` default and sign stays
+   open. `room.wall_frames` turns by 180 − angle − the measured deviation
+   (`room.corner_turn`); at a nominal 90 the turn is `math.pi / 2` itself, so
+   a room of 90-degree corners comes out float for float what it always did —
+   pinned in `check_room.py` on every fixture room. Nothing downstream does
+   its own trig: plan, elevations, 3D and export all read `wall_frames` /
+   `to_world`.
+2. **Draw walls with the mouse** on Room -> Plan. A **Draw walls** button; in
+   draw mode each click sets a corner, and a rubber band shows the length and
+   the corner angle it would make. Direction snaps to
+   `Standard.draw_angle_step` (15 degrees; Shift for a free angle), length to
+   `draw_length_step` (10 mm). Click the first corner to close the room;
+   double-click or Enter finishes an open run; Esc cancels the whole drawing;
+   Backspace takes the last corner off. The corners (world plan mm — the
+   canvas's viewBox is millimetres) go to `/api/room-draw`, and
+   `room.walls_from_points` names the walls A, B, C…, rounds each length to
+   the mm, works out each corner's angle (to 0.1 degree) and puts the chain
+   clockwise: an outline drawn anticlockwise is walked the other way, a closed
+   one still starting on the first wall drawn, and nothing is said. The
+   room's name, ceiling and offset depth are kept; its walls, and their
+   openings and obstructions, are replaced. Drawing over a room with walls
+   asks first ("Replace walls A–D?", with how many items are placed and that
+   placements keep their wall letter). **Drawn lengths are a sketch**: every
+   drawn wall carries `drawn`, is marked in the Walls card, and is a CRITICAL
+   (`wall-drawn`: "wall C: drawn, not measured") until its length is typed or
+   it is ticked **measured**. The model puts wall A along +X, so a drawn room
+   is shown turned that way once it is made. Not built: dragging a corner of
+   an existing room to reshape it.
+3. **Reference lines, panelling outlines, markup: later.** Nothing built
+   towards them.
+4. **Corner units (mitre, blind) only at a nominal 90 inside corner.** The
+   corner a unit belongs in is the one at its HAND end of its wall
+   (`room.unit_corner`). In any other corner: CRITICAL `corner-unit-angle`,
+   "Corner unit at a {angle}° corner: construction not ruled.", and
+   `corner_shadow` casts no shadow there (so the "not standing in a corner"
+   warning is not said as well).
+5. **At any corner the run ends**, inside or outside; nothing special is built
+   at an outside corner. Overlaps and gaps come from real footprints.
+
+**What learnt about angles** (Part 3 of the brief, audited):
+
+- `plinth_butt_wall`: the butt applies at an inside corner (under 180) of any
+  angle, still one board thickness off the later run; at 180 and at an outside
+  corner each plinth ends at the corner.
+- Gaps: the nominal gap along the wall is unchanged. The width at the FRONT of
+  the run (`room._front_gap`) is measured against the real return wall: at a
+  nominal 90 exactly as before (the measured deviation alone); at any other
+  inside corner by the real angle, so a 100 mm gap at a 135 splay is 680 at
+  the front of a 580 run and proposes a cabinet, not a filler; at an outside
+  corner or walls in line there is no return wall in front of the run and the
+  front is the nominal. Cabinets near an inside corner can clash, and the
+  overlap check says so; nothing is auto-resolved.
+- The plan drag and a drop from the unplaced list pick the nearest WALL, not
+  the nearest wall LINE (`project` in `index.html` measures to the segment):
+  in an L a wall's line runs on through the room. The 3D `wallAt` already did.
+- Elevations: the neighbours either side are projected off their real plan
+  outlines (`return_profiles`, `return_faces`), so a 135 return is seen at its
+  angle, and a run behind an outside corner (behind this wall's face) is not
+  drawn. No change needed; pinned in `check_room.py`.
+- Plan: an obstruction on a wall at an angle is drawn as its box turned with
+  the wall (it was the axis-aligned box of its two corners). On a wall along
+  an axis the drawing is byte for byte what it was.
+- 3D: walls, floor and ceiling (three's `ShapeGeometry`, any simple polygon),
+  tiles, plaster and the Grid toggle needed nothing; the contact shadow under
+  an item on a wall at an angle is turned with it (it was the axis-aligned
+  box). `tools/ui_check_walls.py --stage 3d`.
+- Door swing, tip-up, the ceiling, overlaps: geometry already; pinned on an
+  angled room in `check_room.py` (a door hinged at a 60 corner fouls the
+  return wall, at 90 it grazes, at 135 it is clear).
+- New criticals: walls crossing each other in plan (`room-self-intersect`,
+  naming the two walls; not asked while a wall has no length), a corner angle
+  outside 0-360 in a hand-edited file (`corner-angle`; the chain turns 90
+  there meanwhile), a drawn wall (`wall-drawn`), and ruling 4's
+  (`corner-unit-angle`).
+- A negative wall length is refused at the input in the Walls card, with "to
+  turn the other way, set the corner angle to 270"; the `wall-length` critical
+  stays for files that carry one.
+
+**The Walls card** gains a **Corner** column — the corner after each wall,
+labelled `B→C`, quick picks 90 inside · 270 outside · 135 · 225 · 180 in line ·
+custom (a number); a dash on an open run's last wall — and the **drawn** marker
+with its **measured** button. "+ Wall before / after" still add walls at 90.
+The plan redraws as angles change, as it does for lengths.

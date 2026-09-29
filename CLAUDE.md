@@ -39,7 +39,9 @@ the drawers / runners / supports brief (Supports' counts, Catalogue -> Boards |
 Runners, the runner library and swap, drawer boxes in 3D) and the Drawers
 section redo (stages `layout`, `lock`, `auto`; `3d` measures the runner's
 inner member sliding), screenshots into
-`output/_checks/ui_check_drawers/`. All four are optional —
+`output/_checks/ui_check_drawers/`, and `python tools/ui_check_walls.py` walls at
+any angle and Draw walls (stages `draw`, `ell`, `corner`, `input`, `drag`, `3d`),
+screenshots into `output/_checks/ui_check_walls/`. All five are optional —
 Playwright is the only third-party package anywhere near this app, and only
 those scripts need it — and each says so and exits 0 when it is not installed.
 `ui_check_3d.py --stage look` reads the drawn colour of a board off the canvas
@@ -67,6 +69,69 @@ line, and `regen_check` says so rather than failing. Every other figure in this
 list comes out of the engine and is checked on any machine.
 
 ## Status
+
+**Walls at any angle, either direction, and Draw walls (29 September 2026,
+brief `Claude outputs/room-walls-any-angle-brief-2026-09-29.md`, ruled by
+Rudolf).** The 22 September hold on outside corners is LIFTED for the walls;
+corner units still stand only in a nominal 90 inside corner. Nothing in the
+cut list moved: benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6,
+R28,363.50); `check_all` 23 of 23; `snapshot.py --compare` against the tree
+before: identical on every job; every job file and fixture round-trips byte
+for byte. Full write-up in `docs/ROOM-LAYOUT-SPEC.md`, **Ruled — 29 Sept 2026
+(walls at any angle, Draw walls)**. The short form:
+
+1. **`Wall.corner_end`**: the nominal interior angle of the corner after the
+   wall (90 inside, 270 outside, 135 / 225 a splay, 180 in line, any value
+   strictly between 0 and 360), written only when not 90. The offsets stay the
+   fine correction. `room.corner_turn` turns the chain by 180 − angle − the
+   deviation; at 90 it is `math.pi / 2` itself, and `check_room.py` proves
+   every fixture room's frames float-for-float equal to the old turn.
+2. **Walls card**: a **Corner** column (`B→C`, quick picks 90 inside · 270
+   outside · 135 · 225 · 180 in line · custom; a dash on an open run's last
+   wall). A negative length is refused at the input ("to turn the other way,
+   set the corner angle to 270"); an angle outside 0-360 likewise.
+3. **Draw walls** on Room -> Plan: click the corners on a millimetre canvas,
+   15-degree direction snap (Shift free), 10 mm length snap (both in
+   `Standard`), click the start to close, double-click / Enter for an open run,
+   Esc cancels, Backspace undoes. `/api/room-draw` -> `room.walls_from_points`
+   names, measures and angles the walls and puts them clockwise (anticlockwise
+   drawn: walked the other way, the first wall drawn still A). Drawing over a
+   room asks "Replace walls A–D?". Every drawn wall is `drawn` — a CRITICAL
+   (`wall-drawn`) until typed or ticked **measured**. The model puts A along
+   +X, so the plan shows a drawn room turned that way.
+4. **New criticals**: `room-self-intersect` (walls crossing in plan, named in
+   pairs), `wall-drawn`, `corner-angle` (a hand-edited angle out of range),
+   `corner-unit-angle` — ruling 4: "Corner unit at a 135° corner: construction
+   not ruled.", for a mitre or blind unit whose hand-end corner is not a
+   nominal 90; no shadow is cast there.
+5. **What learnt about angles**: the plinth butts only at inside corners
+   (under 180, any angle); a gap meeting an angled inside corner is measured
+   at the front against the real return wall (135: 100 at the wall is 680 at
+   the front of a 580 run — a cabinet, not a filler), at an outside corner
+   the run just ends; the plan drag picks the nearest wall SEGMENT, not the
+   nearest wall line (an L's inner wall line runs through the room); an
+   obstruction on an angled wall draws turned; the 3D contact shadow on an
+   angled wall turns with the item. Elevations, 3D walls / floor / ceiling /
+   tiles / Grid, door swing, tip-up, ceiling and overlaps were already
+   geometry and are pinned on angled rooms.
+6. **Checks**: `check_room.py` `angles()`; `tools/ui_check_walls.py` (new,
+   Playwright: draw a 4-wall room and close it, an L with an outside corner
+   drawn anticlockwise, an open run by double-click, 270 in the Walls card
+   turning the plan, the input refusals, a cabinet dragged onto a 45-degree
+   wall, and the L + splay in 3D) passes every stage. `ui_check_attached`
+   and `ui_check_drawers` pass; `ui_check_restructure` but for its three
+   pre-existing `attach` lines; `ui_check_3d` passed on rerun — once, run in
+   parallel with other scripts, f6's "and nothing was recomputed for it"
+   (Esc during a 3D drag) read `sceneStale` true, and passed four runs alone.
+
+**For Rudolf:** (a) Liam_Room is not saved or touched — set its lengths
+positive and its corners in the new Corner column; (b) at an angled inside
+corner the gap's front width is the real one (item 5) — the brief said gap
+sizes along the wall stay as they are, and they do; say if the front should
+stay on the offsets alone instead; (c) the plinth deduction at a 135 corner
+is still one board thickness, as ruled — a butt at a splay may want a mitre
+cut instead, which is not modelled; (d) a drawn room is re-oriented with
+wall A along +X once made.
 
 **The 3D view drawn realistically — Round 2 (29 September 2026, Rudolf's notes
 `Claude outputs/3d-realism-round2-notes-2026-09-29.md`, reference photo
@@ -1032,6 +1097,8 @@ dirty. Nothing else about either changed.
 | + Face | Drawers | **+ Drawer** (a new row: Share, box Auto) |
 | The three hint paragraphs | Drawers | **Gone**; one help line under each control |
 | Outline section | every cupboard | **Plan shape**, only on a `template "none"` cabinet or one with a footprint |
+| A wall turning the other way | a negative length (ran the wall backwards) | **Corner** column in Room -> Plan's Walls card: the angle of the corner after each wall, `B→C`, 90 / 270 / 135 / 225 / 180 / custom (walls brief, 29 Sept 2026) |
+| Entering walls | typed, one row at a time | typed as before, **or Draw walls** on Room -> Plan (click the corners); drawn lengths marked **drawn** in the Walls card until measured |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**
@@ -1287,7 +1354,10 @@ against skipping it when no back panel is cut. Do not change it.
 Rulings recorded with this brief: **blind corners are intended mainly for base
 and wall-hung units; tall corners are mitres. External corners** (outside
 angles, peninsulas, walls not at 90°) **are awaiting Rudolf's sketch of his own
-kitchen — build nothing towards them yet.**
+kitchen — build nothing towards them yet.** **Lifted for the WALLS on 29
+September 2026** (walls at any angle — see Status): outside corners and any
+angle are in scope for walls; corner units still stand only in a nominal 90
+inside corner (ruling 4).
 
 **A blind corner's panel is INSET, selectable, and edged on one robust edge
 (22 September 2026, Rudolf's final ruling; brief in
@@ -2035,7 +2105,8 @@ cabinetgen/nest.py         guillotine nesting + sheet layout SVGs
 cabinetgen/render.py       SVG drawings: side-by-side elevation, plan, per-wall elevations
 cabinetgen/scene.py        the 3D scene, built here from room.solid_parts and only DRAWN
                            in the browser. Nothing reads it back.
-cabinetgen/room.py         walls, corners, to_world. The only trigonometry.
+cabinetgen/room.py         walls, corners (a nominal angle each, 29 Sept 2026), to_world,
+                           walls_from_points (Draw walls). The only trigonometry.
 cabinetgen/store.py        job files: JSON save / load
 cabinetgen/export_plaza.py Plazaboard CSV + costing off the real rate card
 run_app.py                 starts the local server, opens the window (maximised); under
@@ -2073,7 +2144,10 @@ tools/check_launch.py      the launcher: no-console logging, "already running", 
                            anywhere else "skipped: Windows only", exit 0
 tools/regen_check.py       the regression check above
 tools/check_examples.py    verifies the worked examples in docstrings are true
-tools/check_room.py        room geometry: closure, corners, to_world
+tools/check_room.py        room geometry: closure, corners, to_world; walls at any angle
+                           (angles(): all-90 float-identical, L / hexagon / splay / bay
+                           close, crossing walls, drawn walls, ruling 4, plinth butt,
+                           gaps, elevations, 3D floor, swing, tip-up)
 tools/check_fillers.py     gap detection, taper, scribe, filler panels
 tools/check_plinth.py      runs, butt joints, long-run splits, plinth panels
 tools/check_drag.py        overlaps, snap targets both axes, swings, pull-outs;
@@ -2110,6 +2184,8 @@ tools/ui_check_3d.py       the 3D view in the running app, with a real mouse (Pl
 tools/ui_shots_3d.py       the four 3D screenshots the realism brief compares, before and after
                            (Playwright), into Claude outputs/3d-realism-screenshots/
 tools/ui_check_attached.py attached panels in the running app (Playwright)
+tools/ui_check_walls.py    walls at any angle and Draw walls in the running app (Playwright),
+                           screenshots into output/_checks/ui_check_walls/
 tools/ui_check_restructure.py  the UI restructure in the running app (Playwright),
                            with screenshots into output/_checks/ui_check_restructure/
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
@@ -3736,6 +3812,12 @@ that drawing you cannot afford to miss.
 
 `/api/plan` is separate from `/api/compute` on purpose: flipping a layer should
 cost a redraw, not a re-nest.
+
+**Every corner has a nominal interior angle** (29 September 2026):
+`Wall.corner_end` on the wall before it, 90 inside, 270 outside, anything
+strictly between 0 and 360; the offsets are the fine correction on top, as
+ever. `room.corner_turn` is the one place the turn is worked out. See the
+Status entry and `docs/ROOM-LAYOUT-SPEC.md`, **Ruled — 29 Sept 2026**.
 
 **Walls are added at either end of the sequence** — `room.add_wall(rm, "start" |
 "end", length)`, behind `/api/room-extend` and the "+ Wall before / after" buttons.
