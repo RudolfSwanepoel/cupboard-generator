@@ -102,7 +102,7 @@ scripts pass. What it is:
    dropdown lists the project's boards offering PVC by their Edging Name, blank
    = "(the exterior's name)", with the engine's name beside it
    (`edging.drawer_box.rows` on `/api/compute`). Inner drawers the same.
-   **Proposed, not ruled — change it if Rudolf wants it elsewhere.**
+   **Ruled by Rudolf, 29 September 2026.**
 3. **What moved.** October: 118, 119, 418, 419, 2718, 2719, 3018, 3019
    `PVC WHITE` -> `PVC BROOKHILL` (PVC BROOKHILL 167.082 -> 199.152 m, PVC
    WHITE 33.484 -> 1.414 m — the white-edged supports of 27-29 only); the
@@ -127,11 +127,12 @@ scripts pass. What it is:
    wins, no PVC is `EDGING`, the file round trip, the slot, the scan, the swap,
    the 3D band, October's boxes) and `ui_check_drawers.py --stage boxedge`.
 
-**Report back — open, for Rudolf.** (a) The Box edging dropdown sits on its
-own row under each drawer rather than as a column — confirm. (b) Test.json's
-total moves R6.75 through the per-name metre round-up. (c) An exterior board
-with no PVC now raises two EDGING criticals on a drawer cabinet (carcass
-fronts, and the drawer boxes) — both are real and name different parts.
+**Ruled by Rudolf, 29 September 2026 — all three accepted:** (a) the Box
+edging dropdown stays on its own row under each drawer; (b) Test.json's total
+moving R6.75 (R11,250.75) through the per-name metre round-up is right; (c) an
+exterior board with no PVC raising two EDGING criticals on a drawer cabinet
+(carcass fronts, and the drawer boxes) is right — both are real and name
+different parts.
 
 **The Plazaboard CSV: right columns, right numbers, right edging names (28
 September 2026, brief `Claude outputs/plaza-csv-columns-brief-2026-09-28.md`,
