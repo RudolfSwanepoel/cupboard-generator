@@ -1370,7 +1370,55 @@ def look_fronts(page):
     seam("4:drawer:0", "4:drawer:1", "cabinet 4's drawers 1 and 2")
     seam("4:drawer:2", "4:drawer:3", "cabinet 4's drawers 3 and 4")
     seam("7:drawer:0", "7:drawer:1", "cabinet 7's drawers 1 and 2 (one board)")
+    # with AO on the lines are drawn after the occlusion, so a seam still reads
+    page.evaluate("() => V3D.tune({ao: true})")
+    seam("11:door:0", "11:door:1", "AO on, cabinet 11's pair (GREY)")
+    page.evaluate("() => { V3D.tune({ao: false}); V3D.setDisplay('edges'); }")
+    look_room(page, sc)
+
+
+def look_room(page, sc):
+    """Round 2, item 5 (29 September 2026): the room. In the Shaded modes the
+    floor is pale tiles, the walls a warm plaster grey; the drawing grid is on
+    with edges and in X-ray, off in Shaded, and the Grid button flips the one
+    in force."""
+    page.evaluate("() => { V3D.select(null); V3D.setDisplay('edges'); V3D.viewHome(false); }")
+    settle(page)
+    grids = {}
+    for mode in ("edges", "shaded", "xray"):
+        page.evaluate(f"() => V3D.setDisplay('{mode}')")
+        grids[mode] = page.evaluate("() => V3D.state().grid")
+    check("the drawing grid by default: on with edges and in X-ray, off in Shaded", grids,
+          {"edges": True, "shaded": False, "xray": True})
+    page.evaluate("() => V3D.setDisplay('shaded')")
+    page.click("#v3dbar button:has-text('Grid')")
+    check("Shaded: the Grid button turns it on", page.evaluate("() => V3D.state().grid"), True)
+    page.click("#v3dbar button:has-text('Grid')")
+    check("and off again, and the other modes keep theirs",
+          (page.evaluate("() => V3D.state().grid"),
+           page.evaluate("() => { V3D.setDisplay('edges'); return V3D.state().grid; }")), (False, True))
+    settle(page)
+    time.sleep(0.3)
+    ox, oy = viewport_origin_of(page, "#v3dview canvas")
+    room = sc["room"]
+    wall_b = next(w for w in room["walls"] if w["id"] == "B")
+
+    def at(x, y, z):
+        pr = page.evaluate("([x, y, z]) => V3D.project(x, y, z)", [x, y, z])
+        return page.evaluate("([x, y]) => V3D.pixel(x, y)", [ox + pr["x"], oy + pr["y"]])
+
+    # the middle of a tile out on the open floor, and wall B high up beyond its run
+    floor = at(1500, 2100, 0)
+    wall = at(wall_b["start"][0], 2850, room["top"] - 300)
+    check_true("the floor is a pale tile", min(floor) >= 205 and max(floor) - min(floor) <= 12, f"pixel {floor}")
+    check_true("the walls are a warm plaster grey, darker than the floor",
+               wall[0] - wall[2] >= 8 and 150 <= wall[1] <= 225 and wall[1] < floor[1], f"pixel {wall}")
+    page.evaluate("() => V3D.setDisplay('xray')")
+    settle(page)
+    xw = at(wall_b["start"][0], 2850, room["top"] - 300)
+    check_true("X-ray: the walls are the drawing's paper again", xw[0] - xw[2] < 8 and xw[1] > wall[1], f"pixel {xw}")
     page.evaluate("() => V3D.setDisplay('edges')")
+    settle(page)
 
 
 def viewport_origin_of(page, selector):

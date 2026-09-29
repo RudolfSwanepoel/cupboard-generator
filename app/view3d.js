@@ -30,9 +30,18 @@ CameraControls.install({THREE: THREE});
 const PAPER = {
   bgTop: 0xf4f5f2,       // the viewport: a very slight top-to-bottom gradient (29 Sept 2026)
   bgBottom: 0xe6e8e3,
-  floor: 0xe4e6e0,       // the floor slab
-  wall: 0xf4f4f1,        // wall planes
+  floor: 0xe4e6e0,       // the floor slab, as a drawing (X-ray)
+  wall: 0xf4f4f1,        // wall planes, as a drawing (X-ray)
   ceiling: 0xf7f7f4,
+  // the room in the Shaded modes (Round 2, 29 September 2026), off the
+  // reference kitchen: pale floor tiles, warm plaster walls, an off-white ceiling
+  // (a floor faces the key and the ceiling's light squarely and is drawn about
+  // 1.4 times its colour: these two are stated darker than they read, which
+  // is PAPER.floor lightened — measured #ecece7 on screen)
+  floorTile: 0xcdcdc8,
+  tileJoint: 0xb0b0aa,   // the faint joint between 600 mm tiles
+  plaster: 0xcbc3b6,
+  ceilingShaded: 0xf5f4ef,
   gridMinor: 0xd5d9d2,
   gridMajor: 0xb9beb5,
   edgeWall: 0x2a2d2b,    // heaviest
@@ -103,9 +112,11 @@ const LOOK = {
   front: {opacity: 1, angle: 1, width: 1.25},   // a FRONT's perimeter: every edge, full strength, in every display mode (px)
   outline: {selected: 2.0, hover: 1.4},   // the selection is an OUTLINE (px), not a tint
   grid: {minor: 0.22, major: 0.4},
+  tile: {size: 600, joint: 4},         // the floor's tiles in the Shaded modes, mm
 };
 
 const PIXEL_RATIO_CAP = 2;
+const LINES = 1;             // the layer every paper line is on (see `draw`)
 const CLICK_PX = 4;          // press and release within this is a click
 const GHOST = 0.30;          // the house opacity for "not the focus"
 const XRAY = 0.35;
@@ -156,6 +167,9 @@ const V = {
   frontsOpen: false,
   runners: true,       // drawer runners drawn (the Runners toggle)
   ao: true,            // ambient occlusion (the AO toggle); never under X-ray
+  // the drawing grid, per display mode (the Grid toggle flips the one in
+  // force): a drawing's by default, so on with edges and in X-ray, off in Shaded
+  gridOn: {edges: true, xray: true, shaded: false},
   clearances: false,
   sel: null,           // selected cabinet number
   hover: null,         // {number, id}
@@ -314,9 +328,36 @@ function makeControls(camera, dom, orthographic) {
 // One frame, as the viewport shows it: the scene, then the ambient occlusion
 // over it. `render`, the snapshot and the pixel read all come through here,
 // so a snapshot carries what is on screen.
+//
+// The occlusion is multiplied over everything on screen, and in a 3 mm gap
+// between two fronts it is dark and a pixel wide: a front's line drawn under
+// it came out dashed on a dark board. So every paper line is on its own layer
+// (`paper`), and with AO on the lines are drawn AFTER the occlusion, against
+// the depth the boards left: a line is as written whether AO is on or off.
 function draw() {
-  V.renderer.render(V.scene, V.camera);
-  if (aoActive()) drawAO();
+  const cam = V.camera;
+  if (!aoActive()) {
+    cam.layers.enableAll();
+    V.renderer.render(V.scene, cam);
+    return;
+  }
+  cam.layers.set(0);
+  V.renderer.render(V.scene, cam);
+  drawAO();
+  const background = V.scene.background, clear = V.renderer.autoClear;
+  V.scene.background = null;
+  V.renderer.autoClear = false;
+  cam.layers.set(LINES);
+  V.renderer.setRenderTarget(null);
+  V.renderer.render(V.scene, cam);
+  V.renderer.autoClear = clear;
+  V.scene.background = background;
+  cam.layers.enableAll();
+}
+
+function paper(line) {
+  line.layers.set(LINES);
+  return line;
 }
 
 function render() {
@@ -954,6 +995,7 @@ function buildPart(part) {
   }
   edges.userData.base = edgeColourFor(part.role);
   edges.userData.front = front;
+  paper(edges);
   mesh.add(edges);
   mesh.userData.edges = edges;
   // a door rotates about its hinge, a drawer face slides out: keep the rest
@@ -1086,8 +1128,8 @@ function wallMesh(w, top, closed) {
   mesh.receiveShadow = true;
   mesh.userData = {wall: w.id, kind: "wall", inward: toRender(w.normal[0], w.normal[1], 0),
                    at: toRender(w.start[0], w.start[1], 0)};
-  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 1),
-    new THREE.LineBasicMaterial({color: PAPER.edgeWall, toneMapped: false}));
+  const edges = paper(new THREE.LineSegments(new THREE.EdgesGeometry(geom, 1),
+    new THREE.LineBasicMaterial({color: PAPER.edgeWall, toneMapped: false})));
   edges.applyMatrix4(m);
   mesh.userData.edges = edges;
   return [mesh, edges];
@@ -1136,8 +1178,8 @@ function buildShell(payload) {
     floor.userData.kind = "floor";
     floor.receiveShadow = true;
     shell.add(floor);
-    const floorEdge = new THREE.LineSegments(new THREE.EdgesGeometry(floor.geometry, 1),
-      new THREE.LineBasicMaterial({color: PAPER.edgeWall, toneMapped: false}));
+    const floorEdge = paper(new THREE.LineSegments(new THREE.EdgesGeometry(floor.geometry, 1),
+      new THREE.LineBasicMaterial({color: PAPER.edgeWall, toneMapped: false})));
     shell.add(floorEdge);
     for (const w of room.walls) {
       const [mesh, edges] = wallMesh(w, room.top, room.closed);
@@ -1170,7 +1212,56 @@ function buildShell(payload) {
   V.root.add(shell);
   V.shell = shell;
   buildContacts(payload);
+  applyRoomLook();
   applyWalls();
+}
+
+// The floor's tiles: one tile and its joint as a picture, repeated every
+// LOOK.tile.size mm (a floor's UVs are its plan millimetres).
+const TILE_PX = 256;
+function tileTexture() {
+  if (V.tileTex) return V.tileTex;
+  const c = document.createElement("canvas");
+  c.width = c.height = TILE_PX;
+  const g = c.getContext("2d");
+  const css = (n) => "#" + n.toString(16).padStart(6, "0");
+  g.fillStyle = css(PAPER.tileJoint);
+  g.fillRect(0, 0, TILE_PX, TILE_PX);
+  const j = Math.max(1, LOOK.tile.joint / LOOK.tile.size * TILE_PX / 2);
+  g.fillStyle = css(PAPER.floorTile);
+  g.fillRect(j, j, TILE_PX - 2 * j, TILE_PX - 2 * j);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1 / LOOK.tile.size, 1 / LOOK.tile.size);
+  tex.anisotropy = V.renderer.capabilities.getMaxAnisotropy();
+  V.tileTex = tex;
+  return tex;
+}
+
+// The room as a room in the Shaded modes — tiles, plaster, an off-white
+// ceiling — and as a drawing in X-ray: the paper floor and walls it had.
+function applyRoomLook() {
+  if (!V.shell) return;
+  const drawn = V.display === "xray";
+  for (const m of V.shell.children) {
+    const kind = m.userData.kind;
+    if (!m.isMesh || !(kind === "floor" || kind === "wall" || kind === "ceiling")) continue;
+    if (kind === "floor") {
+      m.material.map = drawn ? null : tileTexture();
+      m.material.color.set(drawn ? PAPER.floor : PAPER.white);
+      // a plane's own UVs run 0..1: a floor with no room is laid in millimetres too
+      if (m.geometry.type === "PlaneGeometry" && !m.userData.uvMm) {
+        const uv = m.geometry.attributes.uv, p = m.geometry.parameters;
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * p.width, uv.getY(i) * p.height);
+        uv.needsUpdate = true;
+        m.userData.uvMm = true;
+      }
+    } else if (kind === "wall") m.material.color.set(drawn ? PAPER.wall : PAPER.plaster);
+    else m.material.color.set(drawn ? PAPER.ceiling : PAPER.ceilingShaded);
+    m.material.needsUpdate = true;
+  }
+  if (V.grid) V.grid.visible = !!V.gridOn[V.display];
 }
 
 // A faint contact shadow under every item standing on the floor, or a leg
@@ -1261,6 +1352,7 @@ function computeBBox() {
   V.grid = makeGrid(Math.max(size * 1.5, 6000));
   const c = b.getCenter(new THREE.Vector3());
   V.grid.position.set(Math.round(c.x / 1000) * 1000, Math.round(c.y / 1000) * 1000, -1);
+  V.grid.visible = !!V.gridOn[V.display];
   V.scene.add(V.grid);
   fitKey();
 }
@@ -1363,7 +1455,7 @@ function outlineMesh(mesh, kind) {
     const g = src.userData.front
       ? new LineSegmentsGeometry().setPositions(src.geometry.attributes.instanceStart.data.array)
       : new LineSegmentsGeometry().fromEdgesGeometry(src.geometry);
-    ol = new LineSegments2(g, outlineMaterial(kind, mesh.userData.ghost));
+    ol = paper(new LineSegments2(g, outlineMaterial(kind, mesh.userData.ghost)));
     ol.computeLineDistances();
     ol.renderOrder = 2;
     mesh.add(ol);
@@ -1514,7 +1606,7 @@ function updateDimLines() {
   const mat = new THREE.LineBasicMaterial({color: PAPER.accent});
   const line = (a, c) => {
     const geo = new THREE.BufferGeometry().setFromPoints([a, c]);
-    g.add(new THREE.Line(geo, mat));
+    g.add(paper(new THREE.Line(geo, mat)));
   };
   // three lines along the box's own edges at the near-bottom corner, and the
   // figures — room.geometry's, sent by the server, never declared — beside them
@@ -2105,6 +2197,8 @@ function buildBar() {
                            onclick: () => { V.runners = !V.runners; applyRunners(); updateBar(); }});
   B.ao = h("button", {text: "AO", title: "ambient occlusion: the soft dark where boards meet (off under X-ray)",
                       onclick: () => { V.ao = !V.ao; updateBar(); requestRender(); }});
+  B.grid = h("button", {text: "Grid", title: "the drawing grid: 100 mm and 1 m (on with edges and in X-ray, off in Shaded, until changed)",
+                        onclick: () => { V.gridOn[V.display] = !V.gridOn[V.display]; applyRoomLook(); updateBar(); requestRender(); }});
   B.clear = h("button", {text: "Clearances", title: "C: door swings and drawer pull-outs", onclick: () => toggleClearances()});
   B.walls = h("button", {text: "Walls: auto ▾", title: "which walls are drawn"});
   B.ceiling = h("button", {text: "Ceiling", title: "draw the ceiling", onclick: () => { V.ceiling = !V.ceiling; applyWalls(); updateBar(); }});
@@ -2117,9 +2211,9 @@ function buildBar() {
   if (OPTS.single) {
     // the one cabinet alone: nothing to layer, isolate, wall off or clear
     B.layers = {};
-    bar.append(B.views, B.proj, B.display, B.ao, B.fit, sep(), B.fronts, B.runners, B.labels, sep(), B.help);
+    bar.append(B.views, B.proj, B.display, B.ao, B.grid, B.fit, sep(), B.fronts, B.runners, B.labels, sep(), B.help);
   } else {
-    bar.append(B.views, B.proj, B.display, B.ao, B.fit, sep(),
+    bar.append(B.views, B.proj, B.display, B.ao, B.grid, B.fit, sep(),
                B.layers.base, B.layers.wall, B.layers.tall, B.layers.panels, sep(),
                B.fronts, B.runners, B.clear, B.walls, B.ceiling, B.labels, B.isolate, sep(), B.snap, B.help);
   }
@@ -2160,6 +2254,7 @@ function updateBar() {
   B.runners.classList.toggle("on", V.runners);
   B.ao.classList.toggle("on", V.ao && V.display !== "xray");
   B.ao.disabled = V.display === "xray" || !V.aoPass;
+  B.grid.classList.toggle("on", !!V.gridOn[V.display]);
   B.clear.classList.toggle("on", V.clearances);
   B.isolate.classList.toggle("on", V.isolate !== null);
   B.isolate.disabled = V.isolate === null && V.sel === null;
@@ -2174,6 +2269,7 @@ function setDisplay(mode) {
     if (contact) contact.visible = grp.visible && itemShown(grp.userData.item) && mode !== "xray";
   }
   if (V.roomParts) V.roomParts.children.forEach(applyDisplay);
+  applyRoomLook();
   shadowsDirty();
   updateBar();
   requestRender();
@@ -2416,8 +2512,8 @@ function buildOverlays() {
         toneMapped: false}));
       mesh.renderOrder = 3;
       mesh.userData = {overlay: true, cabinet: sw.cabinet, kind: sw.kind, clash: sw.clash};
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 30),
-        new THREE.LineBasicMaterial({color: colour, transparent: true, opacity: 0.7, toneMapped: false}));
+      const edges = paper(new THREE.LineSegments(new THREE.EdgesGeometry(geom, 30),
+        new THREE.LineBasicMaterial({color: colour, transparent: true, opacity: 0.7, toneMapped: false})));
       g.add(mesh, edges);
     }
   }
@@ -2428,7 +2524,7 @@ function buildOverlays() {
       const rb = new THREE.Box3().setFromObject(grp).expandByScalar(6);   // render frame
       const box = new THREE.Box3(new THREE.Vector3(rb.min.x, -rb.max.y, rb.min.z),
                                  new THREE.Vector3(rb.max.x, -rb.min.y, rb.max.z));   // room frame
-      const helper = new THREE.Box3Helper(box, PAPER.overlap);
+      const helper = paper(new THREE.Box3Helper(box, PAPER.overlap));
       helper.material.toneMapped = false;
       helper.userData = {overlay: true, overlap: true, cabinet: n};
       g.add(helper);
@@ -3054,7 +3150,7 @@ function state() {
   return {sel: V.sel, isolate: V.isolate, layers: V.layers ? [...V.layers] : null, display: V.display,
           walls: V.walls, labels: V.labels, ortho: V.ortho_on, fronts: V.frontsOpen, runners: V.runners,
           clearances: V.clearances, hidden: [...V.hidden], picked: V.picked || null,
-          ao: aoActive()};
+          ao: aoActive(), grid: !!V.gridOn[V.display]};
 }
 
 function camera() {
@@ -3184,6 +3280,7 @@ function dispose() {
   if (V.shell) disposeObject(V.shell);
   dropLooks({}, true);
   if (V.aoPass) V.aoPass.dispose();
+  if (V.tileTex) V.tileTex.dispose();
   if (V.contacts) V.contacts.children.forEach((m) => { m.geometry.dispose(); m.material.alphaMap.dispose(); m.material.dispose(); });
   if (V.env) V.env.dispose();
   if (V.background) V.background.dispose();
