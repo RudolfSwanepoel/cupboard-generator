@@ -16,6 +16,9 @@
 
 import * as THREE from "three";
 import CameraControls from "camera-controls";
+import {LineSegments2} from "three/addons/lines/LineSegments2.js";
+import {LineSegmentsGeometry} from "three/addons/lines/LineSegmentsGeometry.js";
+import {LineMaterial} from "three/addons/lines/LineMaterial.js";
 
 CameraControls.install({THREE: THREE});
 
@@ -24,7 +27,8 @@ CameraControls.install({THREE: THREE});
    (tools/check_colour.py holds it to that). None of these is a board: every
    board is drawn in the look the server sends, off render.board_look.        */
 const PAPER = {
-  bg: 0xeef0ec,          // the viewport
+  bgTop: 0xf4f5f2,       // the viewport: a very slight top-to-bottom gradient (29 Sept 2026)
+  bgBottom: 0xe6e8e3,
   floor: 0xe4e6e0,       // the floor slab
   wall: 0xf4f4f1,        // wall planes
   ceiling: 0xf7f7f4,
@@ -53,9 +57,29 @@ const PAPER = {
   runner: 0x8d9398,      // a drawer runner's outer channel: hardware, not a board — plain grey
   runnerInner: 0xb4b9bd, // its inner member, a tone lighter so the two read apart
   white: 0xffffff,       // lights
-  ground: 0x8f8f86,      // hemisphere light, from below
   cubeGround: 0x999999,
   none: 0x000000,        // emissive off, and a transparent clear
+};
+
+/* ---------- the look: light, surface and line figures ---------------------------
+   The 3D realism brief, Round 1 (29 September 2026). LOOK is the one place a
+   lighting, material or line figure is stated, as PAPER is for colours. A
+   board's colour still comes off the server (render.board_look); what is
+   here is how it is LIT and what its surface is. The exposure is set so that
+   a plain board's face, unselected, in the default view, renders within a few
+   units of its swatch hex — checked in ui_check_3d.py --stage look.        */
+const LOOK = {
+  exposure: 1.0,          // NeutralToneMapping exposure (tuned below, see the Status entry)
+  environment: 1.0,       // the environment's intensity: the diffuse floor and the reflections
+  sky: {ceiling: 1.2, wall: 1.0, floor: 0.5},   // the neutral room the environment is: radiance per face
+  key: 0.4,               // the one directional light, for form; irradiance = intensity × cos
+  board: {roughness: 0.45, metalness: 0, clearcoat: 0.12, clearcoatRoughness: 0.5},   // melamine
+  tape: {roughness: 0.45, metalness: 0, clearcoat: 0.12, clearcoatRoughness: 0.5},    // an edging band
+  runner: {roughness: 0.45, metalness: 0.3},                                          // hardware: grey
+  room: {roughness: 0.9, metalness: 0},                                               // floor, walls, ceiling: matte
+  edge: {opacity: 0.55, angle: 20},   // Shaded + edges: only where faces meet at an angle, and quieter
+  outline: {selected: 2.0, hover: 1.4},   // the selection is an OUTLINE (px), not a tint
+  grid: {minor: 0.22, major: 0.4},
 };
 
 const PIXEL_RATIO_CAP = 2;
@@ -92,7 +116,10 @@ const V = {
   groups: new Map(),   // cabinet number -> THREE.Group, userData.hash
   roomParts: null,     // plinths and fillers
   shell: null,         // floor, walls, ceiling, obstructions
-  textures: new Map(), // `${board}:${rot}` -> Texture
+  textures: new Map(), // `${board}:${rot}` -> Texture, a rotated clone of the board's picture
+  pictures: new Map(), // board -> {tex, failed}: the picture itself, loaded once
+  materials: new Map(),// the shared materials, one per board per variant (see boardMaterial)
+  env: null, background: null,
   pickables: [],       // meshes a ray may hit (parts)
   bbox: new THREE.Box3(),
   // view settings — browser state, never written to the job
@@ -183,8 +210,12 @@ function makeRenderer() {
   const r = new THREE.WebGLRenderer({antialias: true, alpha: false,
                                      powerPreference: "high-performance"});
   r.setPixelRatio(Math.min(window.devicePixelRatio || 1, PIXEL_RATIO_CAP));
-  r.setClearColor(PAPER.bg, 1);
+  r.setClearColor(PAPER.bgBottom, 1);
   r.outputColorSpace = THREE.SRGBColorSpace;
+  // Physically based light needs a tone map; Neutral (Khronos PBR Neutral)
+  // compresses the top without tinting, so a board's hue is its hue.
+  r.toneMapping = THREE.NeutralToneMapping;
+  r.toneMappingExposure = LOOK.exposure;
   const canvas = r.domElement;
   canvas.tabIndex = 0;                                   // shortcuts need focus
   canvas.addEventListener("webglcontextlost", (e) => {
@@ -308,19 +339,72 @@ function resize() {
   V.ortho.top = half / aspect;
   V.ortho.bottom = -half / aspect;
   V.ortho.updateProjectionMatrix();
+  for (const m of V.materials.values()) if (m.userData.outline) m.resolution.set(w, hh);
   requestRender();
 }
 
 /* ---------- lights and grid ------------------------------------------------- */
 
+// The diffuse light and the reflections come from a neutral image-based
+// environment, pre-filtered once through a PMREMGenerator: a plain grey room
+// — a box whose ceiling, walls and floor are the radiances in LOOK.sky, the
+// four walls alike — so a front reads the same whichever wall it stands on.
+// (three's own RoomEnvironment was measured first, on 29 September 2026: a
+// studio set with one bright side, 3.9 : 1.0 : 0.9 : 1.3 across the four
+// horizontal directions, so a cabinet's colour would have depended on its
+// wall; it is not used.) Turned so the box's ceiling is our +Z; one
+// directional key light gives the form. No hemisphere light any more.
+function makeEnvironment(renderer, scene) {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const room = new THREE.Scene();
+  const faces = [LOOK.sky.wall, LOOK.sky.wall, LOOK.sky.ceiling, LOOK.sky.floor,   // +x -x +y -y
+                 LOOK.sky.wall, LOOK.sky.wall];                                      // +z -z
+  const mats = faces.map((v) => {
+    const m = new THREE.MeshBasicMaterial({side: THREE.BackSide});
+    m.color.setRGB(v, v, v, THREE.LinearSRGBColorSpace);   // a radiance, not a paper colour
+    return m;
+  });
+  const box = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10), mats);
+  room.add(box);
+  const env = pmrem.fromScene(room, 0.1).texture;
+  box.geometry.dispose();
+  mats.forEach((m) => m.dispose());
+  pmrem.dispose();
+  scene.environment = env;
+  scene.environmentIntensity = LOOK.environment;
+  // the box's up is +Y; ours is +Z (measured: this turn puts the ceiling over the tops)
+  scene.environmentRotation.set(Math.PI / 2, 0, 0);
+  return env;
+}
+
 function makeLights() {
   const g = new THREE.Group();
-  const hemi = new THREE.HemisphereLight(PAPER.white, PAPER.ground, 1.15);
-  hemi.position.set(0, 0, 1);
-  const key = new THREE.DirectionalLight(PAPER.white, 1.0);
+  const key = new THREE.DirectionalLight(PAPER.white, LOOK.key);
   key.position.set(-0.5, -0.8, 1.0);
-  g.add(hemi, key);
+  V.key = key;
+  g.add(key);
   return g;
+}
+
+// The background: a slight gradient, PAPER.bgTop over PAPER.bgBottom, as a
+// 1 x 64 canvas the renderer draws as a full-screen plane. Tagged sRGB so it
+// is neither tone mapped nor converted: the two colours land as they are.
+function makeBackground() {
+  const c = document.createElement("canvas");
+  c.width = 1;
+  c.height = 64;
+  const g = c.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, 0, 64);
+  grad.addColorStop(0, "#" + PAPER.bgTop.toString(16).padStart(6, "0"));
+  grad.addColorStop(1, "#" + PAPER.bgBottom.toString(16).padStart(6, "0"));
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 1, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  return tex;
 }
 
 function makeGrid(size) {
@@ -333,92 +417,225 @@ function makeGrid(size) {
   for (const gh of [minor, major]) {
     gh.rotation.x = Math.PI / 2;
     gh.material.transparent = true;
-    gh.material.opacity = gh === major ? 0.55 : 0.35;
+    gh.material.opacity = gh === major ? LOOK.grid.major : LOOK.grid.minor;
     gh.material.depthWrite = false;
+    gh.material.toneMapped = false;
     g.add(gh);
   }
   g.position.z = -1;
   return g;
 }
 
-/* ---------- looks: materials and textures ------------------------------------ */
+/* ---------- looks: materials and textures ------------------------------------
+   One material per board, shared by every part cut from it (the brief's rule
+   2), in three variants — solid, ghost, x-ray — so a part changes its look by
+   being handed another shared material, never by having one mutated. A
+   board's picture is loaded ONCE per board and turned onto each part's grain
+   through a clone that shares the image. Everything lives in V.materials /
+   V.pictures / V.textures and is dropped when its board leaves the job.   */
 
-// A texture for one board turned by `rot` radians, made once and shared by
-// every part that needs it. The picture is asked for at /pictures/<name>; a
-// picture that fails to load leaves the part its colour.
-function textureFor(board, rot) {
+function variantOf(mat, variant) {
+  if (variant === "xray") { mat.transparent = true; mat.opacity = XRAY; mat.depthWrite = false; }
+  else if (variant === "ghost") { mat.transparent = true; mat.opacity = GHOST; mat.depthWrite = true; }
+  else { mat.transparent = false; mat.opacity = 1; mat.depthWrite = true; }
+  mat.userData.shared = true;             // never disposed with a mesh
+  return mat;
+}
+
+function cachedMaterial(key, make) {
+  let m = V.materials.get(key);
+  if (!m) { m = make(); V.materials.set(key, m); }
+  return m;
+}
+
+// The picture of a board, fetched once; its rotated variants come off
+// `pictureFor`. Until it lands the part keeps its colour, and if it never
+// lands (no file, a bad file) the colour is what stays: nothing goes black.
+function loadPicture(board) {
+  let rec = V.pictures.get(board);
+  if (rec) return rec;
   const look = V.payload.looks[board];
-  if (!look || !look.picture) return null;
+  rec = {tex: null, failed: false, picture: look.picture || ""};
+  V.pictures.set(board, rec);
+  new THREE.TextureLoader().load(look.picture, (tex) => {
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const tile = look.tile_mm || 160;
+    tex.repeat.set(1 / tile, 1 / tile);
+    tex.anisotropy = V.renderer ? V.renderer.capabilities.getMaxAnisotropy() : 1;
+    rec.tex = tex;
+    applyPictures(board);
+    requestRender();
+  }, undefined, () => { rec.failed = true; });
+  return rec;
+}
+
+// The board's picture turned by `rot` radians, one Texture per (board, rot),
+// sharing the loaded image with every other rotation of it.
+function pictureFor(board, rot) {
+  const rec = V.pictures.get(board);
+  if (!rec || !rec.tex) return null;
   const key = board + ":" + Math.round(rot * 1000);
-  if (V.textures.has(key)) return V.textures.get(key);
-  const tex = new THREE.TextureLoader().load(look.picture,
-    () => requestRender(),
-    undefined,
-    () => { V.textures.delete(key); });
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const tile = look.tile_mm || 160;
-  tex.repeat.set(1 / tile, 1 / tile);
-  tex.rotation = rot;
-  tex.anisotropy = 4;
-  V.textures.set(key, tex);
+  let tex = V.textures.get(key);
+  if (!tex) {
+    tex = rec.tex.clone();
+    tex.rotation = rot;
+    tex.needsUpdate = true;
+    V.textures.set(key, tex);
+  }
   return tex;
 }
 
-// The two materials a part needs: one for its caps (the faces in the plan
-// plane), one for its side walls. ExtrudeGeometry lays the caps' UV in world
-// XY and the walls' V up the extrusion, so the picture's vertical (its grain)
-// is turned onto the part's `grain` vector: 0 or 90 degrees, as the elevation
-// does it, never an angle worked out here from a photograph.
+// A picture has landed: hand it to every material of that board waiting for it.
+function applyPictures(board) {
+  for (const m of V.materials.values()) {
+    if (m.userData.board !== board || m.userData.rot === undefined || m.map) continue;
+    m.map = pictureFor(board, m.userData.rot);
+    m.needsUpdate = true;
+  }
+}
+
+function boardParams(look) {
+  return {color: hex(look.colour), roughness: LOOK.board.roughness, metalness: LOOK.board.metalness,
+          clearcoat: LOOK.board.clearcoat, clearcoatRoughness: LOOK.board.clearcoatRoughness};
+}
+
+// The shared material for one face set of one board: `rot` is the picture's
+// turn (undefined = no picture on this board), `front` pulls it towards the
+// camera with a polygon offset (fronts sit exactly on the carcass face and
+// coplanar faces flicker; never a move).
+function boardMaterial(board, rot, front, variant) {
+  const key = ["board", board, rot === undefined ? "-" : Math.round(rot * 1000), front ? "f" : "", variant].join("|");
+  return cachedMaterial(key, () => {
+    const look = V.payload.looks[board] || {colour: PAPER.fallback, grain: false, picture: ""};
+    const m = new THREE.MeshPhysicalMaterial(boardParams(look));
+    m.userData.board = board;
+    m.userData.look = lookKey(look);
+    if (rot !== undefined) {
+      m.userData.rot = rot;
+      m.map = pictureFor(board, rot);       // null until the picture lands; applyPictures fills it
+    }
+    if (front) { m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -2; }
+    return variantOf(m, variant);
+  });
+}
+
+function tapeMaterial(board, variant) {
+  return cachedMaterial(["tape", board, variant].join("|"), () => {
+    const look = V.payload.looks[board] || {colour: PAPER.fallback};
+    const m = new THREE.MeshPhysicalMaterial({color: hex(look.colour), roughness: LOOK.tape.roughness,
+      metalness: LOOK.tape.metalness, clearcoat: LOOK.tape.clearcoat,
+      clearcoatRoughness: LOOK.tape.clearcoatRoughness,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4});
+    m.userData.board = board;
+    m.userData.look = lookKey(look);
+    return variantOf(m, variant);
+  });
+}
+
+// hardware: one grey, no board, no picture (Part 6, 28 September 2026); the
+// inner member a lighter tone than the outer channel (29 Sept 2026)
+function runnerMaterial(role, variant) {
+  return cachedMaterial(["runner", role, variant].join("|"), () => {
+    const m = new THREE.MeshStandardMaterial({
+      color: role === "runner_inner" ? PAPER.runnerInner : PAPER.runner,
+      roughness: LOOK.runner.roughness, metalness: LOOK.runner.metalness});
+    return variantOf(m, variant);
+  });
+}
+
+// The two materials a part needs, as a function of the variant: one for its
+// caps (the faces in the plan plane), one for its side walls. ExtrudeGeometry
+// lays the caps' UV in world XY and the walls' V up the extrusion, so the
+// picture's vertical (its grain) is turned onto the part's `grain` vector: 0
+// or 90 degrees, as the elevation does it, never an angle worked out here
+// from a photograph.
 function materialsFor(part) {
   if (isRunner(part)) {
-    // hardware: one grey, no board, no picture (Part 6, 28 September 2026);
-    // the inner member a lighter tone than the outer channel (29 Sept 2026)
-    const m = new THREE.MeshStandardMaterial({
-      color: part.role === "runner_inner" ? PAPER.runnerInner : PAPER.runner,
-      roughness: 0.45, metalness: 0.3});
-    return [m, m.clone()];
+    return (variant) => { const m = runnerMaterial(part.role, variant); return [m, m]; };
   }
   const look = V.payload.looks[part.board] || {colour: PAPER.fallback, grain: false, picture: ""};
-  const base = {color: hex(look.colour), roughness: 0.82, metalness: 0.0};
-  const cap = new THREE.MeshStandardMaterial(base);
-  const side = new THREE.MeshStandardMaterial(base);
+  const front = part.role === "door" || part.role === "drawer" || part.role === "blind" || part.role === "panel";
+  let capRot, sideRot;
   if (look.picture && part.grain) {
+    loadPicture(part.board);
     const [gx, gy, gz] = part.grain;
     const horizontal = Math.abs(gz) < 0.5 && (gx || gy);
     // caps: lay the picture's V along the plan grain vector
-    const capRot = horizontal ? Math.atan2(gy, gx) - Math.PI / 2 : 0;
-    const capTex = textureFor(part.board, capRot);
+    capRot = horizontal ? Math.atan2(gy, gx) - Math.PI / 2 : 0;
     // walls: V runs up; a horizontal grain turns the tile on its side
-    const sideTex = textureFor(part.board, horizontal ? Math.PI / 2 : 0);
-    if (capTex) cap.map = capTex;
-    if (sideTex) side.map = sideTex;
+    sideRot = horizontal ? Math.PI / 2 : 0;
   }
-  // Fronts sit exactly on the carcass front face, and coplanar faces flicker:
-  // pull a front towards the camera with a polygon offset, never by moving it.
-  if (part.role === "door" || part.role === "drawer" || part.role === "blind" || part.role === "panel") {
-    for (const m of [cap, side]) {
-      m.polygonOffset = true;
-      m.polygonOffsetFactor = -1;
-      m.polygonOffsetUnits = -2;
-    }
-  }
-  return [cap, side];
+  return (variant) => [boardMaterial(part.board, capRot, front, variant),
+                       boardMaterial(part.board, sideRot, front, variant)];
 }
 
+// A board's look as the server last sent it: a shared material remembers the
+// one it was built from, so a change is seen (`refreshLooks`).
+function lookKey(look) {
+  return JSON.stringify([look.colour, look.picture || "", look.tile_mm || 160]);
+}
+
+function refreshLooks(looks) {
+  const stale = new Set();
+  for (const m of V.materials.values()) {
+    const b = m.userData.board;
+    if (b === undefined || !looks[b] || m.userData.look === lookKey(looks[b])) continue;
+    stale.add(b);
+  }
+  for (const b of stale) {
+    const look = looks[b];
+    const rec = V.pictures.get(b);
+    const pictureChanged = !rec || rec.picture !== (look.picture || "");
+    if (pictureChanged) {
+      for (const [k, tex] of [...V.textures]) if (k.split(":")[0] === b) { tex.dispose(); V.textures.delete(k); }
+      if (rec && rec.tex) rec.tex.dispose();
+      V.pictures.delete(b);
+    }
+    for (const m of V.materials.values()) {
+      if (m.userData.board !== b) continue;
+      m.color.set(hex(look.colour));
+      m.userData.look = lookKey(look);
+      if (pictureChanged) {
+        m.map = null;
+        if (m.userData.rot !== undefined && look.picture) { loadPicture(b); m.map = pictureFor(b, m.userData.rot); }
+      }
+      m.needsUpdate = true;
+    }
+  }
+}
+
+// Drop the shared materials, pictures and textures of boards the job no
+// longer carries (and, with `all`, everything).
+function dropLooks(keep, all) {
+  for (const [k, m] of [...V.materials]) {
+    const board = m.userData.board;
+    if (all || (board !== undefined && !keep[board])) { m.dispose(); V.materials.delete(k); }
+  }
+  for (const [k, tex] of [...V.textures]) {
+    if (all || !keep[k.split(":")[0]]) { tex.dispose(); V.textures.delete(k); }
+  }
+  for (const [b, rec] of [...V.pictures]) {
+    if (all || !keep[b]) { if (rec.tex) rec.tex.dispose(); V.pictures.delete(b); }
+  }
+}
+
+// What a mesh is drawn with: the variant of its shared materials, and its
+// thin edges shown or not — in Shaded + edges only where faces meet at an
+// angle (EdgesGeometry's threshold, LOOK.edge.angle) and quieter
+// (LOOK.edge.opacity); X-ray as it always was. The selection outline is
+// separate (`outlineMesh`) and is not touched here.
 function applyDisplay(mesh) {
   const xray = V.display === "xray";
-  for (const m of mesh.material) {
-    m.transparent = xray || mesh.userData.ghost;
-    m.opacity = xray ? XRAY : (mesh.userData.ghost ? GHOST : 1);
-    m.depthWrite = !xray;
-    m.needsUpdate = true;
+  const variant = xray ? "xray" : (mesh.userData.ghost ? "ghost" : "solid");
+  if (mesh.userData.mats) mesh.material = mesh.userData.mats(variant);
+  const edges = mesh.userData.edges;
+  if (edges) {
+    edges.visible = V.display !== "shaded";
+    edges.material.opacity = (xray ? 1 : LOOK.edge.opacity) * (mesh.userData.ghost ? GHOST : 1);
+    edges.material.transparent = true;
   }
-  if (mesh.userData.edges) {
-    mesh.userData.edges.visible = V.display !== "shaded";
-    mesh.userData.edges.material.opacity = mesh.userData.ghost ? GHOST : 1;
-    mesh.userData.edges.material.transparent = true;
-  }
+  if (mesh.userData.outline) mesh.userData.outline.material = outlineMaterial(mesh.userData.outlineKind, mesh.userData.ghost);
 }
 
 /* ---------- building parts ---------------------------------------------------- */
@@ -439,11 +656,13 @@ function edgeColourFor(role) {
 
 function buildPart(part) {
   const geom = extrude(part.outline, part.z0, part.z1);
-  const mesh = new THREE.Mesh(geom, materialsFor(part));
-  mesh.userData = {part: part, number: part.cab, id: part.id, ghost: false};
+  const mats = materialsFor(part);
+  const mesh = new THREE.Mesh(geom, mats("solid"));
+  mesh.userData = {part: part, number: part.cab, id: part.id, ghost: false, mats: mats};
   const edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(geom, 20),
-    new THREE.LineBasicMaterial({color: edgeColourFor(part.role), transparent: true, opacity: 1}));
+    new THREE.EdgesGeometry(geom, LOOK.edge.angle),
+    new THREE.LineBasicMaterial({color: edgeColourFor(part.role), transparent: true,
+                                 opacity: LOOK.edge.opacity, toneMapped: false}));
   edges.userData.base = edgeColourFor(part.role);
   mesh.add(edges);
   mesh.userData.edges = edges;
@@ -475,8 +694,9 @@ function disposeObject(obj) {
     if (o.geometry) o.geometry.dispose();
     if (o.material) {
       const mats = Array.isArray(o.material) ? o.material : [o.material];
-      // textures are shared and live in the cache; only the materials go
-      mats.forEach((m) => m.dispose());
+      // a board's materials and textures are shared and live in the cache
+      // (dropLooks); only a mesh's own — edges, overlays, the shell — go
+      mats.forEach((m) => { if (!m.userData.shared) m.dispose(); });
     }
   });
 }
@@ -488,12 +708,12 @@ function disposeObject(obj) {
 // part's face, so a polygon offset pulls it forward, never a move.
 function buildTape(band, part) {
   const geom = extrude(band.outline, band.z0, band.z1);
-  const look = V.payload.looks[band.board] || {colour: PAPER.fallback};
-  const mat = new THREE.MeshStandardMaterial({color: hex(look.colour), roughness: 0.6, metalness: 0,
-                                              polygonOffset: true, polygonOffsetFactor: -2,
-                                              polygonOffsetUnits: -4});
-  const mesh = new THREE.Mesh(geom, [mat]);
-  mesh.userData = {part: part, number: part.cab, id: part.id, ghost: false, tape: band};
+  // two groups (caps, walls), so two entries — the same material twice; one
+  // entry left the walls' group with no material, which three's raycaster
+  // reads as `material.side` of undefined when a pick lands on a band
+  const mats = (variant) => { const m = tapeMaterial(band.board, variant); return [m, m]; };
+  const mesh = new THREE.Mesh(geom, mats("solid"));
+  mesh.userData = {part: part, number: part.cab, id: part.id, ghost: false, tape: band, mats: mats};
   mesh.userData.rest = {position: mesh.position.clone(), quaternion: mesh.quaternion.clone()};
   applyDisplay(mesh);
   return mesh;
@@ -534,10 +754,12 @@ function syncItems(payload) {
     for (const q of payload.room_parts) V.roomParts.add(buildPart(q));
     V.root.add(V.roomParts);
   }
-  // drop textures for boards no longer in the job
-  for (const [k, tex] of [...V.textures]) {
-    if (!payload.looks[k.split(":")[0]]) { tex.dispose(); V.textures.delete(k); }
-  }
+  // drop the materials, pictures and textures of boards no longer in the job,
+  // and bring the shared materials of a board whose look CHANGED up to date
+  // in place (a colour or a picture edited on the Boards tab; the parts'
+  // hashes do not carry the look, so nothing above rebuilt them)
+  dropLooks(payload.looks, false);
+  refreshLooks(payload.looks);
   V.pickables = [];
   for (const grp of V.groups.values()) grp.children.forEach((m) => V.pickables.push(m));
   V.roomParts.children.forEach((m) => V.pickables.push(m));
@@ -561,8 +783,8 @@ function wallMesh(w, top, closed) {
     shape.holes.push(hole);
   }
   const geom = new THREE.ShapeGeometry(shape);
-  const mat = new THREE.MeshStandardMaterial({color: PAPER.wall, roughness: 0.95, metalness: 0,
-                                              side: THREE.BackSide});
+  const mat = new THREE.MeshStandardMaterial({color: PAPER.wall, roughness: LOOK.room.roughness,
+                                              metalness: LOOK.room.metalness, side: THREE.BackSide});
   const mesh = new THREE.Mesh(geom, mat);
   const dir = new THREE.Vector3(w.dir[0], w.dir[1], 0);
   const up = new THREE.Vector3(0, 0, 1);
@@ -572,7 +794,7 @@ function wallMesh(w, top, closed) {
   mesh.applyMatrix4(m);
   mesh.userData = {wall: w.id, kind: "wall"};
   const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 1),
-    new THREE.LineBasicMaterial({color: PAPER.edgeWall}));
+    new THREE.LineBasicMaterial({color: PAPER.edgeWall, toneMapped: false}));
   edges.applyMatrix4(m);
   mesh.userData.edges = edges;
   return [mesh, edges];
@@ -615,12 +837,13 @@ function buildShell(payload) {
     if (pts.length > 3 && Math.abs(fx - lx) < 1 && Math.abs(fy - ly) < 1) pts.pop();
     const floorShape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
     const floor = new THREE.Mesh(new THREE.ShapeGeometry(floorShape),
-      new THREE.MeshStandardMaterial({color: PAPER.floor, roughness: 1, metalness: 0}));
+      new THREE.MeshStandardMaterial({color: PAPER.floor, roughness: LOOK.room.roughness,
+                                      metalness: LOOK.room.metalness}));
     floor.position.z = -0.5;
     floor.userData.kind = "floor";
     shell.add(floor);
     const floorEdge = new THREE.LineSegments(new THREE.EdgesGeometry(floor.geometry, 1),
-      new THREE.LineBasicMaterial({color: PAPER.edgeWall}));
+      new THREE.LineBasicMaterial({color: PAPER.edgeWall, toneMapped: false}));
     shell.add(floorEdge);
     for (const w of room.walls) {
       const [mesh, edges] = wallMesh(w, room.top, room.closed);
@@ -629,7 +852,8 @@ function buildShell(payload) {
       for (const ob of obstructionMeshes(w)) { shell.add(ob); V.obstructions.push(ob); }
     }
     const ceil = new THREE.Mesh(new THREE.ShapeGeometry(floorShape),
-      new THREE.MeshStandardMaterial({color: PAPER.ceiling, roughness: 1, side: THREE.BackSide}));
+      new THREE.MeshStandardMaterial({color: PAPER.ceiling, roughness: LOOK.room.roughness,
+                                      metalness: LOOK.room.metalness, side: THREE.BackSide}));
     ceil.position.z = room.top;
     ceil.userData.kind = "ceiling";
     ceil.visible = V.ceiling;
@@ -641,7 +865,8 @@ function buildShell(payload) {
     const w = Math.max(b.max.x - b.min.x, 1000) + 1200;
     const d = Math.max(b.max.y - b.min.y, 1000) + 1200;
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
-      new THREE.MeshStandardMaterial({color: PAPER.floor, roughness: 1}));
+      new THREE.MeshStandardMaterial({color: PAPER.floor, roughness: LOOK.room.roughness,
+                                      metalness: LOOK.room.metalness}));
     floor.position.set((b.max.x + b.min.x) / 2, -(b.max.y + b.min.y) / 2, -0.5);   // room frame, in the root
     floor.userData.kind = "floor";
     shell.add(floor);
@@ -739,29 +964,69 @@ function applyGhosting() {
 
 /* ---------- selection and hover ---------------------------------------------- */
 
-function tintMesh(mesh, colour, strength) {
-  for (const m of mesh.material) {
-    m.emissive = new THREE.Color(colour || PAPER.none);
-    m.emissiveIntensity = strength || 0;
-    m.needsUpdate = true;
+// The selection is an OUTLINE, not a tint (29 September 2026): the additive
+// emissive glow that turned a dark board navy is gone. A selected item's
+// edges are drawn again as fat lines (three's LineSegments2) in the accent,
+// a touch heavier than the thin edges; a hovered item the same in
+// PAPER.hover, lighter. The board colour under it does not change. Four
+// shared LineMaterials — selected / hover, plain / ghosted — sized in pixels
+// off the viewport (`resize` keeps their resolution).
+function outlineMaterial(kind, ghost) {
+  const key = ["outline", kind, ghost ? "g" : ""].join("|");
+  return cachedMaterial(key, () => {
+    const m = new LineMaterial({
+      color: kind === "sel" ? PAPER.accent : PAPER.hover,
+      linewidth: kind === "sel" ? LOOK.outline.selected : LOOK.outline.hover,
+      transparent: true, opacity: (kind === "sel" ? 1 : 0.85) * (ghost ? GHOST : 1),
+      toneMapped: false, depthWrite: false,
+      // the quads are built in clip space by the shader, so their winding is
+      // not the mirrored root's: under `V.root` (scale 1, -1, 1) a one-sided
+      // fat line is culled entirely — both sides, always
+      side: THREE.DoubleSide,
+      // a fat line is a screen-space quad straddling the edge, half of it over
+      // the face that recedes from it: a polygon offset keeps that half in
+      // front of the face (thin GL lines win the tie on their own)
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -12});
+    m.userData.shared = true;
+    m.userData.outline = true;
+    if (V.els.view) m.resolution.set(Math.max(V.els.view.clientWidth, 1), Math.max(V.els.view.clientHeight, 1));
+    return m;
+  });
+}
+
+function outlineMesh(mesh, kind) {
+  if (!mesh.userData.edges) return;               // a tape band: inside its part's outline
+  if (!kind) {
+    if (mesh.userData.outline) mesh.userData.outline.visible = false;
+    mesh.userData.outlineKind = null;
+    return;
   }
-  if (mesh.userData.edges) mesh.userData.edges.material.color.set(colour && strength ? colour : mesh.userData.edges.userData.base);
+  let ol = mesh.userData.outline;
+  if (!ol) {
+    // built the first time the part is selected or hovered, from the same
+    // EdgesGeometry its thin edges use, so the two cannot disagree
+    const g = new LineSegmentsGeometry().fromEdgesGeometry(mesh.userData.edges.geometry);
+    ol = new LineSegments2(g, outlineMaterial(kind, mesh.userData.ghost));
+    ol.computeLineDistances();
+    ol.renderOrder = 2;
+    mesh.add(ol);
+    mesh.userData.outline = ol;
+  }
+  mesh.userData.outlineKind = kind;
+  ol.material = outlineMaterial(kind, mesh.userData.ghost);
+  ol.visible = true;
 }
 
 function applySelection() {
   for (const grp of V.groups.values()) {
     const selected = grp.userData.number === V.sel;
-    for (const mesh of grp.children) {
-      const hov = V.hover && V.hover.id === mesh.userData.id;
-      if (selected) tintMesh(mesh, PAPER.accent, hov ? 0.22 : 0.14);
-      else if (hov || (V.hover && V.hover.number === grp.userData.number)) tintMesh(mesh, PAPER.hover, hov ? 0.16 : 0.06);
-      else tintMesh(mesh, null, 0);
-    }
+    const hovered = V.hover && V.hover.number === grp.userData.number;
+    for (const mesh of grp.children) outlineMesh(mesh, selected ? "sel" : (hovered ? "hover" : null));
   }
   if (V.roomParts) {
     for (const mesh of V.roomParts.children) {
       const hov = V.hover && V.hover.id === mesh.userData.id;
-      tintMesh(mesh, hov ? PAPER.hover : null, hov ? 0.16 : 0);
+      outlineMesh(mesh, hov ? "hover" : null);
     }
   }
   updateDimLines();
@@ -1761,11 +2026,12 @@ function buildOverlays() {
       const geom = extrude(sw.outline, sw.z0, sw.z1);
       const colour = sw.clash ? PAPER.clash : PAPER.clear;
       const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({
-        color: colour, transparent: true, opacity: sw.clash ? 0.32 : 0.16, depthWrite: false}));
+        color: colour, transparent: true, opacity: sw.clash ? 0.32 : 0.16, depthWrite: false,
+        toneMapped: false}));
       mesh.renderOrder = 3;
       mesh.userData = {overlay: true, cabinet: sw.cabinet, kind: sw.kind, clash: sw.clash};
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 30),
-        new THREE.LineBasicMaterial({color: colour, transparent: true, opacity: 0.7}));
+        new THREE.LineBasicMaterial({color: colour, transparent: true, opacity: 0.7, toneMapped: false}));
       g.add(mesh, edges);
     }
   }
@@ -1777,6 +2043,7 @@ function buildOverlays() {
       const box = new THREE.Box3(new THREE.Vector3(rb.min.x, -rb.max.y, rb.min.z),
                                  new THREE.Vector3(rb.max.x, -rb.min.y, rb.max.z));   // room frame
       const helper = new THREE.Box3Helper(box, PAPER.overlap);
+      helper.material.toneMapped = false;
       helper.userData = {overlay: true, overlap: true, cabinet: n};
       g.add(helper);
     }
@@ -2171,6 +2438,9 @@ function mount(els, hooks) {
   V.root = new THREE.Group();
   V.root.scale.set(1, -1, 1);              // the room frame, drawn true (see toRender)
   V.scene.add(V.root);
+  V.env = makeEnvironment(V.renderer, V.scene);
+  V.background = makeBackground();
+  V.scene.background = V.background;
   V.scene.add(makeLights());
   V.grid = makeGrid(6000);
   V.scene.add(V.grid);
@@ -2184,7 +2454,8 @@ function mount(els, hooks) {
   V.controls = V.cP;
   V.cP.setLookAt(-3000, -4500, 3200, 2000, 1500, 900, false);
   V.pivotDot = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8),
-    new THREE.MeshBasicMaterial({color: PAPER.pivot, depthTest: false, transparent: true, opacity: 0.85}));
+    new THREE.MeshBasicMaterial({color: PAPER.pivot, depthTest: false, transparent: true, opacity: 0.85,
+                                 toneMapped: false}));
   V.pivotDot.renderOrder = 10;
   V.pivotDot.visible = false;
   V.scene.add(V.pivotDot);
@@ -2291,9 +2562,13 @@ function partInfo(id) {
     for (const m of grp.children) {
       if (m.userData.id !== id) continue;
       const mat = m.material[1];
+      const ol = m.userData.outline;
       return {colour: "#" + mat.color.getHexString(), map: !!mat.map,
               opacity: mat.opacity, ghost: !!m.userData.ghost, visible: m.visible && grp.visible,
               edges: !!(m.userData.edges && m.userData.edges.visible),
+              outline: ol && ol.visible ? m.userData.outlineKind : null,
+              outlineInfo: ol ? {segments: ol.geometry.instanceCount, depthTest: ol.material.depthTest,
+                                 width: ol.material.linewidth, res: ol.material.resolution.toArray()} : null,
               rest: m.userData.rest ? [m.userData.rest.position.toArray(), m.position.toArray()] : null,
               rotation: m.rotation.z};
     }
@@ -2422,6 +2697,44 @@ function wallAt(clientX, clientY) {
   return best;
 }
 
+// The colour on screen at a canvas point, for the look check: drawn, then read
+// straight off the drawing buffer (which is not preserved between frames).
+function pixel(clientX, clientY) {
+  if (!V.renderer) return null;
+  V.renderer.render(V.scene, V.camera);
+  const gl = V.renderer.getContext();
+  const r = V.renderer.domElement.getBoundingClientRect();
+  const pr = V.renderer.getPixelRatio();
+  const x = Math.round((clientX - r.left) * pr), y = Math.round((r.bottom - clientY) * pr);
+  const buf = new Uint8Array(4);
+  gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+  return [buf[0], buf[1], buf[2]];
+}
+
+// Try a lighting figure in the running view (the tuning harness only: browser
+// state, written nowhere): exposure, environment, key, and the environment's
+// turn about X in radians.
+function tune(o) {
+  if (!V.renderer) return null;
+  if (o.exposure !== undefined) V.renderer.toneMappingExposure = o.exposure;
+  if (o.environment !== undefined) V.scene.environmentIntensity = o.environment;
+  if (o.key !== undefined && V.key) V.key.intensity = o.key;
+  if (o.envEuler) V.scene.environmentRotation.set(o.envEuler[0], o.envEuler[1], o.envEuler[2]);
+  requestRender();
+  return look();
+}
+
+// The figures the look is built on, for the report and the checks.
+function look() {
+  return {exposure: V.renderer ? V.renderer.toneMappingExposure : LOOK.exposure,
+          environment: V.scene ? V.scene.environmentIntensity : LOOK.environment,
+          key: V.key ? V.key.intensity : LOOK.key,
+          envRot: V.scene ? V.scene.environmentRotation.toArray().slice(0, 3) : null, board: LOOK.board,
+          edge: LOOK.edge, outline: LOOK.outline, materials: V.materials.size,
+          pictures: [...V.pictures].map(([b, r]) => [b, !!r.tex, r.failed]),
+          toneMapping: V.renderer ? V.renderer.toneMapping : null};
+}
+
 function dispose() {
   stopLoop();
   if (V.observer) V.observer.disconnect();
@@ -2430,8 +2743,9 @@ function dispose() {
   for (const [n, grp] of [...V.groups]) { V.root.remove(grp); disposeObject(grp); V.groups.delete(n); }
   if (V.roomParts) disposeObject(V.roomParts);
   if (V.shell) disposeObject(V.shell);
-  for (const t of V.textures.values()) t.dispose();
-  V.textures.clear();
+  dropLooks({}, true);
+  if (V.env) V.env.dispose();
+  if (V.background) V.background.dispose();
   if (V.cube) V.cube.dispose();
   if (V.cP) V.cP.dispose();
   if (V.cO) V.cO.dispose();
@@ -2440,5 +2754,5 @@ function dispose() {
   V.renderer = V.scene = V.camera = V.controls = null;
 }
 
-  return {mount, setVisible, update, select, setLayers, isolate, flyTo, idle, bounds, partInfo, debugCam, pickHandleAt, dragInfo, overlayInfo, groupIds, debugShell, memory, state, camera, project, unproject, dispose, resize, fitAll, viewHome, viewTop, viewWall, setProjection, setDisplay, wallAt};
+  return {mount, setVisible, update, select, setLayers, isolate, flyTo, idle, bounds, partInfo, debugCam, pickHandleAt, dragInfo, overlayInfo, groupIds, debugShell, memory, state, camera, project, unproject, dispose, resize, fitAll, viewHome, viewTop, viewWall, setProjection, setDisplay, wallAt, pixel, look, tune};
 }

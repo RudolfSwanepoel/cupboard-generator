@@ -111,6 +111,18 @@ def main():
           re.findall(r'"#[0-9a-fA-F]{3,6}"|\'#[0-9a-fA-F]{3,6}\'|0x[0-9a-fA-F]{6}\b', outside), [])
     check("and no board is named in PAPER",
           [w for w in ("MEL", "BROOKHILL", "GREY", "BACK", "DECOR") if block and w in block.group(0)], [])
+    # The 3D realism brief, Round 1 (29 September 2026): the light, surface
+    # and line FIGURES (exposure, roughness, clearcoat, edge opacity, outline
+    # widths) sit in the sibling LOOK block, which states no colour; and the
+    # selection is an outline, not an emissive tint — the one emissive left
+    # is the obstruction's, which is meant to shout.
+    look = re.search(r"const LOOK = \{.*?\n\};", js, re.S)
+    check("view3d.js has its LOOK block, the light and surface figures in one place", look is not None, True)
+    check("LOOK states no colour",
+          re.findall(r'"#[0-9a-fA-F]{3,6}"|0x[0-9a-fA-F]{6}\b', look.group(0)) if look else None, [])
+    check("no board is tinted: the only emissive set in view3d.js is the obstruction's",
+          (re.findall(r"\bemissive(?:Intensity)?\s*[:=]", js), "tintMesh" in js),
+          (["emissive:", "emissiveIntensity:"], False))
     check("the fill comes back on the record's colour",
           R.board_look(MATS, "WOOD")["colour"], "#d2b36a")
     check("a board nobody coloured is neutral, and says so",
