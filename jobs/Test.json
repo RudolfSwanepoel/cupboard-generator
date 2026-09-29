@@ -539,7 +539,8 @@
       "arm_b": null,
       "face_a": null,
       "face_b": null,
-      "corner_unit": null
+      "corner_unit": null,
+      "runner": "GELMAR45"
     },
     {
       "number": 6,
@@ -751,7 +752,8 @@
       "arm_b": null,
       "face_a": null,
       "face_b": null,
-      "corner_unit": null
+      "corner_unit": null,
+      "runner": "GELMAR45"
     },
     {
       "number": 8,

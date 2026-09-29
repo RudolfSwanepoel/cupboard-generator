@@ -159,6 +159,15 @@ def legacy_holds():
           json.dumps(job_to_dict(job_from_dict(raw)), indent=2, ensure_ascii=False)
           == json.dumps(raw, indent=2, ensure_ascii=False), True)
     check("  it writes no `runners` key", "runners" in job_to_dict(test), False)
+    # Part 6 of the drawers redo (29 September 2026): the working Test.json was
+    # moved onto Gelmar through Use for all drawers. The same path, on the
+    # frozen copy in memory: at 570 deep both records take 500, so no line moves.
+    moved = dict(job_to_dict(test), runners={H.SEED_ID: H.to_record(H.SEED)})
+    sw = api.runner_swap({"job": moved, "to": H.SEED_ID, "apply": True})
+    check("Use for all drawers onto Gelmar: cabinets 4 and 7, no drawer line moves",
+          (sw["cabinets"], sw["moves"]), ([4, 7], []))
+    check("  and the fixture on disk is untouched (still legacy)",
+          [c.runner for c in load(job_file("Test_drawers")).cabinets if c.drawer_list], ["", ""])
 
     print("\nthe width reads the record's clearance")
     j = job_of(box(runner=H.SEED_ID))
