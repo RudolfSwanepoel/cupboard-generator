@@ -2139,8 +2139,11 @@ def room_new(payload):
 
 # What the page may fetch as a FILE (F1, 23 September 2026): the 3D module,
 # loaded only when the 3D tab is first opened, and the vendored libraries under
-# app/vendor/ — three.js and camera-controls, each with its LICENSE. Nothing
-# else in the repo is reachable this way; `Handler._static` refuses it.
+# app/vendor/ — three.js and camera-controls, each with its LICENSE, and since
+# the 3D realism brief (29 September 2026) three's own addons the view imports
+# under app/vendor/three/addons/ (RoomEnvironment, the fat-line trio), served
+# by the same rule. Nothing else in the repo is reachable this way;
+# `Handler._static` refuses it.
 STATIC_FILES = {"/app/view3d.js": ("app", "view3d.js")}
 VENDOR_ROUTE = "/vendor/"
 VENDOR_DIR = os.path.join(ROOT, "app", "vendor")

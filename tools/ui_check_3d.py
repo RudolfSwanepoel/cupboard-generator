@@ -159,9 +159,13 @@ def stage_f1(pw):
     wait_scene(page)
     check("every request went to this server only", sorted(hosts), ["127.0.0.1"])
     fetched = [u.split("/", 3)[3] for u in requests if "/vendor/" in u or "view3d" in u]
-    check("the module and the two libraries were fetched, and nothing else off /vendor/",
+    # three's fat-line trio joined the vendored set with the 3D realism brief
+    # (29 September 2026): the selection outline is drawn with it
+    check("the module, the two libraries and three's line addons were fetched, and nothing else off /vendor/",
           sorted(set(fetched)),
           ["app/view3d.js", "vendor/camera-controls/camera-controls.module.js",
+           "vendor/three/addons/lines/LineMaterial.js", "vendor/three/addons/lines/LineSegments2.js",
+           "vendor/three/addons/lines/LineSegmentsGeometry.js",
            "vendor/three/three.core.js", "vendor/three/three.module.js"])
     check("no console errors", errors, [])
     check_true("a WebGL canvas is in the viewport",
@@ -173,6 +177,7 @@ def stage_f1(pw):
     for path, ctype in (("/vendor/three/three.module.js", "text/javascript"),
                         ("/vendor/three/LICENSE", "text/plain"),
                         ("/vendor/camera-controls/LICENSE", "text/plain"),
+                        ("/vendor/three/addons/LICENSE", "text/plain"),
                         ("/app/view3d.js", "text/javascript")):
         r = page.request.get(URL.rstrip("/") + path)
         check(f"{path} served as {ctype}", (r.status, r.headers.get("content-type", "").split(";")[0]),
@@ -447,7 +452,12 @@ def stage_f3(pw):
     settle(page)
     m1 = page.evaluate("() => V3D.memory()")
     print(f"      renderer.info.memory before {m0} after {m1}")
-    check("30 edits: geometry count returns to where it was", m1["geometries"], m0["geometries"])
+    # a selection or hover outline is a geometry built the first time its part
+    # is outlined (29 Sept 2026) and goes with the part; the count is taken
+    # net of them, so a pointer left over a cabinet that was rebuilt cannot
+    # move it
+    check("30 edits: geometry count returns to where it was",
+          m1["geometries"] - m1["outlines"], m0["geometries"] - m0["outlines"])
     check("30 edits: texture count returns to where it was", m1["textures"], m0["textures"])
     check("30 edits: the camera did not move", cam(), cam0)
     check("30 edits: no console errors", errors, [])
@@ -1140,8 +1150,70 @@ def stage_room(pw):
     browser.close()
 
 
+# ---------------------------------------------------------------------------
+
+def stage_look(pw):
+    """The 3D realism brief, Round 1 (29 September 2026): a plain board's lit,
+    face-on surface renders within 8 units per channel of its swatch hex, and
+    the selection is an outline, not a tint — the pixel on the face does not
+    move when the cabinet is selected."""
+    print("\nlook — a board's colour on screen is its colour; the selection is an outline, not a tint")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    page.goto(URL)
+    load_job(page, "Test")
+    page.click('nav [data-tab="cabinets"]')
+    page.evaluate("() => { selectCabinet(S.job.cabinets.findIndex((c) => c.number === 4), {isolate: false}); renderList(); }")
+    page.wait_for_function("() => typeof V3C === 'object' && V3C !== null", timeout=30000)
+    page.wait_for_function("() => !S.cabSceneStale && cabTimer === null && S.cab3dShown === 4", timeout=20000)
+    page.wait_for_function("() => V3C.idle()", timeout=10000)
+    time.sleep(0.5)
+    look = page.evaluate("() => V3C.look()")
+    check("the renderer tone-maps with NeutralToneMapping (three's constant 7)", look["toneMapping"], 7)
+    check_true("the picture of the grained board loaded", any(b == "BROOKHILL" and ok for b, ok, _ in look["pictures"]),
+               str(look["pictures"]))
+    # cabinet 4 alone, at Home, UNSELECTED: the view shows the selection, so
+    # select another number first (nothing else is drawn; 4 stays on show)
+    page.evaluate("() => V3C.select(2)")
+    page.evaluate("() => V3C.viewHome(false)")
+    page.wait_for_function("() => V3C.idle()", timeout=10000)
+    time.sleep(0.4)
+    check("cabinet 4 is shown and not selected", (page.evaluate("() => S.cab3dShown"), page.evaluate("() => V3C.state().sel")), (4, 2))
+    sc = page.evaluate("() => fetch('/api/scene-cabinet', {method: 'POST', headers: {'Content-Type': 'application/json'},"
+                       " body: JSON.stringify({job: S.job, number: 4})}).then((r) => r.json())")
+    item = next(i for i in sc["items"] if i["number"] == 4)
+    looks = sc["looks"]
+    # the first drawer face on a PLAIN board (a picture would be the picture's pixels, not a swatch)
+    face = next(p for p in item["parts"] if p["role"] == "drawer" and not looks[p["board"]]["picture"])
+    xs = [q[0] for q in face["outline"]]
+    ys = [q[1] for q in face["outline"]]
+    centre = (sum(xs) / len(xs), max(ys), (face["z0"] + face["z1"]) / 2)       # the face's front surface
+    ox, oy = viewport_origin_of(page, "#c3dview canvas")
+    pr = page.evaluate("([x, y, z]) => V3C.project(x, y, z)", list(centre))
+    at = [ox + pr["x"], oy + pr["y"]]
+    px0 = page.evaluate("([x, y]) => V3C.pixel(x, y)", at)
+    swatch = looks[face["board"]]["colour"]
+    want = [int(swatch[1 + 2 * i:3 + 2 * i], 16) for i in range(3)]
+    diff = [px0[i] - want[i] for i in range(3)]
+    check_true(f"the centre of {face['id']} ({face['board']} {swatch}) reads within 8 per channel of its swatch",
+               all(abs(d) <= 8 for d in diff), f"pixel {px0}, off by {diff}")
+    page.evaluate("() => V3C.select(4)")
+    page.wait_for_function("() => V3C.idle()", timeout=10000)
+    time.sleep(0.3)
+    check("selected: the outline shows on the face", page.evaluate(f"() => V3C.partInfo({json.dumps(face['id'])}).outline"), "sel")
+    px1 = page.evaluate("([x, y]) => V3C.pixel(x, y)", at)
+    check("and the pixel on the face is unchanged (the outline, not the face, shows selection)", px1, px0)
+    check("no console errors", errors, [])
+    browser.close()
+
+
+def viewport_origin_of(page, selector):
+    return page.evaluate("(s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.top]; }", selector)
+
+
 STAGES = {"f1": stage_f1, "f3": stage_f3, "f4": stage_f4, "f5": stage_f5, "f6": stage_f6,
-          "extras": stage_extras, "room": stage_room}
+          "extras": stage_extras, "room": stage_room, "look": stage_look}
 
 with sync_playwright() as pw:
     for name, fn in STAGES.items():

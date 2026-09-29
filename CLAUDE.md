@@ -42,6 +42,9 @@ inner member sliding), screenshots into
 `output/_checks/ui_check_drawers/`. All four are optional —
 Playwright is the only third-party package anywhere near this app, and only
 those scripts need it — and each says so and exits 0 when it is not installed.
+`ui_check_3d.py --stage look` reads the drawn colour of a board off the canvas
+(the 3D realism brief, 29 September 2026), and `python tools/ui_shots_3d.py`
+takes the brief's four screenshots.
 The cloud machine's Chromium is revision 1194, which is `playwright==1.56.0`.
 
 Regenerates the October 2025 wardrobe from cabinet definitions and diffs it
@@ -64,6 +67,104 @@ line, and `regen_check` says so rather than failing. Every other figure in this
 list comes out of the engine and is checked on any machine.
 
 ## Status
+
+**The 3D view drawn realistically — Round 1 of two (29 September 2026, brief
+`Claude outputs/3d-realism-brief-2026-09-29.md`, agreed with Rudolf; Round 2 —
+shadows, ambient occlusion, the snapshot carrying them — waits on his notes on
+this).** `app/view3d.js` and the vendored libraries only: nothing under
+`cabinetgen/` changed, `/api/scene` is byte-identical. Benchmark unchanged
+(272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50); `check_all` 22 of 23 —
+`check_launch.py` fails on the cloud machine at HEAD too (its child stubs
+`ctypes.windll`, which only Windows has; run it on the laptop). Before-and-after
+screenshots of the brief's four views are in
+`Claude outputs/3d-realism-screenshots/` (`tools/ui_shots_3d.py` takes them,
+the same four every time). Every figure below is measured in headless Chromium
+(SwiftShader) off the drawing buffer through the view's new `pixel()`.
+
+1. **A board's colour on screen is its colour — physically lit.** No
+   hemisphere light; the diffuse light and the reflections come from an
+   image-based environment through `PMREMGenerator`, one directional key
+   light (0.4, from (−0.5, −0.8, 1) as before) gives the form, and the
+   renderer tone-maps with `NeutralToneMapping` (Khronos PBR Neutral — no
+   tint) at exposure 1.0, `outputColorSpace` sRGB, every picture tagged
+   sRGB. **The environment is NOT three's `RoomEnvironment`**, which the
+   brief named: vendored and measured first, it is a studio set with one
+   bright side — env only, exposure 1, the four horizontal directions gave
+   irradiance 3.9 : 1.0 : 0.9 : 1.3, so a front's colour would have depended
+   on which wall its cabinet stood on. It is a neutral grey box instead
+   (`makeEnvironment`: ceiling 1.2, the four walls 1.0, floor 0.5, radiances
+   in `LOOK.sky`, blurred 0.1), turned +90° about X so its ceiling is our +Z
+   (measured, not reasoned: three's `environmentRotation` Euler is applied
+   in the map's frame). The measured result, a front face face-on, unselected:
+   GREY `#504f4e` reads **81 / 80 / 79 on wall A and 80 / 79 / 78 on wall B**
+   (+1 and 0), BROOKHILL's fallback `#c6a65d` (pictures stripped) **198 / 166
+   / 94** (0 / 0 / +1), WHITEMEL `#ffffff` **241** on a front and 245 on a
+   top (−14 / −10). **White is the one outside the brief's 8**, and it is the
+   tone map, not the light: Neutral's shoulder starts at linear 0.76 (sRGB
+   ~226) and compresses everything above it, so white reaches 247 only at
+   about 1.4× the exposure — which puts BROOKHILL +37, GREY +12 and every
+   board picture some 20 % light. Exposure 1.0 keeps the mid-tones, the darks
+   and the pictures true and holds white at 241; ruled here, **for Rudolf to
+   look at**. In the Cabinets 3D at Home (perspective, front-left, elevated)
+   the same GREY face reads 85 (+5): the sheen, seen at an angle. Pinned in
+   `ui_check_3d.py --stage look`.
+2. **Melamine**: `MeshPhysicalMaterial`, roughness 0.45, metalness 0,
+   clearcoat 0.12, clearcoat roughness 0.5 (`LOOK.board`; the edging bands
+   the same, `LOOK.tape`, in their own board's colour; runners
+   `MeshStandardMaterial` 0.45 / 0.3, grey, unchanged). **One material per
+   board, shared** by every part cut from it, in three variants — solid,
+   ghost, x-ray — so a part changes its look by being handed another shared
+   material (`boardMaterial` / `tapeMaterial` / `runnerMaterial`, cached in
+   `V.materials`; `applyDisplay` picks the variant; `disposeObject` skips
+   what is shared). A board whose look changes on the Boards tab is brought
+   up to date IN PLACE (`refreshLooks`: the part hashes do not carry the
+   look, so nothing used to rebuild — a colour edit did not reach 3D until
+   the cabinet itself changed). `LOOK` is the one block of light, surface
+   and line figures, beside `PAPER`; `check_colour.py` holds it to no colour
+   and holds the file to no emissive but the obstruction's.
+3. **A grained board draws its picture** (it did already; made right): the
+   picture is fetched **once per board** (`loadPicture`) and each rotation is
+   a clone sharing the image (`pictureFor`), sRGB, repeat-wrapped, tiled at
+   `PICTURE_TILE_MM`, turned onto the part's grain vector by 0 or 90° as
+   before, anisotropy at the renderer's maximum (was 4). A material has no
+   map until the picture lands (`applyPictures` fills it), so a part keeps
+   its colour while loading and on a failed load — before, three drew an
+   unloaded map black.
+4. **Selection is an outline, not a tint.** The emissive glow (accent at
+   0.14, which turned GREY navy) is gone: a selected item's edges are drawn
+   again as fat lines — three's `LineSegments2` / `LineSegmentsGeometry` /
+   `LineMaterial`, vendored from r186's `examples/jsm/lines/` under
+   `app/vendor/three/addons/lines/` with the licence, imported as
+   `three/addons/…` through the importmap — 2 px in the accent; a hovered
+   item 1.4 px in `PAPER.hover` at 0.85. Built lazily from the part's own
+   `EdgesGeometry` the first time it is selected, a child of the part so it
+   opens and slides with it. **Found on the way:** a fat line's quads are
+   built in clip space by its shader, so their winding is not the mirrored
+   root's, and under `V.root` (scale 1, −1, 1) a one-sided `LineMaterial`
+   is culled entirely — `side: DoubleSide`. The board colour under the
+   outline does not move (pinned: the face pixel is identical selected and
+   not). The obstruction's warning emissive and the clash red stay.
+5. **Edges quieter**: the thin edges in Shaded + edges at opacity 0.55
+   (`LOOK.edge.opacity`), only where faces meet at over 20° (the threshold
+   `EdgesGeometry` already had — coplanar seams were never drawn, so that
+   half of the brief was already so); the three weights in `PAPER` keep
+   their roles. X-ray unchanged (edges at 1). Every paper line — edges,
+   walls, the grid, overlays, the pivot dot, the dimension lines — is
+   `toneMapped: false`, so a `PAPER` colour lands as written.
+6. **The room is matte and neutral**: floor, walls and ceiling at roughness
+   0.9; the grid 0.22 / 0.4 (was 0.35 / 0.55); the background a slight
+   top-to-bottom gradient, `PAPER.bgTop` `#f4f5f2` over `PAPER.bgBottom`
+   `#e6e8e3`, a 1 × 64 canvas as `scene.background` tagged sRGB (three then
+   neither tone-maps nor converts it), so a snapshot carries it.
+
+Also: `ui_check_3d.py --stage f1` names the three line files among what is
+fetched off `/vendor/`, and `/vendor/three/addons/LICENSE` is served. The
+view's interface gains `pixel(x, y)` (the drawn colour at a canvas point),
+`look()` (the figures in force) and `tune({…})` (try a figure in the running
+view — browser state, the tuning harness only). `check_scene.py` unchanged.
+**Not done, by the brief:** Round 2 (shadows, AO, the snapshot with them).
+**For Rudolf:** (a) white at 241 versus the brief's 247 — the exposure choice
+above; (b) the sheen and the key at 0.4 — to be felt on the laptop.
 
 **Drawers section fixes after Rudolf's review (29 September 2026, evening,
 brief `Claude outputs/drawers-fixes-brief-2026-09-29b.md`).** Parts 1-5 one
@@ -1471,8 +1572,10 @@ the outlines it is given, turns a door by the angle it is given, and picks the
 nearest snap from a list it is given. None of `engine`, `validate`,
 `export_plaza`, `nest`, `room` or `store` imports `scene`; `check_scene.py`
 fails if one ever does, and `check_colour.py` holds `scene.py` to no colour
-literal and `view3d.js` to its one `PAPER` block of paper colours. The only
-thing the browser works out for itself is the camera.
+literal and `view3d.js` to its one `PAPER` block of paper colours (and, since
+29 September 2026, its `LOOK` block of light and surface figures, which
+states no colour). The only thing the browser works out for itself is the
+camera.
 
 ### What is drawn, and what is not
 
@@ -1531,6 +1634,41 @@ wall elevation at its usual scale; an SVG has no real-world tile size, so the
 figure had to be stated once. Overlays: the swing and pull-out envelopes the
 plan hovers with their height range and `room.clashes`' verdict, the overlaps,
 and each cabinet's issues from `validate` with the check id.
+
+### Light, surface, picture, selection (Round 1, 29 September 2026)
+
+**Lighting is physical.** An image-based environment — a neutral grey box,
+ceiling 1.2, walls 1.0, floor 0.5 (`LOOK.sky`), pre-filtered once through
+`PMREMGenerator`, turned so its ceiling is our +Z — gives the diffuse light
+and the reflections; one directional key at `LOOK.key` 0.4 gives the form;
+`NeutralToneMapping` at `LOOK.exposure` 1.0 maps it to sRGB without a tint.
+Exposure is set so a plain board's front reads its swatch: GREY and the
+BROOKHILL fallback within 1 unit, white 241 (Neutral's shoulder — see the
+Status entry, and the trade-off ruled there). three's `RoomEnvironment` was
+measured and rejected (3.9 : 1 across the horizontal directions). No
+hemisphere light.
+
+**Surface**: `MeshPhysicalMaterial`, `LOOK.board` (roughness 0.45,
+clearcoat 0.12 / 0.5), one material per board shared by every part in three
+variants (solid / ghost / x-ray, `boardMaterial`), tapes the same in their own
+board (`tapeMaterial`), runners grey `MeshStandardMaterial` (`runnerMaterial`);
+`V.materials` is the cache, `dropLooks` empties it of boards the job no longer
+carries, `refreshLooks` updates a board whose colour or picture changed in
+place. **Picture**: fetched once per board (`loadPicture`), one rotated clone
+per (board, turn) sharing the image (`pictureFor`), anisotropy at the
+renderer's maximum, sRGB, tiled at `PICTURE_TILE_MM`; a material carries no
+map until the picture lands, so the colour shows meanwhile and on a failure.
+**Selection**: an outline (`outlineMesh`), fat lines from `LineSegments2`
+(vendored, `app/vendor/three/addons/lines/`), `LOOK.outline` 2 px accent
+selected, 1.4 px `PAPER.hover` hovered, `DoubleSide` because the mirrored root
+would cull them; no emissive on any board — the obstruction's warning glow is
+the only emissive in the file (`check_colour.py`). **Edges**: `LOOK.edge`,
+opacity 0.55 at a 20° threshold; every paper line `toneMapped: false`.
+**Room**: `LOOK.room` roughness 0.9, `LOOK.grid` 0.22 / 0.4, the background
+gradient `PAPER.bgTop` / `bgBottom` as an sRGB canvas texture. Pinned in
+`ui_check_3d.py --stage look` (the face pixel within 8 of the swatch, and
+unchanged when selected); the four views before and after are
+`tools/ui_shots_3d.py`'s.
 
 ### Room frame and render frame
 
@@ -1813,6 +1951,9 @@ app/view3d.js              the 3D view: a module loaded the first time a 3D view
                            Cabinets tab's single-cabinet one
 app/vendor/three/          three.js 0.186.0 — three.module.js, three.core.js, LICENSE
 app/vendor/camera-controls/  camera-controls 3.1.2 — camera-controls.module.js, LICENSE
+app/vendor/three/addons/   three r186's own addons the view imports as `three/addons/…`
+                           (the importmap): lines/ — LineSegments2, LineSegmentsGeometry,
+                           LineMaterial (the selection outline); LICENSE
 jobs/                      the live job folder: Test.json (the working file; its
                            cabinet 8 is the PLACED panel fixture) and
                            wardrobe_oct2025.py, the benchmark. Nothing else the
@@ -1856,7 +1997,10 @@ tools/ui_check_drawers.py  the drawers / runners / supports brief, and the Drawe
 tools/check_attached.py    attached panels: derived place, attach/detach round trip, moves with
                            the cabinet, the room checks in and tip-up out, delete, duplicate,
                            the job file; and a new cabinet's supports by kind
-tools/ui_check_3d.py       the 3D view in the running app, with a real mouse (Playwright)
+tools/ui_check_3d.py       the 3D view in the running app, with a real mouse (Playwright);
+                           --stage look: a board's colour on screen, the outline selection
+tools/ui_shots_3d.py       the four 3D screenshots the realism brief compares, before and after
+                           (Playwright), into Claude outputs/3d-realism-screenshots/
 tools/ui_check_attached.py attached panels in the running app (Playwright)
 tools/ui_check_restructure.py  the UI restructure in the running app (Playwright),
                            with screenshots into output/_checks/ui_check_restructure/
