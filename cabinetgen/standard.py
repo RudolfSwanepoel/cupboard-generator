@@ -40,6 +40,13 @@ class Standard:
     # The least clear gap between two INNER drawer boxes, one over the other
     # (ruled by Rudolf, 28 September 2026). Less is a critical.
     inner_drawer_min_gap: int = 30
+    # A drawer box never sits flush in its face (ruled by Rudolf, 29 September
+    # 2026): its top at least this far under its face's top, its bottom at
+    # least this far above its face's bottom, and its top this far under a Top
+    # Front / Top Rear band. `room.drawer_layout`'s max_box and an Auto box
+    # read it; so does `drawer-box-face`. An upper drawer's least offset is
+    # this; the bottom drawer's stays `drawer_rise` (21).
+    drawer_box_clear: int = 2
     drawer_base_offset: int = 16    # base groove sits this far up from the bottom edge
     # Authoring aids for the face-height editor, not construction dimensions. The
     # heights they produce are what gets ordered; these only decide where a stack

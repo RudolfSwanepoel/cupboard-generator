@@ -1592,7 +1592,7 @@ def drawer_divider(payload):
         top_box, bottom_box = box("above", top_box), box("below", bottom_box)
     top, bottom = split_pair(int(payload["top"]), int(payload["bottom"]),
                              int(payload["at"]), top_box, bottom_box, rise=rise,
-                             bottom_rise=bottom_rise)
+                             bottom_rise=bottom_rise, clear=STANDARD.drawer_box_clear)
     return {"ok": True, "top": top, "bottom": bottom}
 
 

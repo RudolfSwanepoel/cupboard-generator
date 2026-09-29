@@ -464,19 +464,23 @@ def _drawer_setting(job: Job):
         outer = [u for u in lay if not u["inner"]]
         lowest = min(outer, key=lambda u: u["face"][0]) if outer else None
         named = set()
+        clear = std.drawer_box_clear
         for u in outer:
             f0, f1 = u["face"]
             if f1 <= f0:
                 continue                   # no face at all: drawer-face-overrun says so
             b0, b1 = u["box"][4], u["box"][5]
-            if b0 < f0 or b1 > f1:
-                where = (f"{f0 - b0} below the face bottom at {f0}" if b0 < f0
-                         else f"{b1 - f1} above the face top at {f1}")
+            # never flush: drawer_box_clear inside the face both ends (29 Sept 2026)
+            if b0 < f0 + clear or b1 > f1 - clear:
+                where = (f"{f0 + clear - b0} too low — its bottom must be {clear} mm above "
+                         f"the face bottom at {f0}" if b0 < f0 + clear
+                         else f"{b1 - (f1 - clear)} too high — its top must be {clear} mm "
+                              f"under the face top at {f1}")
                 out.append(Issue(CRITICAL, str(c.number),
-                                 f"drawer {u['n']}: its box runs {b0}-{b1}, {where} — a box "
-                                 f"must lie within its own face. At an offset of "
-                                 f"{u['offset']} the tallest box this face takes is "
-                                 f"{u['max_box']}", check="drawer-box-face"))
+                                 f"drawer {u['n']}: its box runs {b0}-{b1}, {where}. A box "
+                                 f"lies within its own face and never flush with it. At an "
+                                 f"offset of {u['offset']} the tallest box this face takes "
+                                 f"is {u['max_box']}", check="drawer-box-face"))
                 named.add(u["n"])
         if lowest is not None and lowest["offset"] < rise:
             out.append(Issue(CRITICAL, str(c.number),

@@ -1089,18 +1089,40 @@ class Cabinet:
         `offset`, or the default rise."""
         return self.drawer_rise_of(std) if d.offset is None else int(d.offset)
 
+    def face_bottom_of(self, d: "Drawer", std: Standard = STANDARD) -> int:
+        """Where one OUTER drawer's face starts above the carcass underside:
+        the faces below it and a `stack_gap` each — the face stack exactly as
+        `room.drawer_layout` sets it out (the last drawer in the list lowest)."""
+        at = 0
+        for x in reversed(self.drawer_list):
+            if x.inner:
+                continue
+            if x is d:
+                return at
+            at += int(x.face_height or 0) + std.stack_gap
+        return at
+
+    def box_top_limit_of(self, d: "Drawer", std: Standard = STANDARD) -> int:
+        """The highest one outer drawer's box top may reach: its face's top less
+        `drawer_box_clear` — a box never sits flush in its face (ruled 29
+        September 2026)."""
+        return (self.face_bottom_of(d, std) + int(d.face_height or 0)
+                - std.drawer_box_clear)
+
     def box_height_of(self, d: "Drawer", std: Standard = STANDARD) -> int:
         """The box height one drawer is CUT at. A typed figure as typed; AUTO
-        (None) the tallest box its face takes at its offset — face less offset,
-        which is exactly `room.drawer_layout`'s `max_box` — so an Auto box lies
-        within its face by construction and follows the face when it moves.
-        An inner drawer's face IS its box, so there is no face to fill: an
-        Auto inner box reads the standard new-row height."""
+        (None) the tallest box its face takes at its offset — up to its top
+        limit (`box_top_limit_of`) from its bottom — which is exactly
+        `room.drawer_layout`'s `max_box`, so an Auto box lies within its face
+        by construction and follows the face when it moves. An inner drawer's
+        face IS its box, so there is no face to fill: an Auto inner box reads
+        the standard new-row height."""
         if d.box_height is not None:
             return int(d.box_height)
         if d.inner:
             return int(std.box_height_default)
-        return max(int(d.face_height or 0) - self.box_offset_of(d, std), 0)
+        bottom = self.face_bottom_of(d, std) + self.box_offset_of(d, std)
+        return max(self.box_top_limit_of(d, std) - bottom, 0)
 
     def face_board_of(self, d: "Drawer") -> str:
         """The board one drawer's face is cut from: its own, or the cabinet's."""

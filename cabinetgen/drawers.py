@@ -161,7 +161,7 @@ def graduated_shares(n: int, std=STANDARD) -> List[float]:
 
 def split_pair(top_h: int, bottom_h: int, at: int, top_box: int = 0,
                bottom_box: int = 0, gap: int = None, std=STANDARD,
-               rise: int = 0, bottom_rise: int = None) -> tuple:
+               rise: int = 0, bottom_rise: int = None, clear: int = 0) -> tuple:
     """Move the join between two faces, leaving the rest of the stack alone.
 
     The pair's own span — the two faces and the gap between them — does not
@@ -181,7 +181,9 @@ def split_pair(top_h: int, bottom_h: int, at: int, top_box: int = 0,
     lead, boxes follow: ruled 28 September 2026). An AUTO box (29 September
     2026) follows its face, so it is not passed as a figure: the caller
     (`api.drawer_divider`) holds that face to the runner's height instead, and
-    the drag writes faces only — the box stays Auto.
+    the drag writes faces only — the box stays Auto. `clear` is
+    `drawer_box_clear` (2, ruled 29 September 2026): a box never sits flush in
+    its face, so each face is held that much further.
 
         split_pair(200, 300, 250)   ->   (250, 250)
         split_pair(200, 300, 10, 90, 116)   ->   (91, 409)
@@ -191,7 +193,7 @@ def split_pair(top_h: int, bottom_h: int, at: int, top_box: int = 0,
     span = int(top_h) + g + int(bottom_h)
     need = max(int(rise or 0), 1)
     need_b = need if bottom_rise is None else max(int(bottom_rise or 0), 1)
-    lo, hi = top_box + need, span - g - (bottom_box + need_b)
+    lo, hi = top_box + need + clear, span - g - (bottom_box + need_b + clear)
     if lo > hi:                      # the pair cannot house both boxes; split it evenly
         lo, hi = 0, span - g
     top = max(lo, min(int(at), hi))

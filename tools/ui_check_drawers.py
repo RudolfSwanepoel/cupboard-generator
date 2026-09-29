@@ -409,19 +409,19 @@ def stage_offset(pw):
           page.evaluate("() => [...document.querySelectorAll('#drawerbox input[data-dk=\"offset\"]')].map((x) => [x.value, x.placeholder])"),
           [["", "21"]] * 4)
     maxes = page.evaluate("() => [...document.querySelectorAll('#drawerbox [data-maxbox]')].map((x) => x.textContent)")
-    check("beside each Box h, the tallest box its face takes: face less 21", maxes, ["≤89", "≤144", "≤199", "≤255"])
+    check("beside each Box h, the tallest box its face takes: face less 21, less the 2 clear", maxes, ["≤87", "≤142", "≤197", "≤253"])
     crit = lambda cid: page.evaluate(f"() => S.res.issues.filter((i) => i.where === '4' && i.check === {json.dumps(cid)}).length")
     check("at the defaults, drawers 1-3 are outside their faces (Test_drawers.json)", crit("drawer-box-face"), 3)
-    page.fill('#drawerbox input[data-d="1"][data-dk="box_height"]', "144")
+    page.fill('#drawerbox input[data-d="1"][data-dk="box_height"]', "142")
     page.dispatch_event('#drawerbox input[data-d="1"][data-dk="box_height"]', "change")
     computed(page)
-    check("drawer 2's box down to its 144: one fewer outside its face", crit("drawer-box-face"), 2)
+    check("drawer 2's box down to its 142: one fewer outside its face", crit("drawer-box-face"), 2)
     page.fill('#drawerbox input[data-d="3"][data-dk="offset"]', "15")
     page.dispatch_event('#drawerbox input[data-d="3"][data-dk="offset"]', "change")
     computed(page)
     check("the bottom drawer's offset to 15: drawer-bottom-offset", crit("drawer-bottom-offset"), 1)
-    check("  and its tallest box reads 276 - 15 = 261",
-          page.evaluate("() => document.querySelector('#drawerbox [data-maxbox=\"3\"]').textContent"), "≤261")
+    check("  and its tallest box reads 276 - 15 - 2 = 259",
+          page.evaluate("() => document.querySelector('#drawerbox [data-maxbox=\"3\"]').textContent"), "≤259")
     page.fill('#drawerbox input[data-d="3"][data-dk="offset"]', "")
     page.dispatch_event('#drawerbox input[data-d="3"][data-dk="offset"]', "change")
     computed(page)
@@ -620,31 +620,31 @@ def stage_auto(pw):
     page.click('#drawerbox [data-dauto="1"]')
     computed(page)
     box1 = '#drawerbox input[data-d="1"][data-dk="box_height"]'
-    check("Auto on drawer 2: stored as null, shown as Auto (≤187)",
+    check("Auto on drawer 2: stored as null, shown as Auto (≤185)",
           (page.evaluate("() => S.job.cabinets[S.sel].drawers[1].box_height"),
            page.evaluate(f"() => [document.querySelector({json.dumps(box1)}).value, document.querySelector({json.dumps(box1)}).placeholder]")),
-          (None, ["", "Auto (≤187)"]))
+          (None, ["", "Auto (≤185)"]))
     sides = lambda: sorted(page.evaluate("() => S.res.panels.filter((p) => p.cabinet === 7 && p.role === 'Drawer Side').map((p) => p.width)"))
-    check("  the cut list cuts it at 187 (face 208 less 21)", 187 in sides(), True)
+    check("  the cut list cuts it at 185 (face 208 less 21, less the 2 clear)", 185 in sides(), True)
     page.fill('#drawerbox input[data-d="1"][data-dk="face_height"]', "200")
     page.dispatch_event('#drawerbox input[data-d="1"][data-dk="face_height"]', "input")
     computed(page)
-    page.wait_for_function(f"() => document.querySelector({json.dumps(box1)}).placeholder === 'Auto (≤179)'", timeout=10000)
+    page.wait_for_function(f"() => document.querySelector({json.dumps(box1)}).placeholder === 'Auto (≤177)'", timeout=10000)
     computed(page)
-    check("the face to 200: Auto follows to 179, and so does the cut list",
-          (page.evaluate(f"() => document.querySelector({json.dumps(box1)}).placeholder"), 179 in sides(), 187 in sides()),
-          ("Auto (≤179)", True, False))
+    check("the face to 200: Auto follows to 177, and so does the cut list",
+          (page.evaluate(f"() => document.querySelector({json.dumps(box1)}).placeholder"), 177 in sides(), 185 in sides()),
+          ("Auto (≤177)", True, False))
     check("  a typed box on every other drawer is untouched",
           page.evaluate("() => S.job.cabinets[S.sel].drawers.map((d) => d.box_height)"), [150, None, 150, 150])
     check("  and an Auto box never raises drawer-box-face",
           page.evaluate("() => S.res.issues.filter((i) => i.where === '7' && i.check === 'drawer-box-face' && /drawer 2:/.test(i.message)).length"), 0)
     page.click('#drawerbox [data-preset="graduated"]')
     computed(page)
-    page.wait_for_function(f"() => document.querySelector({json.dumps(box1)}).placeholder !== 'Auto (≤179)'", timeout=10000)
+    page.wait_for_function(f"() => document.querySelector({json.dumps(box1)}).placeholder !== 'Auto (≤177)'", timeout=10000)
     computed(page)
     face2 = page.evaluate("() => S.job.cabinets[S.sel].drawers[1].face_height")
-    check("Graduated moves the face; Auto follows it (face less 21), the typed boxes stay",
-          (page.evaluate(f"() => document.querySelector({json.dumps(box1)}).placeholder") == f"Auto (≤{face2 - 21})",
+    check("Graduated moves the face; Auto follows it (face less 21 less 2), the typed boxes stay",
+          (page.evaluate(f"() => document.querySelector({json.dumps(box1)}).placeholder") == f"Auto (≤{face2 - 23})",
            page.evaluate("() => S.job.cabinets[S.sel].drawers.map((d) => d.box_height)")),
           (True, [150, None, 150, 150]))
     shot(page, "auto_follows", "#drawerbox [data-dblk=stack]")

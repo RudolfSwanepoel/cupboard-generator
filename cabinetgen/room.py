@@ -1638,7 +1638,9 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
          box sits on a runner standing on the bottom panel. The offset is
          editable per drawer (ruled 28 September 2026, "faces lead, boxes
          follow"): the bottom drawer may be raised, never lowered below 21;
-         an upper one either way; every box within its own face's height;
+         an upper one either way; every box within its own face's height,
+         and never flush: `drawer_box_clear` (2) clear of the face's top and
+         bottom (ruled 29 September 2026) — `max_box` reads it;
       3. the checks read the result. No box position ever moves a face.
 
     The box front is flush with the carcass front (y 0) and the face overlays
@@ -1683,12 +1685,14 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
     gap = std.door_single_gap
     out = []
 
-    def one(i, d, fz0, fz1, bz0, y0, length, face_x, face_y):
+    def one(i, d, fz0, fz1, bz0, y0, length, face_x, face_y, limit=None):
         bh = cab.box_height_of(d, std)          # Auto: the tallest that fits
         return {"n": i + 1, "index": i, "inner": bool(d.inner),
                 "face": (fz0, fz1), "offset": bz0 - fz0,
-                # the tallest box this face takes at this offset (rule 5)
-                "max_box": fz1 - bz0, "face_x": face_x, "face_y": face_y,
+                # the tallest box this face takes at this offset (rule 5):
+                # up to the face top less drawer_box_clear on an outer drawer
+                "max_box": (fz1 if limit is None else limit) - bz0,
+                "face_x": face_x, "face_y": face_y,
                 "face_board": cab.face_board_of(d),
                 "box": (t + clear, W - t - clear, y0, y0 + length, bz0, bz0 + bh),
                 "rails": rails,
@@ -1716,7 +1720,7 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
         # 21 unless the drawer says otherwise (faces lead, boxes follow)
         rise = offset if d.offset is None else int(d.offset)
         out.append(one(i, d, at, at + fh, at + rise, 0, outer_len,
-                       (gap / 2, W - gap / 2), (-ft, 0)))
+                       (gap / 2, W - gap / 2), (-ft, 0), cab.box_top_limit_of(d, std)))
         at += fh + std.stack_gap
     # behind the door: each at its own height, its face the box's size
     inner = [(i, d) for i, d in enumerate(stack) if d.inner]
