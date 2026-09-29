@@ -280,6 +280,10 @@
   #v3ddock #editor{position:static;max-height:100%;height:100%;margin-top:0}
   #roomdock #editor{margin-top:0}
   #editor .dockissues{padding:8px 14px 0;font-size:11.5px}
+  #editor .dockissues:empty{display:none}
+  /* keepPlace holds the control in use still across a repaint; the browser's
+     own scroll anchoring on top of it would move the dock twice */
+  #editor{overflow-anchor:none}
   #editor .dockissues div{margin:2px 0;cursor:pointer;padding:3px 8px;border-radius:5px;
                           border:1px solid transparent}
   #editor .dockissues div:hover{border-color:var(--line);background:var(--surface)}
@@ -1684,6 +1688,10 @@ function alike(a, b) {
   if (a.nodeType !== 1) return true;
   if (a.tagName !== b.tagName) return false;
   if ((a.id || "") !== (b.id || "")) return false;
+  // Two DIVs of different kinds — the issue list and the editor body, one
+  // section and another's slot — are not the same thing, so one is never
+  // morphed into the other (that is what threw the dock's scroll away).
+  if (a.tagName === "DIV" && (a.classList[0] || "") !== (b.classList[0] || "")) return false;
   if (!VALUE_TAGS[a.tagName]) return true;
   return controlKey(a) === controlKey(b);
 }
@@ -1776,9 +1784,13 @@ function renderEditor() {
   // the dock (F4). They come from the compute reply; clicking one opens the
   // Validation tab. Nothing is decided here.
   const own = cabinetIssues(c.number);
-  const issues = own.length ? `<div class="dockissues">${own.map((i) =>
+  // The container is there even when empty (29 September 2026): the editor's
+  // children must not shift by one when the first issue appears, or the paint
+  // pairs the old body with the new issue list and rebuilds every section
+  // under the operator — the dock "jumped" on Equal and on size changes.
+  const issues = `<div class="dockissues">${own.map((i) =>
     `<div class="${i.level === "critical" && i.accepted ? "accepted" : i.level}" data-goto="validation">${
-      i.level === "critical" ? (i.accepted ? "accepted" : "critical") : "warning"} — ${esc(i.message)}</div>`).join("")}</div>` : "";
+      i.level === "critical" ? (i.accepted ? "accepted" : "critical") : "warning"} — ${esc(i.message)}</div>`).join("")}</div>`;
 
   const bespoke = c.template === "none"
     ? `<div class="bespoke"><b>Bespoke cabinet.</b> The template generates nothing;
@@ -1798,10 +1810,16 @@ function renderEditor() {
   if (S.selRendered !== S.sel) {
     box.innerHTML = html;
     S.selRendered = S.sel;
-  } else {
-    paint(box, html);
+    renderSections();
+    return;
   }
+  // The same cabinet: painted over what is there, and the dock does not move.
+  // The control being used (the focused one — a button just pressed, a field
+  // being typed in) stays where it was on screen; with none, the scroll does.
+  keepPlace(box, () => { paint(box, html); renderSections(); });
+}
 
+function renderSections() {
   renderStructure();
   renderCorner();
   renderDoors();
@@ -1813,6 +1831,28 @@ function renderEditor() {
   refreshSwing();
   refreshEdging();
   refreshSupports();
+}
+
+// What names a control well enough to find it again if a repaint replaced it.
+function placeKey(el) {
+  if (el.id) return "#" + CSS.escape(el.id);
+  const attrs = Object.keys(el.dataset || {}).map((k) =>
+    `[data-${k.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase())}="${CSS.escape(el.dataset[k])}"]`).join("");
+  return attrs ? el.tagName.toLowerCase() + attrs : null;
+}
+
+// Run `fn` (a repaint of `box`) without moving what the operator is looking at.
+function keepPlace(box, fn) {
+  const top = box.scrollTop;
+  const a = document.activeElement;
+  const held = a && a !== box && box.contains(a) ? a : null;
+  const key = held && placeKey(held);
+  const y = held && held.getBoundingClientRect().top;
+  fn();
+  box.scrollTop = top;
+  if (!held) return;
+  const now = held.isConnected ? held : (key && box.querySelector(key));
+  if (now) box.scrollTop += now.getBoundingClientRect().top - y;
 }
 
 // A control that had focus was skipped by the paint — that is the rule that
@@ -3027,7 +3067,7 @@ function drawerStackHTML(c) {
     <thead><tr><th class="n">#</th><th>Face height</th><th>Box height</th>
       <th title="${esc(DTIP.offset)}">Offset</th><th></th></tr></thead>
     <tbody>${rows || `<tr><td colspan="5" class="note">No drawers yet — add one.</td></tr>`}</tbody></table>
-    <div class="dtot" id="dtot"></div>
+    <div class="dtot" id="dtot" data-slot="1"></div>
     <div class="presets">
       <button data-preset="equal">Equal</button>
       <button data-preset="graduated">Graduated</button>

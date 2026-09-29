@@ -657,10 +657,57 @@ def stage_auto(pw):
     browser.close()
 
 
+def stage_scroll(pw):
+    print("\nthe editor holds still on a repaint (fixes brief, Part 1, 29 Sept)")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    load_fixture(page, "Test_drawers")
+    for number, preset, why, setup in (
+            (7, "equal", "Equal, a critical appearing above the section",
+             "c.drawers.forEach((d) => { d.box_height = 170; d.mode = 'fixed'; }); c.drawers[0].face_height = 192; "
+             "c.drawers[1].face_height = 250; c.drawers[2].face_height = 171; c.drawers[3].face_height = 158"),
+            (4, "graduated", "Graduated", ""),
+            (7, "equal", "Equal again, nothing above it changing", "")):
+        select(page, number)
+        if setup:
+            page.evaluate("() => { const c = S.job.cabinets[S.sel]; " + setup + "; renderDrawers(); schedule(); }")
+            computed(page)
+        page.wait_for_selector(f'#drawerbox [data-preset="{preset}"]', timeout=5000)
+        page.evaluate(f"() => document.querySelector('#drawerbox [data-preset=\"{preset}\"]').scrollIntoView({{block: 'center'}})")
+        computed(page)
+        where = ("() => [Math.round($('editor').scrollTop), "
+                 f"Math.round(document.querySelector('#drawerbox [data-preset=\"{preset}\"]').getBoundingClientRect().top), "
+                 "Math.round(document.querySelector('#editor .dockissues').getBoundingClientRect().height)]")
+        top0, y0, iss0 = page.evaluate(where)
+        page.click(f'#drawerbox [data-preset="{preset}"]')
+        time.sleep(0.4)
+        computed(page)
+        time.sleep(0.4)
+        top1, y1, iss1 = page.evaluate(where)
+        check(f"cabinet {number}, {why}: the button stays where it was on screen",
+              abs(y1 - y0) <= 1, True)
+        check(f"  and the dock's scroll moves only by what grew above it (issues {iss0} -> {iss1})",
+              abs((top1 - top0) - (iss1 - iss0)) <= 1, True)
+    # a size change on another cabinet, the editor on this one
+    select(page, 7)
+    page.evaluate("() => document.querySelector('#drawerbox [data-preset=\"equal\"]').scrollIntoView({block: 'center'})")
+    computed(page)
+    before = page.evaluate("() => [Math.round($('editor').scrollTop), Math.round(document.querySelector('#drawerbox [data-preset=\"equal\"]').getBoundingClientRect().top)]")
+    page.evaluate("() => { S.job.cabinets.find((x) => x.number === 2).width = 350; schedule(); }")
+    computed(page)
+    check("a size change on another cabinet: the dock's scroll and the button unchanged",
+          page.evaluate("() => [Math.round($('editor').scrollTop), Math.round(document.querySelector('#drawerbox [data-preset=\"equal\"]').getBoundingClientRect().top)]"),
+          before)
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 STAGES = {"supports": stage_supports, "catalogue": stage_catalogue, "runners": stage_runners,
           "drawers": stage_drawers, "3d": stage_3d, "offset": stage_offset,
           "boxedge": stage_boxedge, "layout": stage_layout, "lock": stage_lock,
-          "auto": stage_auto}
+          "auto": stage_auto, "scroll": stage_scroll}
 
 with sync_playwright() as pw:
     for key, fn in STAGES.items():
