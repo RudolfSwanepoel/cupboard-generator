@@ -457,7 +457,8 @@ function loadPicture(board) {
   const look = V.payload.looks[board];
   rec = {tex: null, failed: false, picture: look.picture || ""};
   V.pictures.set(board, rec);
-  new THREE.TextureLoader().load(look.picture, (tex) => {
+  new THREE.TextureLoader().load(look.picture, (loaded) => {
+    const tex = squareTile(loaded);
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.colorSpace = THREE.SRGBColorSpace;
     const tile = look.tile_mm || 160;
@@ -468,6 +469,25 @@ function loadPicture(board) {
     requestRender();
   }, undefined, () => { rec.failed = true; });
   return rec;
+}
+
+// The tile the elevation draws (Round 2, 29 September 2026): its <pattern> is a
+// SQUARE holding the picture `xMidYMid slice` — scaled evenly until it covers
+// the square, the overhang cropped equally off both sides — and the 3D must
+// tile the same thing. Handing three the picture as it is stretched a
+// 1135 x 953 picture into the square, 19 % narrower across the grain than
+// the elevation draws it. So the middle square is cut out once, here, and
+// that is what is tiled at `tile_mm`.
+function squareTile(loaded) {
+  const img = loaded.image;
+  const w = img.naturalWidth || img.width, hh = img.naturalHeight || img.height;
+  const side = Math.min(w, hh);
+  if (!side || w === hh) return loaded;
+  const c = document.createElement("canvas");
+  c.width = c.height = side;
+  c.getContext("2d").drawImage(img, (w - side) / 2, (hh - side) / 2, side, side, 0, 0, side, side);
+  loaded.dispose();
+  return new THREE.CanvasTexture(c);
 }
 
 // The board's picture turned by `rot` radians, one Texture per (board, rot),
@@ -491,8 +511,19 @@ function applyPictures(board) {
   for (const m of V.materials.values()) {
     if (m.userData.board !== board || m.userData.rot === undefined || m.map) continue;
     m.map = pictureFor(board, m.userData.rot);
+    showPicture(m);
     m.needsUpdate = true;
   }
+}
+
+// A material's base colour MULTIPLIES its map, so a board drawn in its picture
+// takes white: the picture is then the colour, as it is in the elevation. With
+// the board's swatch left in (BROOKHILL's fallback, a tan) the pale oak came
+// out orange-brown (Round 2, 29 September 2026). No picture, not landed yet,
+// or failed: the swatch, as before.
+function showPicture(m) {
+  if (m.map) m.color.set(PAPER.white);
+  else m.color.set(hex(m.userData.colour));
 }
 
 function boardParams(look) {
@@ -511,9 +542,11 @@ function boardMaterial(board, rot, front, variant) {
     const m = new THREE.MeshPhysicalMaterial(boardParams(look));
     m.userData.board = board;
     m.userData.look = lookKey(look);
+    m.userData.colour = look.colour;
     if (rot !== undefined) {
       m.userData.rot = rot;
       m.map = pictureFor(board, rot);       // null until the picture lands; applyPictures fills it
+      showPicture(m);
     }
     if (front) { m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -2; }
     return variantOf(m, variant);
@@ -600,6 +633,7 @@ function refreshLooks(looks) {
         m.map = null;
         if (m.userData.rot !== undefined && look.picture) { loadPicture(b); m.map = pictureFor(b, m.userData.rot); }
       }
+      if (m.userData.colour !== undefined) { m.userData.colour = look.colour; showPicture(m); }
       m.needsUpdate = true;
     }
   }
@@ -2563,7 +2597,11 @@ function partInfo(id) {
       if (m.userData.id !== id) continue;
       const mat = m.material[1];
       const ol = m.userData.outline;
-      return {colour: "#" + mat.color.getHexString(), map: !!mat.map,
+      // `colour` is the board's own (its swatch off the server); a board drawn
+      // in its picture multiplies the picture by white, which is `tint`
+      return {colour: mat.userData.colour !== undefined ? String(mat.userData.colour).toLowerCase()
+                                                        : "#" + mat.color.getHexString(),
+              tint: "#" + mat.color.getHexString(), map: !!mat.map,
               opacity: mat.opacity, ghost: !!m.userData.ghost, visible: m.visible && grp.visible,
               edges: !!(m.userData.edges && m.userData.edges.visible),
               outline: ol && ol.visible ? m.userData.outlineKind : null,
