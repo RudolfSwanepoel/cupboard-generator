@@ -343,6 +343,11 @@ def _geometry_info(job, cab, std):
                                "offset": u["offset"], "max_box": u["max_box"],
                                # the box as cut, and whether that is Auto
                                "box_h": u["box_h"], "auto": u["auto"], "fits": u["fits"],
+                               # the Offset field's range (29 Sept 2026): the
+                               # engine's, so the browser clamps to no figure
+                               # of its own
+                               "offset_min": u.get("offset_min"),
+                               "offset_max": u.get("offset_max"),
                                "face_w": round(u["face_x"][1] - u["face_x"][0], 1),
                                "box": [round(v, 1) for v in u["box"]],
                                "travel": u["travel"]}

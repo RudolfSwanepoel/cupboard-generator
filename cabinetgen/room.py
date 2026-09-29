@@ -1737,6 +1737,23 @@ def drawer_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List
         length = std.pick_runner(cab.depth - ft, rr.lengths) or 0
         out.append(one(i, d, z, z + cab.box_height_of(d, std), z, ft, length,
                        (t + clear, W - t - clear), (0, ft)))
+    # Each outer drawer's allowed OFFSET (29 September 2026, the fixes brief):
+    # at least `drawer_rise` (21) for the bottom drawer — its runner stands on
+    # the bottom panel — and `drawer_box_clear` for an upper one; at most the
+    # offset at which the box still fits under its top limit: the typed box,
+    # or for Auto the smallest box its runner allows (the runner's height).
+    # The editor's Offset field is held to this; the checks name what falls
+    # outside it, and a stored value outside it is cut as it stands.
+    outer = [u for u in out if not u["inner"]]
+    lowest = min(outer, key=lambda u: u["face"][0])["n"] if outer else None
+    for u in outer:
+        d = stack[u["index"]]
+        f0 = u["face"][0]
+        limit = cab.box_top_limit_of(d, std)
+        need = (int(d.box_height) if d.box_height is not None
+                else int(math.ceil(rr.height)))
+        u["offset_min"] = offset if u["n"] == lowest else std.drawer_box_clear
+        u["offset_max"] = limit - f0 - need
     return sorted(out, key=lambda u: u["n"])
 
 

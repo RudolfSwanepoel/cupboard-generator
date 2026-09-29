@@ -416,18 +416,46 @@ def stage_offset(pw):
     page.dispatch_event('#drawerbox input[data-d="1"][data-dk="box_height"]', "change")
     computed(page)
     check("drawer 2's box down to its 142: one fewer outside its face", crit("drawer-box-face"), 2)
-    page.fill('#drawerbox input[data-d="3"][data-dk="offset"]', "15")
-    page.dispatch_event('#drawerbox input[data-d="3"][data-dk="offset"]', "change")
+    # the range (fixes brief, Part 4): the engine's, on the field
+    rng = lambda: page.evaluate("() => [...document.querySelectorAll('#drawerbox input[data-dk=\"offset\"]')].map((x) => [x.min, x.max])")
+    check("each Offset field carries the engine's range: the bottom drawer from 21, an upper one from 2, "
+          "up to where its box still fits (drawer 1 held by the band)",
+          rng(), [["2", "5"], ["2", "21"], ["2", "18"], ["21", "34"]])
+    off = lambda k: f'#drawerbox input[data-d="{k}"][data-dk="offset"]'
+
+    def commit(k, v):
+        page.fill(off(k), v)
+        page.dispatch_event(off(k), "change")
+        computed(page)
+        return page.evaluate(f"() => S.job.cabinets[S.sel].drawers[{k}].offset")
+    check("typing 15 on the bottom drawer is clamped to its floor, 21: no drawer-bottom-offset",
+          (commit(3, "15"), crit("drawer-bottom-offset")), (21, 0))
+    check("typing -5 on an upper drawer is refused: clamped to 2", commit(1, "-5"), 2)
+    check("typing 99 on it is clamped to the most its box allows, 21", commit(1, "99"), 21)
+    check("clearing it is the default again (stored as nothing)", commit(1, ""), None)
+    commit(3, "")
+    # a job saved with an offset outside the range: kept, red, named, cut as it stands
+    page.evaluate("() => document.activeElement && document.activeElement.blur()")   # as a Load finds it
+    page.evaluate("() => { S.job.cabinets[S.sel].drawers[2].offset = -10; S.job.cabinets[S.sel].drawers[3].offset = 15; renderDrawers(); schedule(); }")
     computed(page)
-    check("the bottom drawer's offset to 15: drawer-bottom-offset", crit("drawer-bottom-offset"), 1)
-    check("  and its tallest box reads 276 - 15 - 2 = 259",
-          page.evaluate("() => document.querySelector('#drawerbox [data-maxbox=\"3\"]').textContent"), "≤259")
-    page.fill('#drawerbox input[data-d="3"][data-dk="offset"]', "")
-    page.dispatch_event('#drawerbox input[data-d="3"][data-dk="offset"]', "change")
-    computed(page)
-    check("cleared, it is the default again (stored as nothing)",
-          (page.evaluate("() => S.job.cabinets[S.sel].drawers[3].offset"), crit("drawer-bottom-offset")), (None, 0))
+    check("a stored -10 on drawer 3 and 15 on the bottom drawer load as they are, both red",
+          page.evaluate("() => [2, 3].map((k) => { const x = document.querySelector(`#drawerbox input[data-d=\"${k}\"][data-dk=\"offset\"]`); return [x.value, x.classList.contains('bad')]; })"),
+          [["-10", True], ["15", True]])
+    check("  with the criticals: drawer 3 outside its face, the bottom drawer below 21",
+          (page.evaluate("() => S.res.issues.some((i) => i.where === '4' && i.check === 'drawer-box-face' && /drawer 3:/.test(i.message))"),
+           crit("drawer-bottom-offset")), (True, 1))
+    check("  and drawer 3's Box h shows red", page.evaluate("() => document.querySelector('#drawerbox [data-maxbox=\"2\"]').classList.contains('over')"), True)
+    check("  kept as stored, not clamped behind the operator's back",
+          page.evaluate("() => [S.job.cabinets[S.sel].drawers[2].offset, S.job.cabinets[S.sel].drawers[3].offset]"), [-10, 15])
     shot(page, "drawer_offsets", "#drawerbox")
+    check("changed by the operator, it is clamped: drawer 3 to 1 -> 2", commit(2, "1"), 2)
+    # an Auto box on the way down: red in its own cell
+    page.evaluate("() => { const c = S.job.cabinets[S.sel]; c.drawers[1].box_height = null; c.drawers[1].offset = 0; renderDrawers(); schedule(); }")
+    computed(page)
+    check("an Auto box at offset 0 on an upper drawer: its Auto cell is red, and drawer-box-face names it",
+          (page.evaluate("() => document.querySelector('#drawerbox input[data-d=\"1\"][data-dk=\"box_height\"]').classList.contains('over')"),
+           page.evaluate("() => S.res.issues.some((i) => i.where === '4' && i.check === 'drawer-box-face' && /drawer 2:/.test(i.message))")),
+          (True, True))
     check("no console errors", errors, [])
     ctx.close()
     browser.close()

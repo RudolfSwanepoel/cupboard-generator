@@ -487,6 +487,7 @@
   #drawerbox td [data-maxbox].over{color:var(--crit);font-weight:600}
   #drawerbox .dautob{padding:0 5px;line-height:16px;font-size:10.5px;box-shadow:none}
   #drawerbox input.dbox.over{border-color:var(--crit)}
+  #drawerbox input.doff.bad{border-color:var(--crit);color:var(--crit);font-weight:600}
   #drawerbox input.dbox.over::placeholder{color:var(--crit);font-weight:600}
   #drawerbox td.dend{text-align:right;white-space:nowrap}
   #drawerbox .dlink{background:none;border:0;box-shadow:none;padding:0 4px;color:var(--accent);
@@ -2065,9 +2066,10 @@ $("editor").addEventListener("input", (e) => {
     schedule();
     return;
   }
+  // the Offset is written when it is COMMITTED (the change listener below),
+  // clamped to its range; a keystroke on the way to "30" is not a 3
+  if (dk === "offset") return;
   if (dk === "share") d.share = parseFloat(e.target.value) || 0;
-  // blank is the default offset (21): stored as nothing, not as 0
-  else if (dk === "offset") d.offset = e.target.value === "" ? null : (parseInt(e.target.value, 10) || 0);
   // blank is Auto (29 September 2026): the tallest box that fits its face
   else if (dk === "box_height") d.box_height = e.target.value === "" ? null : (parseInt(e.target.value, 10) || 0);
   else d[dk] = parseInt(e.target.value, 10) || 0;
@@ -2077,6 +2079,25 @@ $("editor").addEventListener("input", (e) => {
   // compute: the engine's checks and the tallest-box figure still have to
   if (dk === "box_height" || dk === "offset") { renderDrawers(); schedule(); return; }
   solveStack();
+});
+
+// A drawer's Offset, committed (29 September 2026): blank or not a number is
+// the default (stored as nothing); a figure is clamped to the engine's range.
+$("editor").addEventListener("change", (e) => {
+  if (e.target.dataset.dk !== "offset" || e.target.dataset.d === undefined) return;
+  const c = S.job.cabinets[S.sel];
+  if (!c) return;
+  const d = c.drawers[+e.target.dataset.d];
+  const n = parseInt(e.target.value, 10);
+  if (e.target.value === "" || isNaN(n)) {
+    d.offset = null;
+  } else {
+    const lo = e.target.min === "" ? 0 : +e.target.min;
+    const hi = e.target.max === "" ? Infinity : +e.target.max;
+    d.offset = Math.min(Math.max(n, lo, 0), hi);
+  }
+  renderDrawers();
+  schedule();
 });
 
 /* ---------- the two tickboxes ---------------------------------------------
@@ -3029,6 +3050,21 @@ function drawerEndCell(c, i) {
       title="Remove this drawer">×</button></td>`;
 }
 
+// The Offset field, held to the range the engine hands over (drawer_layout's
+// offset_min / offset_max, 29 September 2026): the spinner stops at both ends
+// and a typed figure is clamped when it is committed (`change`). A stored
+// value outside the range — a job saved before — is shown as it is, red, with
+// the critical, and cut as it stands until the operator changes it.
+function offsetInput(i, d, u, rise) {
+  const lo = u && u.offset_min !== undefined && u.offset_min !== null ? u.offset_min : 0;
+  const hi = u && u.offset_max !== undefined && u.offset_max !== null ? Math.max(u.offset_max, lo) : "";
+  const v = isSet(d.offset) ? +d.offset : null;
+  const bad = v !== null && (v < lo || (hi !== "" && v > hi));
+  return `<input type="number" step="1" class="doff${bad ? " bad" : ""}" data-d="${i}" data-dk="offset"
+      min="${lo}"${hi === "" ? "" : ` max="${hi}"`} value="${v === null ? "" : v}" placeholder="${rise}"
+      title="${esc(DTIP.offset)} — ${lo} to ${hi === "" ? "…" : hi} here">`;
+}
+
 function drawerStackHTML(c) {
   const g = drawerGeom(c);
   const lay = {};
@@ -3059,8 +3095,7 @@ function drawerStackHTML(c) {
       <td><div class="dface"><button type="button" class="dlock${share ? "" : " on"}"
           data-dlock="${i}" title="${esc(DTIP.lock)}">${share ? "🔓" : "🔒"}</button>${face}</div></td>
       <td><div class="dboxc">${boxCell}</div></td>
-      <td><input type="number" step="1" data-d="${i}" data-dk="offset"
-           value="${isSet(d.offset) ? d.offset : ""}" placeholder="${rise}" title="${esc(DTIP.offset)}"></td>
+      <td>${offsetInput(i, d, u, rise)}</td>
       ${drawerEndCell(c, i)}
     </tr>${drawerOpen(c, i) ? drawerSubRow(c, i, d, 4) : ""}`;
   }).join("");

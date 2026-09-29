@@ -959,6 +959,58 @@ def support_band():
           (tall.support_band_underside(), [tall.box_height_of(d) for d in tall.drawers]), (None, [377, 377]))
 
 
+def offset_floor():
+    print("\nthe offset has a floor, and a range (fixes brief, Part 4, 29 Sept 2026)")
+    from cabinetgen.room import drawer_layout
+
+    def two(**kw):
+        return box(runner=H.SEED_ID, drawers=[
+            Drawer(face_height=545, box_height=kw.get("top_box", 150), offset=kw.get("top_off")),
+            Drawer(face_height=200, box_height=kw.get("low_box", 150), offset=kw.get("low_off"))])
+    c = two()
+    L = {u["n"]: u for u in drawer_layout(c, STANDARD, job_of(c).materials)}
+    check("the bottom drawer (face 0-200, box 150): offset 21 to 200 - 2 - 150 = 48",
+          (L[2]["offset_min"], L[2]["offset_max"]), (21, 48))
+    check("an upper drawer (face 202-747, box 150): offset 2 to 745 - 202 - 150 = 393",
+          (L[1]["offset_min"], L[1]["offset_max"]), (2, 393))
+    c = two(top_box=None)
+    L = {u["n"]: u for u in drawer_layout(c, STANDARD, job_of(c).materials)}
+    check("  Auto: up to where the smallest box the runner allows (45) still fits, 745 - 202 - 45 = 498",
+          (L[1]["offset_min"], L[1]["offset_max"]), (2, 498))
+    j = job_to_dict(job_of(two()))
+    got = api.compute({"job": j})
+    lay = got["geometry"]["1"]["drawer_layout"]
+    check("/api/compute hands the range over per drawer",
+          [(u["n"], u["offset_min"], u["offset_max"]) for u in lay], [(1, 2, 393), (2, 21, 48)])
+
+    # the way down, Auto: every step past the floor is named
+    for off, want in ((1, {"drawer-box-face"}), (0, {"drawer-box-face"}), (-10, {"drawer-box-face"})):
+        c = two(top_box=None, top_off=off)
+        got = {i.check for i in validate(job_of(c), generate_job(job_of(c)))} & {"drawer-box-face", "drawer-bottom-offset"}
+        L = {u["n"]: u for u in drawer_layout(c, STANDARD, job_of(c).materials)}
+        check(f"an upper Auto drawer at offset {off}: drawer-box-face, and it does not fit (the red <=)",
+              (got, L[1]["fits"]), (want, False))
+    for off in (20, 5, -30):
+        c = two(low_box=None, low_off=off)
+        got = {i.check for i in validate(job_of(c), generate_job(job_of(c)))} & {"drawer-box-face", "drawer-bottom-offset"}
+        check(f"the bottom Auto drawer at offset {off}: drawer-bottom-offset at once",
+              "drawer-bottom-offset" in got, True)
+    c = two(top_box=None, top_off=2)
+    check("  an upper Auto drawer at offset 2, the least: clear",
+          {i.check for i in validate(job_of(c), generate_job(job_of(c)))} & {"drawer-box-face"}, set())
+
+    # a stored value outside the range is cut as it stands
+    c = two(top_off=-10)
+    sides = sorted((p.width, p.qty) for p in generate_job(job_of(c)) if p.role == "Drawer Side")
+    check("a saved offset outside the range (-10) is kept and cut as typed (both boxes 150)",
+          (c.drawers[0].offset, sides), (-10, [(150, 4)]))
+    test = load(job_file("Test_drawers"))
+    t4 = next(x for x in test.cabinets if x.number == 4)
+    check("Test_drawers cabinet 4 (boxes 90 / 150 / 200 / 240): the ranges, the top one held by the band",
+          [(u["n"], u["offset_min"], u["offset_max"]) for u in drawer_layout(t4, test.std, test.materials)],
+          [(1, 2, 5), (2, 2, 13), (3, 2, 18), (4, 21, 34)])
+
+
 def main():
     catalogue()
     legacy_holds()
@@ -971,6 +1023,7 @@ def main():
     section_defaults()
     auto_box()
     support_band()
+    offset_floor()
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + "; ".join(FAILS))
