@@ -1103,10 +1103,28 @@ function outlineMesh(mesh, kind) {
   ol.visible = true;
 }
 
+// The Cabinets tab's view IS the selection (Round 2, 29 September 2026): an
+// outline on the cabinet it shows says nothing and lands on every edge. There
+// the cabinet gets none; only the PART picked gets the accent outline
+// (`V.picked`, set by a click on a part), and the part under the pointer the
+// lighter one. An attached panel selected beside its cabinet is still
+// outlined as an item: there the view shows more than the selection, and the
+// outline is what says which of the two the arrows move. The 3D tab is as it
+// was: the selected item, and the hovered item, whole.
 function applySelection() {
   for (const grp of V.groups.values()) {
     const selected = grp.userData.number === V.sel;
     const hovered = V.hover && V.hover.number === grp.userData.number;
+    if (OPTS.single) {
+      const item = grp.userData.item;
+      const beside = selected && item && item.attached !== null && item.attached !== undefined;
+      for (const mesh of grp.children) {
+        const id = mesh.userData.id;
+        outlineMesh(mesh, (beside || (V.picked && V.picked === id)) ? "sel"
+                          : (V.hover && V.hover.id === id ? "hover" : null));
+      }
+      continue;
+    }
     for (const mesh of grp.children) outlineMesh(mesh, selected ? "sel" : (hovered ? "hover" : null));
   }
   if (V.roomParts) {
@@ -1908,6 +1926,7 @@ function toggleHelp() {
 // the one isolate, and tells this view back through `select` / `isolate`.
 function doSelect(number, part, opts) {
   V.sel = number;
+  V.picked = part ? part.id : null;          // the part clicked (the Cabinets tab's outline)
   const isolate = !!(opts && opts.isolate);
   if (isolate) V.isolate = number;
   else if (V.isolate !== null && number !== null) V.isolate = number;    // follows the selection
@@ -2609,6 +2628,7 @@ function update(payload, opts) {
 function select(number) {
   if (number === V.sel) { applySelection(); updateList(); requestRender(); return; }
   V.sel = number;
+  V.picked = null;                           // another item: the picked part was the old one's
   applyGhosting();
   updateBar();
   updateList();
@@ -2737,7 +2757,7 @@ function memory() {
 function state() {
   return {sel: V.sel, isolate: V.isolate, layers: V.layers ? [...V.layers] : null, display: V.display,
           walls: V.walls, labels: V.labels, ortho: V.ortho_on, fronts: V.frontsOpen, runners: V.runners,
-          clearances: V.clearances, hidden: [...V.hidden]};
+          clearances: V.clearances, hidden: [...V.hidden], picked: V.picked || null};
 }
 
 function camera() {

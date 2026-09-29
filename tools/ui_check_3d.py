@@ -1198,12 +1198,26 @@ def stage_look(pw):
     diff = [px0[i] - want[i] for i in range(3)]
     check_true(f"the centre of {face['id']} ({face['board']} {swatch}) reads within 8 per channel of its swatch",
                all(abs(d) <= 8 for d in diff), f"pixel {px0}, off by {diff}")
+    # Round 2, item 3: the Cabinets tab's view IS the selection, so the cabinet
+    # it shows gets no outline at all; only a PICKED part does
     page.evaluate("() => V3C.select(4)")
     page.wait_for_function("() => V3C.idle()", timeout=10000)
     time.sleep(0.3)
-    check("selected: the outline shows on the face", page.evaluate(f"() => V3C.partInfo({json.dumps(face['id'])}).outline"), "sel")
+    outlined = page.evaluate("(ids) => ids.filter((id) => V3C.partInfo(id) && V3C.partInfo(id).outline)",
+                             [p["id"] for p in item["parts"]])
+    check("Cabinets tab, cabinet 4 selected: no part of it is outlined", outlined, [])
     px1 = page.evaluate("([x, y]) => V3C.pixel(x, y)", at)
-    check("and the pixel on the face is unchanged (the outline, not the face, shows selection)", px1, px0)
+    check("and the pixel on the face is unchanged", px1, px0)
+    page.mouse.click(at[0], at[1])
+    page.wait_for_function("() => V3C.idle()", timeout=10000)
+    time.sleep(0.3)
+    outlined = page.evaluate("(ids) => ids.filter((id) => V3C.partInfo(id) && V3C.partInfo(id).outline === 'sel')",
+                             [p["id"] for p in item["parts"]])
+    check("a click on the drawer face: that part alone takes the accent outline", outlined, [face["id"]])
+    page.mouse.move(at[0] + 300, at[1] + 250)          # off the cabinet, so no hover is in the pixel
+    time.sleep(0.3)
+    px2 = page.evaluate("([x, y]) => V3C.pixel(x, y)", at)
+    check("and the pixel on the face is still unchanged (the outline, not the face, shows the pick)", px2, px0)
     look_fronts(page)
     check("no console errors", errors, [])
     browser.close()
@@ -1222,6 +1236,14 @@ def look_fronts(page):
     sc = page.evaluate("() => fetch('/api/scene', {method: 'POST', headers: {'Content-Type': 'application/json'},"
                        " body: JSON.stringify({job: S.job})}).then((r) => r.json())")
     parts = {p["id"]: p for i in sc["items"] for p in i["parts"]}
+    # the 3D tab is unchanged by item 3: the selected item is outlined whole
+    page.evaluate("() => V3D.select(4)")
+    settle(page)
+    four = [p["id"] for i in sc["items"] if i["number"] == 4 for p in i["parts"]]
+    got = page.evaluate("(ids) => ids.map((id) => V3D.partInfo(id).outline)", four)
+    check("3D tab, cabinet 4 selected: every part of it carries the accent outline", set(got), {"sel"})
+    page.evaluate("() => V3D.select(null)")
+    settle(page)
     side = next(p for i in sc["items"] if i["number"] == 1 for p in i["parts"] if p["role"] == "side")
     check("Shaded: a front's perimeter is drawn, a carcass side's edges are not",
           (page.evaluate("() => V3D.partInfo('1:door:0').edges"),
