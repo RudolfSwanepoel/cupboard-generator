@@ -259,6 +259,16 @@ def stage_plan(pw):
     page.keyboard.up("Control")
     time.sleep(0.2)
     check_true("Ctrl+wheel zooms", page.evaluate("() => S.zoom.plan") > 0.8, page.evaluate("() => S.zoom.plan"))
+    # zoom speed (drawers redo, Part 8, 29 September 2026): a mouse notch is
+    # exp(100 x 0.003) = 1.35; a pinch, many small ctrlKey steps, follows the
+    # fingers one for one (Chromium's exp(-deltaY / 100)) — ten steps of -6.93
+    # are one doubling
+    zoom_after = """(steps) => { zoomReset('plan'); const el = $('plan');
+        for (const dy of steps) el.dispatchEvent(new WheelEvent('wheel', {deltaY: dy, deltaMode: 0,
+            ctrlKey: true, clientX: 400, clientY: 300, bubbles: true, cancelable: true}));
+        return Math.round(S.zoom.plan * 100) / 100; }"""
+    check("a Ctrl+wheel notch zooms the plan by 1.35", page.evaluate(zoom_after, [-100]), 1.35)
+    check("a pinch of ten small steps summing to -69.3 doubles it", page.evaluate(zoom_after, [-6.93] * 10), 2.0)
     page.click('#planzoombar [data-zoom="reset"]')
     # a real-mouse drag of cabinet 2 along wall A
     time.sleep(0.4)

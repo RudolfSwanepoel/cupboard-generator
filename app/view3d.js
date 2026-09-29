@@ -970,12 +970,24 @@ function setOrbitPointFrom(e) {
 // passes through it. In orthographic the zoom changes and the camera shifts in
 // its own plane by what keeps the point where it was. Nothing under the cursor
 // zooms about the point at the pivot's depth on the cursor's ray.
+//
+// Zoom speed (29 September 2026): a mouse notch (deltaY 100) scales the view by
+// exp(100 x WHEEL_ZOOM) = 1.25, double the old step (0.0011, 1.12). A trackpad
+// pinch arrives as many small ctrlKey wheel events in pixels, sized by Chromium
+// so the page's own zoom is exp(-deltaY / 100): PINCH_ZOOM 0.01 makes the view
+// follow the fingers one for one. A pinch step is a few pixels, a notch 100 or
+// 120, and a line-mode wheel is never a pinch.
+const WHEEL_ZOOM = 0.0022;
+const PINCH_ZOOM = 0.01;
+
 function onWheel(e) {
   e.preventDefault();
   if (!V.payload || !V.controls) return;
   const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY;
   if (!dy) return;
-  const s = Math.exp(Math.max(-300, Math.min(300, dy)) * 0.0011);   // > 1 zooms out
+  // > 1 zooms out. One factor per gesture (29 September 2026): see WHEEL_ZOOM.
+  const pinch = e.ctrlKey && e.deltaMode === 0 && Math.abs(e.deltaY) < 50;
+  const s = Math.exp(Math.max(-300, Math.min(300, dy)) * (pinch ? PINCH_ZOOM : WHEEL_ZOOM));
   const c = V.controls;
   const C = V.camera.position.clone();
   const v = new THREE.Vector3(0, 0, -1).applyQuaternion(V.camera.quaternion);
