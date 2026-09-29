@@ -65,6 +65,87 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
+**Drawers section fixes after Rudolf's review (29 September 2026, evening,
+brief `Claude outputs/drawers-fixes-brief-2026-09-29b.md`).** Parts 1-5 one
+commit each, `check_all` 23 of 23 at every one; Part 6 a report, no change.
+Benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50).
+`snapshot.py --compare` against the tree before: the October job identical;
+Test.json gains ONE critical (Part 2, below) and nothing else moves.
+
+1. **The editor jumped on Equal, Graduated and size changes — fixed at the
+   cause.** The dock's issue list was emitted only when the cabinet had
+   issues; when the first appeared, `#editor`'s children shifted by one, the
+   paint paired the old `.body` with the new issue list (two plain divs),
+   rebuilt every section with empty slots and the dock's scroll was clamped
+   away (measured: Equal from y 461 to 1041). Now the container is always
+   there (hidden when empty), `alike()` never pairs two divs of different
+   kinds (first class), `renderEditor` keeps the scroll and holds the
+   focused control where it was on screen (`keepPlace`; the browser's own
+   `overflow-anchor` off on the dock), and the stack readout `#dtot` — filled
+   after the solve, emptied by every paint, growing back 18 px later — is a
+   slot the paint leaves alone. `ui_check_drawers.py --stage scroll`.
+2. **A box never sits flush in its face** (NEW RULE, Rudolf, 29 Sept):
+   `Standard.drawer_box_clear` 2. See **FACES LEAD, BOXES FOLLOW**, rules 1
+   and 5. Test.json cabinet 7 drawer 3 (face 171, box 150; 148 fits) now
+   raises `drawer-box-face` — the one snapshot change. Cabinet 4 does not
+   (its boxes 90 / 150 / 141 / 136 fit).
+3. **Auto put the top box into the Top Front — fixed.** The limit a box top
+   may reach (`Cabinet.box_top_limit_of`) is the lower of the face top and a
+   Top Front / Top Rear band's underside (`Cabinet.support_band_underside`,
+   H − t, held equal to `support_layout`'s band on every fixture), each less
+   the clear. `max_box`, `≤` and Auto read it; `support-drawer-foul` fires
+   within 2 of the band too. Test_drawers cabinet 4 after Equal, all Auto:
+   top box stops at 762 under the band at 764, nothing raised.
+4. **The offset's floor.** What it was: the checks DID read the offset on the
+   way down (negative → `drawer-box-face`, the bottom drawer under 21 →
+   `drawer-bottom-offset`); the FIELD took any number, an Auto box's cell had
+   no red state and its `≤` grew as it slid down, 0-20 on an upper drawer
+   was legal under the old rule, and the critical landed in the dock's issue
+   list, which Part 1's jump scrolled away. Now `drawer_layout` gives each
+   outer drawer `offset_min` (21 bottom, 2 upper) and `offset_max` (the most
+   at which the typed box — or for Auto the runner's height — still fits),
+   `/api/compute` passes them, and the Offset field carries min / max, is
+   written on commit (`change`) clamped to them, blank or not a number = the
+   default. A stored value outside the range loads as it is, red, with the
+   critical, and cuts as it stands until changed. An Auto box that does not
+   fit shows its cell red (`drawer_layout`'s `fits`).
+5. **Box board and Face board** each have their own label over their control.
+6. **Report only — why cabinet 4 reads navy / near black in the Cabinets 3D
+   and mid grey in the elevation.** Measured in the running app (Test.json
+   cabinet 4, the Cabinets tab's Home view, which is front-left; pixels read
+   off a screenshot): GREY is `#504f4e` off `render.board_look` (a PLAIN
+   board, so its picture `Storm Grey.jpg` is not used — `Fills.textured`'s
+   rule), and `view3d.js` gives the material exactly that colour. The GREY
+   drawer faces are DRAWN `#364362`; with the selection tint off, `#353433`.
+   The WHITEMEL left side (`#ffffff`) is drawn `#9ea2ae`, untinted
+   `#9d9d9c`; even a white bottom facing up tops out at `#f5f6f7`. Why:
+   (a) **the lighting is physical and dim.** three.js r186 has no legacy
+   lights: Lambert diffuse is albedo / π, and the rig (`makeLights`) is a
+   hemisphere 1.15 (sky white, ground `#8f8f86`) plus one directional 1.0
+   from (−0.5, −0.8, 1) in the render frame. A front face gets irradiance
+   ≈ 0.58 (key) + 0.73 (hemisphere) = 1.31, × 1/π = 0.42 of its albedo in
+   LINEAR light — `#504f4e` (linear 0.080) comes out 0.033, sRGB `#333`; a
+   side the key barely reaches gets 0.35 of white, `#9e9e9e`. Every board is
+   drawn at roughly 40 % of its swatch in linear light, ~65 % in sRGB.
+   (b) **the selection tint** (`applySelection` → `tintMesh`): the selected
+   cabinet gets `PAPER.accent` `#1f6fd0` as EMISSIVE at 0.14 — linear
+   (0.002, 0.022, 0.088) ADDED to every face. On a dark board that is more
+   blue than the board reflects (0.088 against 0.033), so GREY turns navy
+   (`#353433` → `#364362`, which the arithmetic reproduces to the unit); on
+   white it only cools it. In the Cabinets tab the cabinet shown IS the
+   selection, so it is always tinted, and its edges are drawn in the accent
+   too. (c) **the elevation is a flat SVG fill** of `#504f4e`, no light and
+   no tint. For the realism brief: raise the light (or scale by π), add a
+   fill light, consider tone mapping, and make the selection an outline
+   rather than an emissive that recolours dark boards.
+
+Found, not touched: `hardware.json`'s Gelmar record carries
+`inner_height` 37 and `inner_thickness` 6 in the working tree, saved after
+the redo's last commit (the Runners form's estimate) — left uncommitted, as
+workshop data; commit it when the figures are confirmed off drawing 04227.
+`ui_check_restructure.py --stage attach` still fails its three
+pre-existing lines.
+
 **The Drawers section redone (29 September 2026, brief
 `Claude outputs/drawers-section-redo-brief-2026-09-29.md`, agreed with
 Rudolf).** Built Parts 1 to 8 in order, one commit each, `check_all` 23 of 23
@@ -500,14 +581,21 @@ against its OWN face:
 
 - **Outer drawers.** (1) Every box lies entirely within its own face's height
   — box bottom >= face bottom AND box top <= face top — or `drawer-box-face`
-  (CRITICAL): a box is never mounted higher or lower than its own face. (2)
+  (CRITICAL): a box is never mounted higher or lower than its own face.
+  **Since 29 September 2026 (evening) never FLUSH either:**
+  `Standard.drawer_box_clear` 2 — bottom >= face bottom + 2, top <= face top
+  − 2, and top <= a Top Front / Top Rear band's underside − 2 (else
+  `support-drawer-foul`); an upper drawer's least offset is therefore 2. (2)
   Each box sits at the bottom of its face, `Drawer.offset` up — per drawer,
   editable in the drawer row (**Off.**), blank = the default `drawer_rise`,
   21; written to the job file only when set. (3) The BOTTOM drawer may be
   raised, never set below 21: `drawer-bottom-offset` (CRITICAL). (4) An upper
   drawer may go lower or higher, still under rule 1. (5) The tallest box that
   fits is face − offset (`drawer_layout`'s `max_box`), shown as `≤n` beside
-  Box h, red when the box is over it.
+  Box h, red when the box is over it — **since 29 Sept: up to
+  `Cabinet.box_top_limit_of`, the face top or the support band, less the 2,
+  and Auto fills exactly that; red off `drawer_layout`'s `fits`. The Offset
+  field is held to `offset_min` / `offset_max` off the engine.**
 - **Inner drawers.** (6) Equal spacing as built. (7) At least
   `Standard.inner_drawer_min_gap` (30) clear between adjacent inner boxes, or
   `drawer-inner-gap` (CRITICAL).
@@ -575,7 +663,8 @@ are typed and auto-spaced, all-inner-or-all-outer, runner over depth − 16.
 Two things to look at in Test.json: cabinet 4's drawers now raise four
 criticals (three `drawer-box-face`, one `support-drawer-foul`) — boxes 90 /
 150 / 200 in faces 110 / 165 / 220 need to drop to 89 / 144 / 199 (or their
-offsets lower), and the top box to 76 to clear the Top Front band — so
+offsets lower), and the top box to 76 to clear the Top Front band (since the
+2 mm clear, 29 Sept: 87 / 142 / 197, and 74) — so
 Test.json does not export until they are changed; and the Gelmar price per pair is R0.00 in `hardware.json`
 until it is typed in.
 
@@ -1686,7 +1775,8 @@ restructure.
 ## Layout
 
 ```
-cabinetgen/standard.py     every construction constant. Start here.
+cabinetgen/standard.py     every construction constant. Start here. (drawer_box_clear 2: a
+                           drawer box never flush in its face — 29 Sept 2026)
 cabinetgen/boards.py       the board library: load, save, tape names, job usage
 boards.json                the library itself, shared through the repo
 cabinetgen/hardware.py     the hardware catalogue: runners (LEGACY, the Gelmar seed, load,
