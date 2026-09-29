@@ -8,6 +8,7 @@ import binascii
 import copy
 import glob
 import json
+import math
 import os
 import re
 import threading
@@ -1563,21 +1564,34 @@ def drawer_divider(payload):
     # (faces lead, boxes follow): the job and the pair's two drawer indices
     # say which. Without them, as before.
     rise = bottom_rise = 0
+    top_box = int(payload.get("top_box") or 0)
+    bottom_box = int(payload.get("bottom_box") or 0)
     if payload.get("job") is not None and payload.get("index") is not None:
         _job_, cab = _cabinet_of(payload)
         default = drawer_rise(cab, STANDARD)
 
-        def off(k):
+        def drawer(k):
             try:
-                d = cab.drawers[int(payload.get(k))]
+                return cab.drawers[int(payload.get(k))]
             except (TypeError, ValueError, IndexError):
-                return default
-            return default if d.offset is None else int(d.offset)
+                return None
+
+        def off(k):
+            d = drawer(k)
+            return default if d is None or d.offset is None else int(d.offset)
+
+        # An AUTO box (29 September 2026) is no figure to hold the face to:
+        # it follows the face. It must still take its runner, so an Auto
+        # drawer's face is held to the runner's height over its offset.
+        def box(k, sent):
+            d = drawer(k)
+            if d is None or d.box_height is not None:
+                return sent
+            return int(math.ceil(cab.runner_or_legacy.height))
         rise, bottom_rise = off("above"), off("below")
+        top_box, bottom_box = box("above", top_box), box("below", bottom_box)
     top, bottom = split_pair(int(payload["top"]), int(payload["bottom"]),
-                             int(payload["at"]),
-                             int(payload.get("top_box") or 0),
-                             int(payload.get("bottom_box") or 0), rise=rise,
+                             int(payload["at"]), top_box, bottom_box, rise=rise,
                              bottom_rise=bottom_rise)
     return {"ok": True, "top": top, "bottom": bottom}
 

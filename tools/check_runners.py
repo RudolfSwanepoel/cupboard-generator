@@ -21,7 +21,10 @@ The drawers / runners / supports brief of 28 September 2026. Holds:
   * Part 5 — the drawer checks, each with a stable id and worked numbers;
   * drawer box edging (29 September 2026): `Drawer.box_edge_board`, the
     exterior board by default, a chosen board winning, a board with no PVC an
-    EDGING critical, the job file, the board slot, the swap, the 3D band.
+    EDGING critical, the job file, the board slot, the swap, the 3D band;
+  * the Drawers section redone (29 September 2026): the section's defaults and
+    a drawer's own overrides, the box edging thickness (R1), the runner's inner
+    member and what a record must state (R3, R4), box height Auto (R2).
 
 Repo root is the parent of tools/.
 """
@@ -819,6 +822,66 @@ def section_defaults():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def auto_box():
+    print("\nbox height Auto (R2, 29 September 2026): the tallest box that fits its face")
+    from cabinetgen.room import drawer_layout
+    c = box(drawers=[Drawer(240, None), Drawer(240, 150), Drawer(233, None)])
+    j = job_of(c)
+    lay = {u["n"]: u for u in drawer_layout(c, STANDARD, j.materials)}
+    check("Auto is drawer_layout's max_box: face less offset (240 - 21, 233 - 21)",
+          [(c.box_height_of(d), lay[i + 1]["max_box"], lay[i + 1]["box_h"], lay[i + 1]["auto"])
+           for i, d in enumerate(c.drawers)],
+          [(219, 219, 219, True), (150, 219, 150, False), (212, 212, 212, True)])
+    sides = lambda job: sorted((p.width, p.qty) for p in generate_job(job) if p.role == "Drawer Side")
+    check("the engine cuts it there: sides 219 and 212, the typed 150 as typed",
+          sides(j), [(150, 2), (212, 2), (219, 2)])
+    c.drawers[0].offset = 30
+    check("  a raised offset lowers it (240 - 30)", c.box_height_of(c.drawers[0]), 210)
+    c.drawers[0].offset = None
+    c.drawers[0].face_height = 300
+    check("it follows a face change (300 - 21), the typed box untouched",
+          (c.box_height_of(c.drawers[0]), c.drawers[1].box_height, sides(j)),
+          (279, 150, [(150, 2), (212, 2), (279, 2)]))
+    check("drawer-box-face cannot fire on an Auto box",
+          [i.message[:9] for i in issues(j, "drawer-box-face")], [])
+    short = job_of(box(drawers=[Drawer(60, None), Drawer(655, 150)]))
+    got = [i.message for i in issues(short, "drawer-runner-height")]
+    check("drawer-runner-height still can: a face too short for the runner, and says so",
+          [("face is too short" in m, "Auto" in m, "at least 66" in m) for m in got], [(True, True, True)])
+    typed = job_of(box(drawers=[Drawer(60, 40), Drawer(655, 150)]))
+    check("  a TYPED short box keeps the old wording",
+          ["box 40 is lower than" in i.message for i in issues(typed, "drawer-runner-height")], [True])
+
+    # the file: null only when Auto
+    raw = job_to_dict(j)["cabinets"][0]["drawers"]
+    check("the file writes box_height null only on the Auto drawers",
+          [d["box_height"] for d in raw], [None, 150, None])
+    back = job_from_dict(json.loads(json.dumps(job_to_dict(j))))
+    check("  and reads them back Auto",
+          [d.box_height for d in back.cabinets[0].drawers], [None, 150, None])
+    for name in ("Test_drawers", "Test_export"):
+        with open(job_file(name), encoding="utf-8") as f:
+            data = json.load(f)
+        check(f"{name}.json: every saved drawer carries a typed figure, and keeps it",
+              all(isinstance(d.get("box_height"), int) for c2 in data["cabinets"] for d in c2.get("drawers", [])),
+              True)
+
+    # presets and the divider leave Auto alone
+    d2 = copy.deepcopy(c)
+    job = job_of(d2)
+    r = api.drawer_divider({"job": job_to_dict(job), "index": 0, "above": 0, "below": 1,
+                            "top": 300, "bottom": 240, "at": 5, "top_box": None, "bottom_box": 150})
+    check("the divider drag: an Auto face is held to the runner (45) over its offset (21), not to "
+          "a box figure — 66, and the typed box below still clears",
+          (r["top"], r["bottom"]), (66, 474))
+    check("  and the drag writes faces only: the Auto box stays Auto",
+          [d.box_height for d in job.cabinets[0].drawers], [None, 150, None])
+    inn = api.inner_drawers({"job": job_to_dict(job_of(box(doors=1, drawers=[Drawer(240, None)]))),
+                             "index": 0, "inner": True})
+    check("making an Auto drawer inner writes down the figure it came to (240 - 21)",
+          [d["box_height"] for d in inn["drawers"]], [219])
+
+
 def main():
     catalogue()
     legacy_holds()
@@ -829,6 +892,7 @@ def main():
     scene_3d()
     box_edging()
     section_defaults()
+    auto_box()
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + "; ".join(FAILS))

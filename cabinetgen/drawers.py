@@ -178,7 +178,10 @@ def split_pair(top_h: int, bottom_h: int, at: int, top_box: int = 0,
     lift) — and `bottom_rise` the same for the lower face, `rise` when not
     given. Each face is then held to at least its box plus its offset, so no
     box top passes its own face top — the `drawer-box-face` critical (faces
-    lead, boxes follow: ruled 28 September 2026).
+    lead, boxes follow: ruled 28 September 2026). An AUTO box (29 September
+    2026) follows its face, so it is not passed as a figure: the caller
+    (`api.drawer_divider`) holds that face to the runner's height instead, and
+    the drag writes faces only — the box stays Auto.
 
         split_pair(200, 300, 250)   ->   (250, 250)
         split_pair(200, 300, 10, 90, 116)   ->   (91, 409)
