@@ -27,6 +27,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# the corner warning reads "A→B"; a Windows console on cp1252 cannot print it
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from cabinetgen.engine import generate_job, plinth_panels                 # noqa: E402
 from cabinetgen.model import (Cabinet, GapChoice, Job, Placement,         # noqa: E402
@@ -128,6 +130,32 @@ def main() -> int:
     j.plinths = [PlinthChoice("B", "base", 2)]
     check("no deduction when the other run has no plinth to butt into",
           [p.length for p in plinth_panels(j)], [600])
+
+    print("\nan inside corner that is not 90: no butt, a warning (ruled 29 September 2026)")
+    rm = rectangular(4000, 3000, ceiling=2600)
+    rm.walls[0].corner_end = 135
+    j = Job(name="c", room=rm,
+            cabinets=[cab(1, 900), cab(2, 600)],
+            placements=[Placement(1, "A", 3100), Placement(2, "B", 0)],
+            plinths=[PlinthChoice("A", "base", 1), PlinthChoice("B", "base", 2)])
+    check("both boards are cut to their runs, neither shortened",
+          sorted(p.length for p in plinth_panels(j)), [600, 900])
+    check("and no note says it butts",
+          [p.note for p in plinth_panels(j) if "butts into" in p.note], [])
+    warn = [i for i in validate(j, generate_job(j)) if i.check == "plinth-corner"]
+    check("one WARNING naming the corner and its angle",
+          [(i.level, i.where, i.message) for i in warn],
+          [("warning", "A-B", "Plinth at the A→B 135° corner: the boards don't meet, "
+                              "cut a closing piece on site")])
+    j.plinths = [PlinthChoice("B", "base", 2)]
+    check("not said when only one run has a plinth there",
+          [i for i in validate(j, generate_job(j)) if i.check == "plinth-corner"], [])
+    rm.walls[0].corner_end = 90
+    j.plinths = [PlinthChoice("A", "base", 1), PlinthChoice("B", "base", 2)]
+    check("back at 90: the 16 mm butt, and nothing said",
+          (sorted(p.length for p in plinth_panels(j)),
+           [i for i in validate(j, generate_job(j)) if i.check == "plinth-corner"]),
+          ([584, 900], []))
 
     print("\na run longer than a board splits at a cabinet division")
     spec = tuple((i + 1, 800, i * 800) for i in range(5))       # 4000 mm of cabinets

@@ -944,9 +944,13 @@ corners and any other angle are in scope for walls. Corner units are not (4).
 
 **What learnt about angles** (Part 3 of the brief, audited):
 
-- `plinth_butt_wall`: the butt applies at an inside corner (under 180) of any
-  angle, still one board thickness off the later run; at 180 and at an outside
-  corner each plinth ends at the corner.
+- `plinth_butt_wall`: the 16 mm butt applies at a nominal 90 inside corner
+  only (ruled the same evening, replacing "any inside angle"). At any other
+  inside angle there is no deduction: each plinth ends where its run ends, and
+  where two fitted plinths meet there a WARNING names the corner
+  (`plinth-corner`: "Plinth at the B→C 135° corner: the boards don't meet, cut
+  a closing piece on site"). At 180 and at an outside corner each plinth ends
+  at the corner and nothing is said.
 - Gaps: the nominal gap along the wall is unchanged. The width at the FRONT of
   the run (`room._front_gap`) is measured against the real return wall: at a
   nominal 90 exactly as before (the measured deviation alone); at any other
@@ -986,3 +990,24 @@ labelled `B→C`, quick picks 90 inside · 270 outside · 135 · 225 · 180 in l
 custom (a number); a dash on an open run's last wall — and the **drawn** marker
 with its **measured** button. "+ Wall before / after" still add walls at 90.
 The plan redraws as angles change, as it does for lengths.
+
+**Follow-up rulings, the same evening.** Gap front width at an angled inside
+corner: the real angle, as built. Plinth: as above, the butt at 90 only.
+Drawn-room lettering and winding: accepted as built.
+
+**Which side is the room on an OPEN run.** The side the run turns towards on
+balance — the inside of an L or a U, whichever way round it was clicked
+(`room.walls_from_points`; an L clicked left-to-right and right-to-left comes
+out the same walls, its cabinets on the room side of both walls — pinned in
+`check_room.py` and `ui_check_walls.py --stage side`). A run that does not turn
+on balance — one straight wall, a step whose turns cancel — cannot say, and is
+taken as drawn: the room on the right hand of the direction drawn. And an L
+may be meant round the outside of a nib. So the Walls card offers **Flip
+side** on an open run (`room.flip_side`, `/api/room-flip`): the same walls
+walked the other way, each keeping its letter; each corner 360 less itself;
+offsets swapped end for end and negated; openings, obstructions, cabinets and
+placed panels kept where they are along each wall (x from the other end); a
+corner unit's hand swapped; a gap decision's two sides swapped; a plinth
+decision moved to the cabinet that now starts its run. No cut changes, and
+flipping twice gives the job file back exactly. A closed room has no other
+side and is refused.

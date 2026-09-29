@@ -104,8 +104,8 @@ for byte. Full write-up in `docs/ROOM-LAYOUT-SPEC.md`, **Ruled — 29 Sept 2026
    `corner-unit-angle` — ruling 4: "Corner unit at a 135° corner: construction
    not ruled.", for a mitre or blind unit whose hand-end corner is not a
    nominal 90; no shadow is cast there.
-5. **What learnt about angles**: the plinth butts only at inside corners
-   (under 180, any angle); a gap meeting an angled inside corner is measured
+5. **What learnt about angles**: the plinth butts (16 mm) only at a nominal
+   90 inside corner — see the follow-up rulings below; a gap meeting an angled inside corner is measured
    at the front against the real return wall (135: 100 at the wall is 680 at
    the front of a 580 run — a cabinet, not a filler), at an outside corner
    the run just ends; the plan drag picks the nearest wall SEGMENT, not the
@@ -124,13 +124,36 @@ for byte. Full write-up in `docs/ROOM-LAYOUT-SPEC.md`, **Ruled — 29 Sept 2026
    parallel with other scripts, f6's "and nothing was recomputed for it"
    (Esc during a 3D drag) read `sceneStale` true, and passed four runs alone.
 
-**For Rudolf:** (a) Liam_Room is not saved or touched — set its lengths
-positive and its corners in the new Corner column; (b) at an angled inside
-corner the gap's front width is the real one (item 5) — the brief said gap
-sizes along the wall stay as they are, and they do; say if the front should
-stay on the offsets alone instead; (c) the plinth deduction at a 135 corner
-is still one board thickness, as ruled — a butt at a splay may want a mitre
-cut instead, which is not modelled; (d) a drawn room is re-oriented with
+**Follow-up rulings, Rudolf, 29 September 2026 (the same evening):**
+
+- **Gap front width at an angled inside corner: the real angle, as built.**
+- **Plinth at an inside corner that is not 90: no butt deduction.** Each
+  plinth ends where its run ends, and a WARNING names the corner
+  (`plinth-corner`, `room.plinth_open_corners`): "Plinth at the A→B 135°
+  corner: the boards don't meet, cut a closing piece on site" — raised where
+  two fitted plinths on the floor meet there. The 16 mm butt stays for 90
+  inside corners only (`plinth_butt_wall`). Pinned in `check_plinth.py` and
+  `check_room.py` (90 butts; 135 and 60 warn; 180 and 270 neither).
+- **Drawn-room lettering and winding: accepted as built.**
+- **Which side is the room on an OPEN run** (asked, answered): the side the
+  run turns towards on balance — the inside of an L or a U, whichever way it
+  was clicked (`walls_from_points`). An L clicked left-to-right and
+  right-to-left gives the same walls, and its cabinets stand inside the L on
+  the room side of both walls — proved in `check_room.py` and in the running
+  app (`ui_check_walls.py --stage side`). A run that does not turn on balance
+  (one straight wall, a step whose turns cancel) cannot say, and is taken as
+  drawn: the room on the right hand of the direction drawn. And an L may be
+  meant round the OUTSIDE of a nib. So the Walls card has **Flip side** on an
+  open run: `room.flip_side` (`/api/room-flip`) walks the same walls the other
+  way — each keeps its letter, each corner becomes 360 less itself, offsets
+  swap ends and change sign, openings, obstructions, cabinets and placed
+  panels keep their places along each wall (x from the other end), a corner
+  unit's hand swaps, a gap decision swaps its sides, a plinth decision follows
+  its run. Nothing is cut differently; flipping twice gives the job file back
+  exactly. Refused on a closed room, which has no other side.
+
+**For Rudolf:** Liam_Room is not saved or touched — set its lengths positive
+and its corners in the new Corner column. A drawn room is re-oriented with
 wall A along +X once made.
 
 **The 3D view drawn realistically — Round 2 (29 September 2026, Rudolf's notes

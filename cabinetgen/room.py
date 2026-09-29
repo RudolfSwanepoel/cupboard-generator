@@ -228,11 +228,19 @@ def walls_from_points(points, closed: bool) -> List[Wall]:
     Lengths are rounded to the millimetre, and each corner's interior angle is
     worked out from the two walls' directions, to 0.1 degree and whole where it
     is whole. The model is clockwise, so an outline drawn the other way round
-    is walked in reverse first (an open run by the way it mostly turns) —
-    a closed one still starting on the first wall drawn, so that wall stays A.
-    A closed outline's last wall runs back to the first point. The browser
-    sends the points and works out nothing else. Pinned in
-    tools/check_room.py.
+    is walked in reverse first — a closed one still starting on the first wall
+    drawn, so that wall stays A. A closed outline's last wall runs back to the
+    first point. The browser sends the points and works out nothing else.
+    Pinned in tools/check_room.py.
+
+    WHICH SIDE IS THE ROOM on an OPEN run: the side the run turns towards, on
+    balance — the inside of an L or a U, whichever way round it was drawn,
+    because a run that turns clockwise on the page has the room on its inner
+    side. A run that does not turn on balance (one straight wall, a step whose
+    turns cancel) gives no answer, and is taken as drawn: the room on the
+    right hand of the direction it was drawn in. Neither is always what was
+    meant — a run can wrap the outside of a nib — so the Walls card offers
+    Flip side on an open run (`flip_side`).
     """
     pts = []
     for x, y in points:
@@ -275,6 +283,69 @@ def walls_from_points(points, closed: bool) -> List[Wall]:
             w.corner_end = int(round(a)) if a == round(a) else a
         walls.append(w)
     return walls
+
+
+def flip_side(job, std: Standard = STANDARD) -> None:
+    """Put the room on the OTHER side of an open run of walls, in place (29
+    September 2026) — for a run the drawing guessed the wrong way round, or a
+    typed run meant to wrap the outside of a nib.
+
+    The same walls in the same places, walked the other way: the order is
+    reversed, so each corner is now after the other wall and its interior
+    angle is 360 less what it was; the offsets swap ends and change sign (the
+    return wall that opened away from the room now closes towards it). Every
+    wall keeps its letter. Along each wall x now runs from the other end, so
+    an opening, an obstruction, a cabinet and a placed panel are each given
+    the x that keeps them where they are along it, and they stand against the
+    other face — the room's. A corner unit's hand swaps with it, so the end in
+    the corner is still the end in the corner; a gap decision swaps its two
+    sides, and a plinth decision follows its run to the cabinet that now
+    starts it. Nothing is cut differently: no cabinet, board or number moves.
+    A closed room has no other side, and is refused.
+    """
+    rm = job.room
+    if rm is None or rm.closed:
+        raise ValueError("only an open run of walls has another side")
+    mats = job.materials
+    # the plinth choices by the run they belong to, read before anything moves
+    was = {}
+    for r in runs(job, std):
+        c = plinth_choice_for(job, r)
+        if c is not None:
+            was[id(c)] = r.cabinets[-1]
+
+    old = list(rm.walls)
+    n = len(old)
+    lengths = {w.id: w.length for w in old}
+    angles = [corner_angle(rm, i) for i in range(n)]
+    new = old[::-1]
+    for k, w in enumerate(new):
+        w.offset_start, w.offset_end = -w.offset_end, -w.offset_start
+        i = n - 1 - k                       # this wall's index in the old order
+        # the corner after it now is the one that was before it (after old i-1)
+        a = 360 - angles[i - 1] if k < n - 1 else 90
+        w.corner_end = int(a) if a == int(a) else a
+        for o in w.openings:
+            o.x = w.length - o.x - o.width
+        for ob in w.obstructions:
+            ob.x = w.length - ob.x
+    rm.walls = new
+
+    by = {c.number: c for c in job.cabinets}
+    for p in job.placements:
+        cab = by.get(p.cabinet)
+        if cab is None or p.wall not in lengths:
+            continue
+        reach = geometry(cab, std, mats).width
+        p.x = lengths[p.wall] - p.x - reach
+        if cab.corner_on:
+            # R is written as its default, blank, so flipping twice is exact
+            cab.corner_hand = "" if cab.hand == "L" else "L"
+    for g in job.gaps:
+        g.after, g.before = g.before, g.after
+    for c in job.plinths:
+        if id(c) in was:
+            c.first = was[id(c)]
 
 
 def corner_points(rm: Room) -> List[Point]:
@@ -3122,10 +3193,23 @@ def plinth_butt_wall(job, run: Run, std: Standard = STANDARD) -> Optional[str]:
     exactly one of the two boards — never both, which would leave a gap, and
     never neither, which would not fit.
 
-    Only at an INSIDE corner — interior under 180 degrees, of any angle (29
-    September 2026). Walls in line or an outside corner give no butt: each
-    plinth simply ends at the corner.
+    Only at a nominal 90-degree INSIDE corner (ruled 29 September 2026). At
+    any other inside angle the boards do not meet: each plinth ends where its
+    run ends, and `plinth_open_corners` names the corner for a closing piece
+    cut on site. Walls in line or an outside corner give no butt either.
     """
+    rm = job.room
+    prev_id = _plinth_meets(job, run, std)
+    if prev_id is None:
+        return None
+    i = [w.id for w in rm.walls].index(run.wall)
+    return prev_id if corner_angle(rm, (i - 1) % len(rm.walls)) == 90 else None
+
+
+def _plinth_meets(job, run: Run, std: Standard = STANDARD) -> Optional[str]:
+    """The wall before this run's start corner, when a fitted plinth on that
+    wall runs into the same corner at the same height — whatever the angle
+    there. None where no two plinths meet at this run's start."""
     rm = job.room
     if rm is None or not run.touches_start:
         return None
@@ -3133,14 +3217,35 @@ def plinth_butt_wall(job, run: Run, std: Standard = STANDARD) -> Optional[str]:
     i = wall_ids.index(run.wall)
     if i == 0 and not rm.closed:
         return None
-    if corner_angle(rm, (i - 1) % len(wall_ids)) >= 180:
-        return None
     prev_id = wall_ids[i - 1]
     for other in runs(job, std):
         if (other.wall == prev_id and other.z == run.z and other.touches_end
                 and _plinth_fitted(job, other)):
             return prev_id
     return None
+
+
+def plinth_open_corners(job, std: Standard = STANDARD) -> List[Tuple[str, str, float]]:
+    """(wall before, wall after, angle) for every INSIDE corner that is not a
+    nominal 90 where two fitted plinths meet (ruled 29 September 2026). There
+    is no butt deduction: each board ends where its run ends, and the gap
+    between them is closed with a piece cut on site — a WARNING, never a
+    critical, because the boards on the order are right as they stand."""
+    rm = job.room
+    if rm is None:
+        return []
+    out = []
+    for run in runs(job, std):
+        if run.z != 0 or not _plinth_fitted(job, run):
+            continue
+        prev_id = _plinth_meets(job, run, std)
+        if prev_id is None:
+            continue
+        i = [w.id for w in rm.walls].index(run.wall)
+        a = corner_angle(rm, (i - 1) % len(rm.walls))
+        if a != 90 and a < 180:
+            out.append((prev_id, run.wall, a))
+    return out
 
 
 def plinth_deduction(job, run: Run, std: Standard = STANDARD) -> int:

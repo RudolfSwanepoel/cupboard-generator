@@ -21,7 +21,7 @@ from .room import (above_ceiling, arm_shelf_depth, arm_shelf_max_depth,
                    corner_exists, crossing_walls, unit_corner,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
                    panel_clashes as room_panel_clashes, placed,
-                   plinth_choice_for, run_key, runs as room_runs, tip_inputs,
+                   plinth_choice_for, plinth_open_corners, run_key, runs as room_runs, tip_inputs,
                    ceiling_inputs_for,
                    tip_problems,
                    triangulate)
@@ -1216,6 +1216,12 @@ def _plinth(job: Job, std):
                              f"a hung run stands on nothing, so none is made"))
             continue
         fitted += 1
+    # An inside corner that is not a nominal 90 (ruled 29 September 2026): no
+    # butt, each board ends with its run, and the gap is closed on site.
+    for a, b, angle in plinth_open_corners(job, std):
+        out.append(Issue(WARNING, f"{a}-{b}",
+                         f"Plinth at the {a}→{b} {angle:g}° corner: the boards "
+                         f"don't meet, cut a closing piece on site", check="plinth-corner"))
     for c in job.plinths:
         if c.fitted and (c.wall, c.layer, c.first) not in live:
             out.append(Issue(WARNING, f"{c.wall}:{c.first}",

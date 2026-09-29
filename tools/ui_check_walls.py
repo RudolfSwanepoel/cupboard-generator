@@ -2,13 +2,14 @@
 app, with a real mouse (Playwright, optional).
 
     python run_app.py --no-window --port 8766      # in another window
-    python tools/ui_check_walls.py [--port 8766] [--stage draw|ell|corner|input|drag|all]
+    python tools/ui_check_walls.py [--port 8766] [--stage draw|ell|corner|input|drag|side|3d|all]
 
 Drives what check_room.py cannot: a 4-wall room drawn by clicks on Room ->
 Plan and closed on its first corner; an L drawn with an outside corner; a
 corner set to 270 in the Walls card turning the plan; a negative length and an
 angle out of range refused at the input; and a cabinet dragged in the plan onto
-a wall standing at 45 degrees. Every job is built in the page (`adopt`), never
+a wall standing at 45 degrees; an open L drawn
+both ways with its cabinets on the room side, and Flip side. Every job is built in the page (`adopt`), never
 loaded from jobs/ and never saved. Screenshots go into
 output/_checks/ui_check_walls/.
 
@@ -390,6 +391,99 @@ def stage_drag(pw):
     browser.close()
 
 
+def stage_side(pw):
+    print("\nAn OPEN run drawn with the mouse: which side is the room")
+    browser = pw.chromium.launch(headless=not args.headed)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+
+    def draw_open(points):
+        page.click("#drawwalls")
+        page.wait_for_selector("#drawsvg", timeout=5000)
+        for x, y in points[:-1]:
+            click_mm(page, x, y)
+        cx, cy = at_mm(page, *points[-1])
+        page.mouse.move(cx, cy, steps=3)
+        page.mouse.dblclick(cx, cy)
+        page.wait_for_function("() => !DRAW", timeout=10000)
+        computed(page)
+
+    def room_side(own_only=False):
+        """Every placed cabinet's drawn footprint (the 3D scene's parts, world
+        mm) against the room side of every wall line — or only its own wall's
+        — off the engine's corners: the half-plane test check_room.py makes.
+        Inside an L the room is on the room side of both walls; round the
+        outside of one it is on the room side of each cabinet's own."""
+        sc = page.evaluate("async () => await post('/api/scene', {job: S.job})")
+        corners = page.evaluate("() => S.res.room.corners")
+        ids = page.evaluate("() => S.res.room.walls.map((w) => w.id)")
+        out = []
+        for item in sc["items"]:
+            if not item["parts"]:
+                continue
+            ok = True
+            for k in range(len(corners) - 1):
+                if own_only and ids[k] != item["wall"]:
+                    continue
+                (ax, ay), (bx, by) = corners[k], corners[k + 1]
+                ln = math.hypot(bx - ax, by - ay)
+                nx, ny = -(by - ay) / ln, (bx - ax) / ln
+                for part in item["parts"]:
+                    for x, y in part["outline"]:
+                        if (x - ax) * nx + (y - ay) * ny < -0.5:
+                            ok = False
+            out.append((item["number"], ok))
+        return sorted(out)
+
+    def place_two():
+        page.evaluate("() => { S.job.placements = [{cabinet: 1, wall: 'A', x: 1000, z: 0, y: 0, "
+                      "flip: false, layer: null}, {cabinet: 2, wall: 'B', x: 500, z: 0, y: 0, "
+                      "flip: false, layer: null}]; placesSig = null; schedule(); }")
+        computed(page)
+
+    job = Job(name="side", cabinets=[Cabinet(number=n, width=600, height=720, depth=560,
+                                             kind="base") for n in (1, 2)])
+    adopt(page, job)
+    room_plan(page)
+    ltr = [(0, 0), (3000, 0), (3000, 2000)]
+    for name, pts in (("left to right", ltr), ("right to left", ltr[::-1])):
+        page.evaluate("() => { S.job.room = null; S.job.placements = []; schedule(); }")
+        computed(page)
+        draw_open(pts)
+        check(f"an L drawn {name}: A 3000, B 2000, corner 90", walls(page),
+              [["A", 3000, 90, True], ["B", 2000, 90, True]])
+        place_two()
+        check(f"  both cabinets inside the L, on the room side of both walls", room_side(),
+              [(1, True), (2, True)])
+        shot(page, "side_" + name.replace(" ", "_"), "#plancard")
+    check("Flip side is offered on an open run",
+          page.evaluate("() => !!document.querySelector('#roomflip')"), True)
+    page.click("#roomflip")
+    computed(page)
+    check("Flip side: the walls walked the other way, the corner now 270",
+          walls(page), [["B", 2000, 270, True], ["A", 3000, 90, True]])
+    check("  the cabinets keep their places along the walls, x from the other end",
+          page.evaluate("() => S.job.placements.map((p) => [p.cabinet, p.wall, p.x])"),
+          [[1, "A", 1400], [2, "B", 900]])
+    check("  and stand on the room's side of their own walls — the outside of the L now",
+          room_side(own_only=True), [(1, True), (2, True)])
+    check("  no longer inside the L", room_side(), [(1, False), (2, False)])
+    shot(page, "side_flipped", "#plancard")
+    page.click("#roomflip")
+    computed(page)
+    check("Flip side again: back as it was",
+          page.evaluate("() => S.job.placements.map((p) => [p.cabinet, p.wall, p.x])"),
+          [[1, "A", 1000], [2, "B", 500]])
+    page.select_option('#room select[data-r="closed"]', "yes")
+    computed(page)
+    page.evaluate("() => renderRoom(true)")
+    check("not offered on a closed room",
+          page.evaluate("() => !!document.querySelector('#roomflip')"), False)
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 def stage_3d(pw):
     print("\n3D: an L room with an outside corner and a splayed wall")
     browser = pw.chromium.launch(headless=not args.headed, args=[
@@ -434,7 +528,7 @@ def stage_3d(pw):
 
 
 STAGES = {"draw": stage_draw, "ell": stage_ell, "corner": stage_corner,
-          "input": stage_input, "drag": stage_drag, "3d": stage_3d}
+          "input": stage_input, "drag": stage_drag, "side": stage_side, "3d": stage_3d}
 
 
 def main() -> int:

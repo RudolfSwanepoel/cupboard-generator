@@ -31,6 +31,8 @@ import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# the messages name corners "A→B"; a Windows console on cp1252 cannot print it
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from cabinetgen.model import (Cabinet, Job, Obstruction, Opening,          # noqa: E402
                               Placement, Room, Wall)
@@ -419,6 +421,94 @@ def angles():
           [None, 270, None, None, None, None])
     check("and read back", job_to_dict(job_from_dict(json.loads(json.dumps(j2)))), j2)
 
+    print("\nwhich side is the room on an OPEN run drawn with the mouse")
+    from cabinetgen.model import GapChoice
+    from cabinetgen.room import flip_side
+
+    def on_room_side(rm, pts, wall_ids):
+        """Every point on the room side of each named wall's line."""
+        fr = wall_frames(rm)
+        return all(((x - fr[w][0][0]) * fr[w][2][0] + (y - fr[w][0][1]) * fr[w][2][1]) >= -0.5
+                   for w in wall_ids for x, y in pts)
+
+    def open_l(points):
+        rm = Room(name="o", ceiling=2600, closed=False, walls=walls_from_points(points, False))
+        j = Job(name="o", room=rm,
+                cabinets=[Cabinet(number=1, width=600, height=720, depth=580, kind="base"),
+                          Cabinet(number=2, width=600, height=720, depth=580, kind="base")],
+                placements=[Placement(1, "A", 1000), Placement(2, "B", 700)])
+        fps = [cabinet_footprint(rm, p, c) for c, p in zip(j.cabinets, j.placements)]
+        return rm, j, fps
+
+    # the same L on the page, clicked in each direction: right then down, and
+    # up then left back along it
+    ltr = [(0, 0), (3000, 0), (3000, 2000)]
+    rtl = ltr[::-1]
+    rm1, _j1, fp1 = open_l(ltr)
+    rm2, _j2, fp2 = open_l(rtl)
+    check("an L clicked left-to-right: A 3000 then B 2000, one 90 corner",
+          [(w.id, w.length, w.corner_end) for w in rm1.walls], [("A", 3000, 90), ("B", 2000, 90)])
+    check("clicked right-to-left: the same walls, the same corner",
+          [(w.id, w.length, w.corner_end) for w in rm2.walls], [("A", 3000, 90), ("B", 2000, 90)])
+    check("left-to-right: both cabinets inside the L, on the room side of BOTH walls",
+          [on_room_side(rm1, fp, ["A", "B"]) for fp in fp1], [True, True])
+    check("right-to-left: the same", [on_room_side(rm2, fp, ["A", "B"]) for fp in fp2],
+          [True, True])
+    check("  and they stand in the same places", fp1, fp2)
+    down_right = [(0, 0), (0, 2000), (3000, 2000)]
+    for name, pts in (("down-then-right", down_right), ("left-then-up", down_right[::-1])):
+        rm3, _j3, fp3 = open_l(pts)
+        check(f"an L drawn {name}: the room is inside it",
+              ([w.corner_end for w in rm3.walls][:1],
+               [on_room_side(rm3, fp, ["A", "B"]) for fp in fp3]), ([90], [True, True]))
+    straight_a = walls_from_points([(0, 0), (3000, 0)], False)
+    straight_b = walls_from_points([(3000, 0), (0, 0)], False)
+    check("one straight wall gives no answer: it is taken as drawn, room on the right hand",
+          [len(straight_a), len(straight_b), straight_a[0].length], [1, 1, 3000])
+
+    print("\nFlip side: the room on the other side of an open run")
+    rm, j, fp_before = open_l(ltr)
+    j.cabinets.append(Cabinet(number=3, width=1000, height=720, depth=560, doors=1,
+                              corner_unit=True, corner_style="blind", blind_width=500))
+    j.placements.append(Placement(3, "A", 2000))
+    rm.walls[0].offset_end, rm.walls[1].offset_start = 12, 10
+    rm.walls[0].openings.append(Opening("door", 200, 700))
+    j.gaps = [GapChoice("A", None, 1, "base", "open")]
+    j.plinths = [PlinthChoice("A", "base", 1)]
+    first_run = [r for r in runs(j) if r.wall == "A"][0]
+    before = job_to_dict(j)
+    cut_before = [(p.label, p.length, p.width, p.qty) for p in generate_job(j)]
+    flip_side(j)
+    check("the walls walked the other way, each keeping its letter",
+          [(w.id, w.length) for w in rm.walls], [("B", 2000), ("A", 3000)])
+    check("the corner is now 270 from the room's side", [w.corner_end for w in rm.walls][:1], [270])
+    check("the offsets swap ends and change sign",
+          (rm.walls[0].offset_end, rm.walls[1].offset_start), (-10, -12))
+    check("an opening keeps its place along the wall, x from the other end",
+          [(o.x, o.width) for o in rm.walls[1].openings], [(2100, 700)])
+    by = {p.cabinet: p for p in j.placements}
+    check("cabinet 1 keeps its distance from the corner (1400-2000 from it)",
+          (by[1].wall, by[1].x), ("A", 1400))
+    check("cabinet 2 on B the same, from B's other end", (by[2].wall, by[2].x), ("B", 700))
+    check("a blind corner's hand swaps, so its corner end stays in the corner",
+          j.cabinets[2].corner_hand, "L")
+    check("a gap decision swaps its sides", [(g.after, g.before) for g in j.gaps], [(1, None)])
+    check("a plinth decision follows its run to the cabinet that now starts it",
+          [(p.wall, p.first) for p in j.plinths], [("A", first_run.cabinets[-1])])
+    check("the cut list does not move",
+          [(p.label, p.length, p.width, p.qty) for p in generate_job(j)], cut_before)
+    check("cabinet 1 now stands on the other face of A (the room's)",
+          on_room_side(rm, cabinet_footprint(rm, by[1], j.cabinets[0]), ["A"]), True)
+    flip_side(j)
+    check("flipped twice: the job file is exactly what it was", job_to_dict(j) == before, True)
+    closed = Job(name="c", room=rectangular(4000, 3000))
+    try:
+        flip_side(closed)
+        refused = False
+    except ValueError:
+        refused = True
+    check("a closed room has no other side: refused", refused, True)
+
     print("\ncorner units only at a nominal 90 inside corner (ruling 4)")
     mitre = Cabinet(number=1, width=850, height=2400, depth=500, back="none", supports=0,
                     doors=1, corner_unit=True, corner_style="mitre",
@@ -452,10 +542,10 @@ def angles():
           (_issues(sq, "corner-unit-angle"), corner_shadow(sq.room, mitre, sq.placements[0])),
           ([], ("B", 0, 850, 500)))
 
-    print("\nplinth butts at an inside corner of any angle, not at an outside one")
+    print("\nplinth butts at a 90 inside corner only (ruled 29 September 2026)")
 
     def butt(angle):
-        rm = rectangular(4000, 3000)
+        rm = rectangular(4000, 3000, ceiling=2600)
         rm.walls[0].corner_end = angle
         j = Job(name="c", room=rm,
                 cabinets=[Cabinet(number=1, width=900, height=720, depth=580, kind="base"),
@@ -463,12 +553,16 @@ def angles():
                 placements=[Placement(1, "A", 3100), Placement(2, "B", 0)],
                 plinths=[PlinthChoice("A", "base", 1), PlinthChoice("B", "base", 2)])
         r = [x for x in runs(j) if x.wall == "B"][0]
-        return plinth_butt_wall(j, r), sorted(p.length for p in plinth_panels(j))
+        return (plinth_butt_wall(j, r), sorted(p.length for p in plinth_panels(j)),
+                [(i.level, i.message) for i in _issues(j, "plinth-corner")])
 
-    check("at 90", butt(90), ("A", [584, 900]))
-    check("at 135", butt(135), ("A", [584, 900]))
-    check("at 180 none: each ends at the corner", butt(180), (None, [600, 900]))
-    check("at 270 none", butt(270), (None, [600, 900]))
+    check("at 90: the 16 mm butt, no warning", butt(90), ("A", [584, 900], []))
+    check("at 135: no butt, each board ends with its run, and a warning naming the corner",
+          butt(135), (None, [600, 900], [("warning", "Plinth at the A→B 135° corner: the "
+                                          "boards don't meet, cut a closing piece on site")]))
+    check("at 60 the same", butt(60)[:2] + (len(butt(60)[2]),), (None, [600, 900], 1))
+    check("at 180 none: each ends at the corner, nothing said", butt(180), (None, [600, 900], []))
+    check("at 270 none", butt(270), (None, [600, 900], []))
 
     print("\ngaps at an angled corner")
 

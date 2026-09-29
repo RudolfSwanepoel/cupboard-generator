@@ -5755,6 +5755,7 @@ function renderRoom(force) {
     <div style="margin-top:9px">
       <button data-walladd="start">+ Wall before ${esc(rm.walls.length ? rm.walls[0].id : "the first")}</button>
       <button data-walladd="end">+ Wall after ${esc(rm.walls.length ? rm.walls[rm.walls.length - 1].id : "the last")}</button>
+      ${rm.closed ? "" : `<button id="roomflip" title="put the room on the other side of this run — the walls stay where they are">Flip side</button>`}
       <button id="roomdel" style="float:right">Remove room</button>
     </div>
     <p class="note" style="margin-top:14px;max-width:64ch">
@@ -6784,6 +6785,23 @@ $("room").addEventListener("click", async (e) => {
     const r = await post("/api/room-extend", {room: S.job.room, at: end.dataset.walladd});
     if (!r.ok) { toast(r.error, true); return; }
     S.job.room = r.room;
+    renderRoom(true); schedule();
+    return;
+  }
+  if (e.target.id === "roomflip") {
+    // An open run's room side (29 September 2026): the engine walks the walls
+    // the other way and carries every placement and decision with them.
+    const r = await post("/api/room-flip", {job: S.job});
+    if (!r.ok) { toast(r.error, true); return; }
+    S.job.room = r.room;
+    S.job.placements = r.placements;
+    S.job.gaps = r.gaps;
+    S.job.plinths = r.plinths;
+    for (const c of S.job.cabinets) {
+      if (String(c.number) in r.hands) c.corner_hand = r.hands[String(c.number)];
+    }
+    places();
+    placesSig = null;
     renderRoom(true); schedule();
     return;
   }

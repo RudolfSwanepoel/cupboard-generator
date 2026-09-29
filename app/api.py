@@ -50,7 +50,7 @@ from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, 
                              blind_panel_height, blind_spans, carcass_z,
                              clashes as room_clashes,
                              closure_error, corner_angle, corner_points, crossing_walls,
-                             free_x, gaps as room_gaps, geometry, walls_from_points,
+                             flip_side, free_x, gaps as room_gaps, geometry, walls_from_points,
                              layer_of, mitre_blank, mitre_inner_span, mitre_legs,
                              overlaps as room_overlaps,
                              panel_clashes as room_panel_clashes, placed_panels,
@@ -2138,6 +2138,22 @@ def room_extend(payload):
     return {"ok": True, "room": room_to_dict(rm)}
 
 
+def room_flip(payload):
+    """The room on the other side of an open run (29 September 2026): the
+    same walls walked the other way, and every placement, gap and plinth
+    decision carried with them so nothing moves along its wall
+    (`room.flip_side`). Hands back what changed; the cut list is untouched."""
+    job = _job(payload)
+    try:
+        flip_side(job, job.std)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    d = job_to_dict(job)
+    return {"ok": True, "room": d["room"], "placements": d.get("placements", []),
+            "gaps": d.get("gaps", []), "plinths": d.get("plinths", []),
+            "hands": {str(c.number): c.corner_hand for c in job.cabinets if c.corner_on}}
+
+
 def room_draw(payload):
     """Walls off an outline drawn with the mouse on Room -> Plan (29 September
     2026). The browser sends the corners it clicked, in world plan mm, and
@@ -2450,6 +2466,7 @@ ROUTES = {
     "/api/snapshot": snapshot,
     "/api/room-extend": room_extend,
     "/api/room-draw": room_draw,
+    "/api/room-flip": room_flip,
 }
 
 
