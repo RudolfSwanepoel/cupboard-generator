@@ -1348,6 +1348,9 @@ function sizeGrey(c, key) {
   if (cornerTicked(c)) return "Set in Corner Unit below";
   return "";
 }
+function showPlanShape(c) {
+  return notPanel(c) && (c.template === "none" || (c.footprint || []).length > 0);
+}
 function outlineGrey(c) {
   return cornerShaped(c)
     ? "Derived from the corner measurements \u2014 an entered outline is not read"
@@ -1417,10 +1420,14 @@ const SECTIONS = [
          "and an end cap each side \u2014 each its own numbered item.",
    fields: []},
 
-  {key: "outline", name: "Outline", when: notPanel, grey: outlineGrey,
-   hint: "Actual plan shape, x along the wall, y out from the wall. " +
-         "All geometry checks read this, not the declared width/depth.",
-   fields: [["footprint", "Footprint outline", "poly"]]},
+  // Plan shape (29 September 2026, was Outline): offered only where it means
+  // something — a hand-built (template "none") cabinet, or one that already
+  // carries an outline. What it does is unchanged.
+  {key: "outline", name: "Plan shape", when: showPlanShape, grey: outlineGrey,
+   hint: "The cabinet's shape in plan, for a hand-built unit that is not a " +
+         "rectangle. x along the wall, y out from it, in mm. Leave blank for " +
+         "the rectangle its panels make.",
+   fields: [["footprint", "Plan shape", "poly"]]},
 
   {key: "structure", name: "Structure", slot: "structurebox", when: notPanel,
    fields: []},
@@ -7022,7 +7029,7 @@ function select3D(number, part, opts) {
 // nothing more: the section says everything about it.
 const PART_SECTION = {door: "doors", drawer: "drawers", support: "supports", shelf: "structure",
                       drawer_side: "drawers", drawer_front: "drawers", drawer_back: "drawers",
-                      drawer_base: "drawers", runner: "drawers",
+                      drawer_base: "drawers", runner_outer: "drawers", runner_inner: "drawers",
                       side: "structure", top: "structure", bottom: "structure", back: "structure",
                       carcass: "outline", blind: "corner", panel: "panel"};
 
