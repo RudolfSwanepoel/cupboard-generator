@@ -452,7 +452,12 @@ def stage_f3(pw):
     settle(page)
     m1 = page.evaluate("() => V3D.memory()")
     print(f"      renderer.info.memory before {m0} after {m1}")
-    check("30 edits: geometry count returns to where it was", m1["geometries"], m0["geometries"])
+    # a selection or hover outline is a geometry built the first time its part
+    # is outlined (29 Sept 2026) and goes with the part; the count is taken
+    # net of them, so a pointer left over a cabinet that was rebuilt cannot
+    # move it
+    check("30 edits: geometry count returns to where it was",
+          m1["geometries"] - m1["outlines"], m0["geometries"] - m0["outlines"])
     check("30 edits: texture count returns to where it was", m1["textures"], m0["textures"])
     check("30 edits: the camera did not move", cam(), cam0)
     check("30 edits: no console errors", errors, [])

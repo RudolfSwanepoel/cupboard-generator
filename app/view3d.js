@@ -2634,7 +2634,14 @@ function debugShell() {
 
 function memory() {
   const m = V.renderer ? V.renderer.info.memory : {geometries: 0, textures: 0};
-  return {geometries: m.geometries, textures: m.textures, groups: V.groups.size, pickables: V.pickables.length};
+  // outlines: the selection / hover fat-line geometries in existence, built
+  // lazily and kept while their part lives — a transient the checks take out
+  let outlines = 0, shown = 0;
+  for (const grp of [...V.groups.values(), V.roomParts].filter(Boolean)) {
+    for (const mesh of grp.children) if (mesh.userData.outline) { outlines += 1; if (mesh.userData.outline.visible) shown += 1; }
+  }
+  return {geometries: m.geometries, textures: m.textures, groups: V.groups.size, pickables: V.pickables.length,
+          outlines: outlines, outlinesShown: shown, hover: V.hover ? V.hover.number : null, sel: V.sel};
 }
 
 function state() {
