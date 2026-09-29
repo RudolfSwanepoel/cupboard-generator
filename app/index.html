@@ -440,31 +440,61 @@
   /* a board with no edging at all: grey, because that is a setting, not a fault */
   .tape .leaf b.off{color:var(--muted);font-weight:400}
   .tape .note{display:block;margin-top:2px;line-height:1.3}
-  /* nine columns in a side panel (the settings column is 560 wide for them):
-     let the numbers and board ids have the room, not the labels */
+  /* The Drawers section (redone 29 September 2026): Setup and the Stack as
+     sub-headed blocks inside the Drawers tint, one help line under each
+     control, and a five-column stack with room to breathe in the 560 column. */
+  #drawerbox .dblk{margin:6px 0 0;padding:8px 10px 10px;border:1px solid var(--sec-drawers-line);
+                   border-radius:var(--r-s);background:rgba(255,255,255,.38)}
+  #drawerbox .dblk>h4{margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:.05em;
+                      text-transform:uppercase;color:var(--muted)}
+  #drawerbox .drow{margin:0 0 9px}
+  #drawerbox .drow:last-child{margin-bottom:0}
+  #drawerbox .drow>label,#drawerbox .tape>label{display:block;font-size:11.5px;font-weight:600;
+                      color:var(--ink);margin:0 0 2px}
+  #drawerbox .drow>select,#drawerbox .drow>input{width:auto;min-width:160px}
+  #drawerbox .dhelp{display:block;font-size:11px;color:var(--muted);line-height:1.35;margin-top:3px}
+  #drawerbox .dblk>.dhelp{margin:0 0 6px}
+  #drawerbox .dstatus{display:block;font-size:11.5px;margin-top:3px;color:var(--ink)}
+  #drawerbox .pair{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  #drawerbox .pair select{width:100%;min-width:0}
+  #drawerbox .tape{margin:0 0 9px}
   #drawerbox table{table-layout:fixed}
-  #drawerbox th,#drawerbox td{padding:2px 3px;font-size:11.5px}
+  #drawerbox th,#drawerbox td{padding:3px 4px;font-size:12px;vertical-align:middle}
   #drawerbox th{background:transparent;box-shadow:none;position:static}
-  #drawerbox input,#drawerbox select{padding:2px 3px}
-  #drawerbox col.c-n{width:18px}
-  #drawerbox col.c-mode{width:52px}
-  #drawerbox col.c-val{width:50px}
-  #drawerbox col.c-mm{width:36px}
-  #drawerbox col.c-box{width:50px}
-  #drawerbox col.c-base{width:60px}
-  #drawerbox col.c-mat{width:auto}
-  #drawerbox col.c-rm{width:30px}
-  #drawerbox col.c-boxmax{width:78px}
-  #drawerbox col.c-off{width:42px}
-  #drawerbox td [data-maxbox]{margin-left:3px;font-size:10px}
+  #drawerbox input,#drawerbox select{padding:2px 4px}
+  #drawerbox col.c-n{width:30px}
+  #drawerbox col.c-face{width:150px}
+  #drawerbox col.c-box{width:150px}
+  #drawerbox col.c-off{width:62px}
+  #drawerbox col.c-read{width:auto}
+  #drawerbox col.c-end{width:auto}
+  #drawerbox .ddot{color:var(--accent);margin-left:3px;font-size:9px;vertical-align:middle}
+  #drawerbox .dface,#drawerbox .dboxc{display:flex;align-items:center;gap:4px}
+  #drawerbox .dface input[data-dk="face_height"]{width:70px}
+  #drawerbox .dmm{min-width:34px;color:var(--muted);text-align:right}
+  #drawerbox .dshare{width:48px;font-size:11px}
+  #drawerbox .dlock{flex:none;padding:0 3px;line-height:18px;font-size:12px;background:transparent;
+                    border:1px solid transparent;box-shadow:none;opacity:.55}
+  #drawerbox .dlock.on{opacity:1}
+  #drawerbox .dlock:hover{border-color:var(--rule)}
+  #drawerbox input.dbox{width:92px}
+  #drawerbox .dboxc input.dbox:not(:placeholder-shown){width:54px}
+  #drawerbox td [data-maxbox]{font-size:10.5px;color:var(--muted)}
   #drawerbox td [data-maxbox].over{color:var(--crit);font-weight:600}
-  #drawerbox td input[data-dk="box_height"]{width:44px}
-  #drawerbox col.c-z{width:62px}
+  #drawerbox .dautob{padding:0 5px;line-height:16px;font-size:10.5px;box-shadow:none}
+  #drawerbox td.dend{text-align:right;white-space:nowrap}
+  #drawerbox .dlink{background:none;border:0;box-shadow:none;padding:0 4px;color:var(--accent);
+                    font-size:11px;text-decoration:underline;cursor:pointer}
+  #drawerbox td.dend .mini{padding:0 6px;line-height:16px;box-shadow:none}
   #drawerbox tr.dsub td{padding-top:0;border-top:none}
-  #drawerbox tr.dsub label{display:inline;margin-right:6px;color:var(--muted)}
-  #drawerbox tr.dsub select{width:auto;max-width:190px}
-  #drawerbox tr.dsub b{margin-left:6px;font-size:11px}
-  #drawerbox col.c-read{width:64px}
+  #drawerbox .dsubgrid{display:grid;grid-template-columns:1fr 1fr;gap:5px 8px;padding:6px 8px;
+                       border-left:2px solid var(--accent-line);background:rgba(255,255,255,.55);
+                       border-radius:0 var(--r-s) var(--r-s) 0}
+  #drawerbox .dsubgrid>label{display:flex;flex-direction:column;gap:2px;font-size:11px;
+                             color:var(--muted);font-weight:500}
+  #drawerbox .dsubgrid select{width:100%;min-width:0}
+  #drawerbox .dsubgrid .leaf{margin:0}
+  #drawerbox .dtot .sep{color:var(--muted);margin:0 -8px}
   #elevation{position:relative}
   #elevation svg{user-select:none;-webkit-user-select:none}
   #elevation svg .ecabg{cursor:grab}
@@ -1654,7 +1684,7 @@ function alike(a, b) {
 function controlKey(el) {
   const d = el.dataset || {};
   return ["sup", "sk", "d", "dk", "k", "dboard", "edge", "ek", "leaf", "tick",
-          "t", "pk", "po"]
+          "t", "pk", "po", "dsec", "dtype", "dcount", "runner"]
     .map((a) => (d[a] === undefined ? "" : d[a])).concat(el.type || "").join("|");
 }
 
@@ -1663,7 +1693,9 @@ function morphNode(a, b) {
     if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
     return;
   }
-  if (a === document.activeElement) return;      // open, or being typed into
+  // open, or being typed into. Only a control with a VALUE: a focused button
+  // (the one just clicked — differs…, a lock, Auto) still takes its new label.
+  if (a === document.activeElement && VALUE_TAGS[a.tagName]) return;
   syncAttrs(a, b);
   if (a.dataset.slot !== undefined) return;      // its render function owns it
   if (a.tagName === "SELECT") { morphSelect(a, b); return; }
@@ -1826,8 +1858,15 @@ $("editor").addEventListener("input", (e) => {
   // back to the cabinet, and the name beside them is always the engine's.
   const edge = e.target.dataset.edge;
   if (edge !== undefined) {
-    c[(edge === "door" ? "door_edge_" : "drawer_edge_") + e.target.dataset.ek] =
-      e.target.value || null;
+    const field = edge + "_edge_" + e.target.dataset.ek;
+    if (edge === "drawer_box") {
+      // the section's box edging: drawers whose own choice was the old section
+      // value follow it (they were not saying they differ)
+      drawerSectionSet(c, field, e.target.value || null);
+      renderDrawers();
+    } else {
+      c[field] = e.target.value || null;
+    }
     schedule();
     return;
   }
@@ -1954,24 +1993,40 @@ $("editor").addEventListener("input", (e) => {
     return;
   }
 
+  // a Drawers section default (29 September 2026): blank follows Structure;
+  // the Bottom's 'board' is the default and is stored as nothing
+  const sec = e.target.dataset.dsec;
+  if (sec !== undefined) {
+    const v = e.target.value || null;
+    drawerSectionSet(c, sec, sec === "drawer_base" && v === "board" ? null : v);
+    renderDrawers();
+    schedule();
+    return;
+  }
+
   const i = e.target.dataset.d;
   if (i === undefined) return;
   const d = c.drawers[+i];
   const dk = e.target.dataset.dk;
-  if (dk === "mode") { d.mode = e.target.value; renderDrawers(); return; }
-  if (dk === "base") d.base = e.target.value;
-  // "" is not a board: it hands this drawer back to the cabinet's
-  else if (dk === "box_board" || dk === "face_board" || dk === "box_edge_board")
+  // "" is not a board, a bottom or an edging: it hands this drawer back to the
+  // section. A drawer's sub-row changes nothing in the stack.
+  if (DRAWER_OVERRIDES.indexOf(dk) >= 0) {
     d[dk] = e.target.value || null;
-  else if (dk === "share") d.share = parseFloat(e.target.value) || 0;
+    renderDrawers();
+    schedule();
+    return;
+  }
+  if (dk === "share") d.share = parseFloat(e.target.value) || 0;
   // blank is the default offset (21): stored as nothing, not as 0
   else if (dk === "offset") d.offset = e.target.value === "" ? null : (parseInt(e.target.value, 10) || 0);
+  // blank is Auto (29 September 2026): the tallest box that fits its face
+  else if (dk === "box_height") d.box_height = e.target.value === "" ? null : (parseInt(e.target.value, 10) || 0);
   else d[dk] = parseInt(e.target.value, 10) || 0;
   // an inner drawer is outside the face stack: nothing to solve, only compute
   if (d.inner) { schedule(); return; }
   // a box height or an offset moves no face, so the solve below would not
   // compute: the engine's checks and the tallest-box figure still have to
-  if (dk === "box_height" || dk === "offset") schedule();
+  if (dk === "box_height" || dk === "offset") { renderDrawers(); schedule(); return; }
   solveStack();
 });
 
@@ -2098,11 +2153,47 @@ $("editor").addEventListener("click", (e) => {
     if (i >= 0) { selectCabinet(i, {isolate: false}); renderList(); }
     return;
   }
+  const lock = e.target.closest("[data-dlock]");
+  if (lock) {
+    // locked = Fixed at the height it has now; unlocked = Share, weight 1
+    // unless it had one — the same mode / share / face_height as ever
+    const d = S.job.cabinets[S.sel].drawers[+lock.dataset.dlock];
+    if ((d.mode || "fixed") === "share") d.mode = "fixed";
+    else { d.mode = "share"; if (!(d.share > 0)) d.share = 1; }
+    renderDrawers();
+    return;
+  }
+  const au = e.target.closest("[data-dauto]");
+  if (au) {
+    S.job.cabinets[S.sel].drawers[+au.dataset.dauto].box_height = null;
+    renderDrawers();
+    schedule();
+    return;
+  }
+  const diff = e.target.closest("[data-ddiff]");
+  if (diff) {
+    const c = S.job.cabinets[S.sel];
+    const k = +diff.dataset.ddiff;
+    const key = c.number + ":" + k;
+    if (drawerOpen(c, k)) {
+      // "same as section": every override on this drawer handed back
+      const had = drawerDiffers(c, c.drawers[k]);
+      DRAWER_OVERRIDES.forEach((f) => { c.drawers[k][f] = null; });
+      delete S.dOpen[key];
+      if (had) schedule();
+    } else {
+      S.dOpen[key] = true;
+    }
+    renderDrawers();
+    return;
+  }
   const rm = e.target.closest("[data-drm]");
   if (rm) {
     const c = S.job.cabinets[S.sel];
     const wasInner = c.drawers.length && c.drawers.every((d) => d.inner);
     c.drawers.splice(+rm.dataset.drm, 1);
+    // an opened sub-row belongs to the drawer, not to its place in the list
+    Object.keys(S.dOpen).forEach((k) => { if (k.indexOf(c.number + ":") === 0) delete S.dOpen[k]; });
     // the count changed: inner heights go back to the auto spacing (ruled)
     if (wasInner) { setInner(c, true, c.drawers.length); return; }
     renderDrawers();
@@ -2122,9 +2213,14 @@ $("editor").addEventListener("click", (e) => {
   if (pre) { applyPreset(pre.dataset.preset); return; }
   if (e.target.id === "dadd") {
     const c = S.job.cabinets[S.sel];
-    const std = S.def.standard || {};
-    c.drawers.push({face_height: 0, box_height: std.box_height_default,
-                    base: (S.def.bases || ["board"])[0], mode: "share", share: 1,
+    // inner: one more, and every height back on the equal spacing (ruled)
+    if (c.drawers.length && c.drawers.every((d) => d.inner)) {
+      setInner(c, true, c.drawers.length + 1);
+      return;
+    }
+    // a new face shares what is left, its box Auto and everything else the
+    // section's (29 September 2026)
+    c.drawers.push({face_height: 0, box_height: null, base: null, mode: "share", share: 1,
                     box_board: null, face_board: null});
     renderDrawers();
   }
@@ -2663,158 +2759,316 @@ $("editor").addEventListener("change", (e) => {
   }
 });
 
-// A drawer box's sides and fronts are edged in PVC in the colour of the board
-// its Box edging names (29 September 2026), the Exterior board when blank. The
-// list is every project board that offers PVC, shown by its Edging Name like
-// every other edging-colour dropdown; the name beside it is the engine's. A
-// row of its own under the drawer, so the nine columns above keep their room.
-function boxEdgeRow(c, i, d, span) {
-  const keys = ((S.res && S.res.boards) || []).filter((k) => boardOffers(k, "pvc"));
-  const v = d.box_edge_board || "";
-  const def = c.exterior_board || "";
-  const lost = v && keys.indexOf(v) < 0;
-  return `<tr class="dsub"><td></td><td colspan="${span}">
-      <label>Box edging</label>
-      <select data-d="${i}" data-dk="box_edge_board"
-        title="the PVC colour on this drawer's box sides and fronts — blank follows the Exterior board (${esc(edgeLabel(def) || "—")})">
-        <option value=""${v ? "" : " selected"}>(${esc(edgeLabel(def) || "—")})</option>
-        ${lost ? `<option value="${esc(v)}" selected>${esc(edgeLabel(v))} (no PVC)</option>` : ""}
-        ${keys.map((k) => `<option value="${esc(k)}"${k === v ? " selected" : ""}>${
-          esc(edgeLabel(k))}</option>`).join("")}</select>
-      <b data-boxedgerow="${i}">…</b></td><td></td></tr>`;
+/* ---------- the Drawers section (redone 29 September 2026) ----------------
+   Brief `drawers-section-redo-brief-2026-09-29.md`. Three blocks in the
+   Drawers tint: SETUP (type, runner, bottom, the two boards, the two edgings),
+   the STACK (one row per face: face height with its lock, box height with its
+   Auto, offset) and, per drawer, a "differs…" sub-row holding what that one
+   drawer does differently from the section. Every figure is the engine's —
+   the face heights from /api/drawer-solve, the tallest box and the runner's
+   length and travel from /api/compute; the browser works none of them out. */
+
+const DRAWER_BASE_LABEL = {board: "3 mm grooved sheet", melamine: "16 mm housed melamine"};
+// What a drawer's "differs…" sub-row can set; null in each follows the section.
+const DRAWER_OVERRIDES = ["box_board", "face_board", "base", "box_edge_board", "box_edge_kind"];
+// The section default each override falls back to (Cabinet fields).
+const DRAWER_SECTION_OF = {box_board: "drawer_carcass_board", face_board: "drawer_face_board",
+                           base: "drawer_base", box_edge_board: "drawer_box_edge_board",
+                           box_edge_kind: "drawer_box_edge_kind"};
+// The wording, verbatim from the brief (Part 5).
+const DHELP = {
+  type: "Outer: the faces show on the front. Inner: the drawers sit behind a door " +
+        "and each face is the size of its box.",
+  runner: "Sets the box length and width, how far it pulls out and where it sits. " +
+          "All figures come from the catalogue record.",
+  legacy: "Quoted on the old lengths and cut exactly as quoted. Pick a catalogue runner " +
+          "to update it; the drawer lines that change are listed before anything moves.",
+  base: "3 mm sheet grooved into all four sides (the backing board), or 16 mm melamine " +
+        "housed between them.",
+  boards: "Every drawer in this cabinet, unless its row says it differs.",
+  boxedge: "The top edge of the box sides and fronts.",
+  faceedge: "All four edges of every face.",
+  stack: "Faces are set out from the bottom: 2 mm between faces, 3 mm under the top. " +
+         "Type a height, or unlock a row to let the app share out what is left. Box: " +
+         "Auto is the tallest that fits in its face. Offset: the box bottom above the " +
+         "face bottom; 21 is the bottom panel plus the runner's lift, and the bottom " +
+         "drawer cannot go lower.",
+};
+const DTIP = {
+  offset: "Box bottom above its face's bottom, mm",
+  max: "Tallest box that fits this face at this offset",
+  lock: "Locked: height as typed. Unlocked: shared out of what the fixed rows leave",
+};
+
+S.dOpen = {};          // "<cabinet number>:<drawer index>" -> a sub-row opened by hand
+
+function drawerGeom(c) {
+  return S.res && S.res.geometry && S.res.geometry[String(c.number)];
 }
 
-function renderDrawers() {
-  const box = slot($("drawerbox"));
-  if (!box) return;
-  const c = S.job.cabinets[S.sel];
-  if (c.drawers.length && c.drawers.every((d) => d.inner)) { renderInnerDrawers(box, c); return; }
-  const std = S.def.standard || {};
+// The section's defaults as the engine resolves them (drawer_defaults on
+// /api/compute), with the same fallbacks while no compute has landed yet.
+function drawerDefaults(c) {
+  const g = drawerGeom(c);
+  return (g && g.drawer_defaults) || {
+    box_board: c.drawer_carcass_board || c.carcass_board || "",
+    face_board: c.drawer_face_board || c.exterior_board || "",
+    box_edge_board: c.drawer_box_edge_board || c.exterior_board || "",
+    box_edge_kind: c.drawer_box_edge_kind || "pvc",
+    base: c.drawer_base || "board"};
+}
+
+function isSet(v) { return v !== null && v !== undefined && v !== ""; }
+
+// A drawer differs from the section when it names something of its own. A
+// typed bottom the same as the section's is not a difference: every drawer
+// saved before the section had a Bottom carries one ('board').
+function drawerDiffers(c, d) {
+  const def = drawerDefaults(c);
+  return DRAWER_OVERRIDES.some((k) => isSet(d[k]) && !(k === "base" && d[k] === def.base));
+}
+
+function drawerOpen(c, i) {
+  return drawerDiffers(c, c.drawers[i]) || !!S.dOpen[c.number + ":" + i];
+}
+
+// A board dropdown off the project's boards. A drawer box and face are both
+// built from a sheet, so the 3 mm backing is not offered; one stored stays,
+// flagged. Blank follows whatever `follows` says.
+function drawerBoardSelect(attrs, v, follows, what) {
   const keys = (S.res && S.res.boards) || [];
-  // What a drawer follows when it names no board of its own: the box the
-  // Carcass board and the face the Exterior board, both from Structure (or the
-  // cabinet-wide choice an older job file may still carry).
-  const boxDefault = c.drawer_carcass_board || c.carcass_board || "";
-  const faceDefault = c.drawer_face_board || c.exterior_board || "";
-  // A drawer box and a drawer face are both built from a sheet, so the 3 mm
-  // backing is not offered. One already stored stays, flagged.
-  const boardCell = (i, dk, v, follows, what) => `<td><select data-d="${i}"
-      data-dk="${dk}" title="${esc(what)} — blank follows Structure (${esc(follows || "—")})">
+  return `<select ${attrs} title="${esc(what)}">
       <option value=""${v ? "" : " selected"}>(${esc(follows || "—")})</option>
       ${v && boardIsThin(v)
         ? `<option value="${esc(v)}" selected>${esc(v)} (3 mm — too thin)</option>` : ""}
       ${keys.filter((k) => !boardIsThin(k)).map((k) =>
-        `<option value="${esc(k)}"${k === v ? " selected" : ""}>${
-        esc(k)}</option>`).join("")}</select></td>`;
-
-  // Faces lead, boxes follow (ruled 28 September 2026): each box sits its
-  // drawer's Offset above its own face bottom (blank = the default, 21) and
-  // must lie within that face. The tallest box that fits — face less offset —
-  // is the engine's figure (room.drawer_layout), shown beside Box h.
-  const gd = S.res && S.res.geometry && S.res.geometry[String(c.number)];
-  const lay = {};
-  ((gd && gd.drawer_layout) || []).forEach((u) => { lay[u.n] = u; });
-  const rise = (gd && gd.drawer_rise) || 21;
-  const rows = c.drawers.map((d, i) => {
-    const share = (d.mode || "fixed") === "share";
-    const val = share ? (d.share === undefined ? 1 : d.share) : d.face_height;
-    const u = lay[i + 1];
-    const over = u && !u.inner && (u.box[5] > u.face[1] || u.box[4] < u.face[0]);
-    return `<tr>
-      <td class="n">${i + 1}</td>
-      <td><select data-d="${i}" data-dk="mode">
-        <option value="share"${share ? " selected" : ""}>Share</option>
-        <option value="fixed"${share ? "" : " selected"}>Fixed</option></select></td>
-      <td><input type="number" step="${share ? "0.1" : "1"}" data-d="${i}"
-           data-dk="${share ? "share" : "face_height"}" value="${val}"></td>
-      <td class="n mono" data-mm="${i}">${d.face_height}</td>
-      <td><input type="number" step="1" data-d="${i}" data-dk="box_height"
-           value="${d.box_height}"><span class="note mono${over ? " over" : ""}" data-maxbox="${i}"
-           title="the tallest box this face takes at this offset (face less offset)">${
-           u ? "≤" + u.max_box : ""}</span></td>
-      <td><input type="number" step="1" data-d="${i}" data-dk="offset"
-           value="${d.offset === null || d.offset === undefined ? "" : d.offset}" placeholder="${rise}"
-           title="how far the box bottom sits above this face's bottom — blank is ${rise}; the bottom drawer may be raised, never below ${rise}"></td>
-      <td><select data-d="${i}" data-dk="base">${(S.def.bases || []).map((b) =>
-        `<option${b === d.base ? " selected" : ""}>${esc(b)}</option>`).join("")}</select></td>
-      ${boardCell(i, "box_board", d.box_board || "", boxDefault,
-                  "what this drawer's box is cut from: sides, front, and a melamine base")}
-      ${boardCell(i, "face_board", d.face_board || "", faceDefault,
-                  "what this drawer's face is cut from")}
-      <td><button data-drm="${i}" title="Remove this face">x</button></td>
-    </tr>${boxEdgeRow(c, i, d, 8)}`;
-  }).join("");
-
-  box.innerHTML = `${drawerTypeHTML(c)}<table class="rows">
-    <colgroup><col class="c-n"><col class="c-mode"><col class="c-val"><col class="c-mm">
-      <col class="c-boxmax"><col class="c-off"><col class="c-base"><col class="c-mat"><col class="c-mat">
-      <col class="c-rm"></colgroup>
-    <thead><tr>
-      <th class="n">#</th><th>Mode</th><th>Value</th><th class="n">mm</th>
-      <th title="box side height, and the tallest this face takes">Box h</th>
-      <th title="Offset: the box bottom above its face bottom (blank = ${rise})">Off.</th><th>Base</th>
-      <th title="box material">Box mat.</th><th title="face material">Face mat.</th><th></th>
-    </tr></thead><tbody>${rows ||
-      `<tr><td colspan="10" class="note">No faces yet — add one.</td></tr>`}</tbody></table>
-    <div class="dtot" id="dtot"></div>
-    <div class="presets">
-      <button data-preset="equal">Equal</button>
-      <button data-preset="graduated">Graduated</button>
-      <button id="dadd">+ Face</button>
-    </div>
-    <p class="hint">Faces lead, boxes follow: each box sits <b>Offset</b> above the bottom of
-      its own face (blank is ${rise} — the runner standing on the bottom panel) and must lie
-      within that face; the figure beside <b>Box h</b> is the tallest box that fits. The
-      bottom drawer may be raised, never set below ${rise}.</p>
-    <p class="hint">Listed top to bottom. The ${std.stack_gap} mm gap between faces
-      comes from the standard and is never typed per drawer. Drag the join between
-      two faces in the elevation to pin just those two at the heights you drag to.
-      <b>Base</b> is how the drawer bottom is held: <b>board</b> is the 3 mm sheet
-      grooved into all four panels, <b>melamine</b> a 16 mm one housed between
-      them. <b>Box mat.</b> and <b>Face mat.</b> are per drawer: left in brackets,
-      the box follows the Carcass board (${esc(boxDefault || "—")}) and the face the
-      Exterior board (${esc(faceDefault || "—")}); pick a board on one row to give
-      just that drawer a different finish.</p>
-    ${runnerHTML(c)}
-    ${edgingHTML(c, "drawer")}
-    <p class="hint">Each box's sides and fronts are edged in PVC in its <b>Box edging</b>
-      colour — left in brackets, the Exterior board's: <b data-boxedge="1">—</b>.</p>`;
-  refreshEdging();
-  solveStack();
+        `<option value="${esc(k)}"${k === v ? " selected" : ""}>${esc(k)}</option>`).join("")}</select>`;
 }
 
-// The runner the drawers hang on (28 September 2026): one of the project's
-// selected runners, by id. The readout is the engine's — the length it picks,
-// what is left behind, the travel, the box width — never worked out here.
+function drawerTypeHTML(c) {
+  const inner = c.drawers.length > 0 && c.drawers.every((d) => d.inner);
+  const mixed = c.drawers.some((d) => d.inner) && !inner;
+  return `<div class="drow"><label>Drawer type</label>
+      <select data-dtype="1" title="faces on the front, or drawers behind the door">
+        <option value="outer"${inner ? "" : " selected"}>Outer</option>
+        <option value="inner"${inner ? " selected" : ""}>Inner</option>
+      </select>
+      ${mixed ? `<span class="note over">inner and outer drawers are mixed on this
+        cabinet — pick one; the export is blocked until then</span>` : ""}
+      <span class="dhelp">${esc(DHELP.type)}</span></div>`;
+}
+
+// The runner the drawers hang on: one of the project's selected runners, by id,
+// and ONE status line — the engine's length, box and travel, never worked out
+// here. A cabinet naming none is on the legacy lengths it was quoted on.
 function runnerHTML(c) {
-  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const g = drawerGeom(c);
   const info = (g && g.runner) || {};
   const ids = (S.res && S.res.runners) || Object.keys(S.job.runners || {});
   const recs = (S.res && S.res.runner_records) || S.job.runners || {};
   const cur = c.runner || "";
   const legacy = S.def.legacy_runner || {};
   const opts = [];
-  if (!cur) opts.push(`<option value="" selected>${esc(legacy.name || "Legacy runners")} — ${
-    (legacy.lengths || []).join(" / ")}, no longer offered</option>`);
+  if (!cur) opts.push(`<option value="" selected>${esc(legacy.name || "Legacy runners")}</option>`);
   if (cur && ids.indexOf(cur) < 0) opts.push(`<option value="${esc(cur)}" selected>${
     esc(cur)} (not selected into this project)</option>`);
   ids.forEach((k) => opts.push(`<option value="${esc(k)}"${k === cur ? " selected" : ""}>${
     esc((recs[k] || {}).name || k)}</option>`));
-  const read = info.length
-    ? `runner <b>${info.length}</b> long — the box is ${info.length} long and
-       ${info.box_width} wide, ${info.behind} left behind it, pulls out ${info.travel}`
-    : info.length === null && c.drawers && c.drawers.length
-      ? `<span class="over">no length on this runner fits ${c.depth} deep</span>` : "";
-  return `<div class="tape"><label>Runner</label>
+  let status = "";
+  if (!cur) status = `Legacy lengths (${(legacy.lengths || []).join(" / ")}), as quoted`;
+  else if (info.length) status = `${esc(info.short || info.name || cur)} · ${info.length} long · box ${
+    info.length} × ${info.box_width} · pulls out ${info.travel}`;
+  else if (info.length === null && c.drawers && c.drawers.length)
+    status = `<span class="over">no length on this runner fits ${c.depth} deep</span>`;
+  return `<div class="drow"><label>Runner</label>
       <div class="leaf"><select data-runner="1" title="the runner these drawers hang on">
         ${opts.join("")}</select>
         <button type="button" class="mini" id="druncat" title="the runner library">Catalogue…</button></div>
-      <span class="note" data-runread="1">${read}</span>
-      ${!ids.length && !cur ? "" : ""}
-      ${!cur ? `<span class="note">These drawers were quoted on the legacy runner lengths and are
-        cut exactly as they were. Pick a catalogue runner to re-point them — you are shown
-        which drawer lines move first.</span>` : ""}
-    </div>`;
+      <span class="dstatus mono" data-runread="1">${status}</span>
+      <span class="dhelp">${esc(cur ? DHELP.runner : DHELP.legacy)}</span></div>`;
+}
+
+function drawerSetupHTML(c) {
+  const base = c.drawer_base || "board";
+  return `<div class="dblk" data-dblk="setup"><h4>Setup</h4>
+    ${drawerTypeHTML(c)}
+    ${runnerHTML(c)}
+    <div class="drow"><label>Bottom</label>
+      <select data-dsec="drawer_base" title="how every drawer's bottom is held">${
+        (S.def.bases || ["board", "melamine"]).map((b) =>
+          `<option value="${esc(b)}"${b === base ? " selected" : ""}>${
+          esc(DRAWER_BASE_LABEL[b] || b)}</option>`).join("")}</select>
+      <span class="dhelp">${esc(DHELP.base)}</span></div>
+    <div class="drow"><label>Box board · Face board</label>
+      <div class="pair">
+        ${drawerBoardSelect('data-dsec="drawer_carcass_board"', c.drawer_carcass_board || "",
+          "Carcass: " + (c.carcass_board || "—"), "what every drawer's box is cut from")}
+        ${drawerBoardSelect('data-dsec="drawer_face_board"', c.drawer_face_board || "",
+          "Exterior: " + (c.exterior_board || "—"), "what every drawer's face is cut from")}
+      </div>
+      <span class="dhelp">${esc(DHELP.boards)}</span></div>
+    ${edgingHTML(c, "drawer_box", {kinds: ["pvc", "1mm", "2mm"], label: "Box edging",
+                                   help: DHELP.boxedge, quiet: true})}
+    ${edgingHTML(c, "drawer", {label: "Face edging", help: DHELP.faceedge, quiet: true})}
+  </div>`;
+}
+
+// The kinds a box edging dropdown offers for one board, blank = the section's.
+function boxEdgeKinds(board) {
+  return ["pvc", "1mm", "2mm"].filter((k) => boardOffers(board, k));
+}
+
+function kindLabel(k) {
+  return (S.def.edging_prefix || {})[k] || k;
+}
+
+// The sub-row under a drawer that differs: its own box board, face board,
+// bottom and box edging. Blank is the section's. A face's edging stays the
+// section's (ruled so it matches Doors).
+function drawerSubRow(c, i, d, span) {
+  const def = drawerDefaults(c);
+  const board = d.box_edge_board || def.box_edge_board;
+  const kind = d.box_edge_kind || def.box_edge_kind;
+  const colourKeys = ((S.res && S.res.boards) || []).filter((k) => boardOffers(k, kind));
+  const bLost = d.box_edge_board && colourKeys.indexOf(d.box_edge_board) < 0;
+  const kinds = boxEdgeKinds(board);
+  const kLost = d.box_edge_kind && kinds.indexOf(d.box_edge_kind) < 0;
+  return `<tr class="dsub" data-dsub="${i}"><td></td><td colspan="${span}"><div class="dsubgrid">
+      <label>Box board ${drawerBoardSelect(`data-d="${i}" data-dk="box_board"`, d.box_board || "",
+        "section: " + (def.box_board || "—"), "what this drawer's box is cut from")}</label>
+      <label>Face board ${drawerBoardSelect(`data-d="${i}" data-dk="face_board"`, d.face_board || "",
+        "section: " + (def.face_board || "—"), "what this drawer's face is cut from")}</label>
+      <label>Bottom <select data-d="${i}" data-dk="base" title="how this drawer's bottom is held">
+        <option value=""${isSet(d.base) ? "" : " selected"}>(section: ${
+          esc(DRAWER_BASE_LABEL[def.base] || def.base)})</option>
+        ${(S.def.bases || ["board", "melamine"]).map((b) =>
+          `<option value="${esc(b)}"${b === d.base ? " selected" : ""}>${
+          esc(DRAWER_BASE_LABEL[b] || b)}</option>`).join("")}</select></label>
+      <label>Box edging <span class="leaf">
+        <select data-d="${i}" data-dk="box_edge_kind" title="how thick this drawer's box edging is">
+          <option value=""${d.box_edge_kind ? "" : " selected"}>(section: ${esc(kindLabel(def.box_edge_kind))})</option>
+          ${kLost ? `<option value="${esc(d.box_edge_kind)}" selected>${esc(kindLabel(d.box_edge_kind))} (not offered)</option>` : ""}
+          ${kinds.map((k) => `<option value="${esc(k)}"${k === d.box_edge_kind ? " selected" : ""}>${
+            esc(kindLabel(k))}</option>`).join("")}</select>
+        <select data-d="${i}" data-dk="box_edge_board" title="the colour of this drawer's box edging">
+          <option value=""${d.box_edge_board ? "" : " selected"}>(section: ${esc(edgeLabel(def.box_edge_board) || "—")})</option>
+          ${bLost ? `<option value="${esc(d.box_edge_board)}" selected>${esc(edgeLabel(d.box_edge_board))} (not offered)</option>` : ""}
+          ${colourKeys.map((k) => `<option value="${esc(k)}"${k === d.box_edge_board ? " selected" : ""}>${
+            esc(edgeLabel(k))}</option>`).join("")}</select></span></label>
+    </div></td></tr>`;
+}
+
+// What a row's tooltip says it is edged in: the engine's names, as everywhere.
+function drawerRowTip(c, i) {
+  const g = drawerGeom(c);
+  const e = (g && g.edging) || {};
+  const box = ((e.drawer_box || {}).rows || [])[i];
+  const face = (e.drawer || {}).name;
+  return `Box edging: ${box || "none"} · Face edging: ${face || "none"}`;
+}
+
+function drawerNumCell(c, i, d) {
+  return `<td class="n">${i + 1}${drawerDiffers(c, d)
+    ? `<span class="ddot" title="this drawer differs from the section">●</span>` : ""}</td>`;
+}
+
+function drawerEndCell(c, i) {
+  const open = drawerOpen(c, i);
+  return `<td class="dend"><button type="button" class="dlink" data-ddiff="${i}"
+      title="${open ? "hand every choice on this drawer back to the section" : "give this drawer a board, bottom or edging of its own"}">${
+      open ? "same as section" : "differs…"}</button><button type="button" class="mini" data-drm="${i}"
+      title="Remove this drawer">×</button></td>`;
+}
+
+function drawerStackHTML(c) {
+  const g = drawerGeom(c);
+  const lay = {};
+  ((g && g.drawer_layout) || []).forEach((u) => { lay[u.n] = u; });
+  const rise = (g && g.drawer_rise) || 21;
+  const rows = c.drawers.map((d, i) => {
+    const share = (d.mode || "fixed") === "share";
+    const u = lay[i + 1];
+    const auto = !isSet(d.box_height);
+    const over = u && !u.inner && (u.box[5] > u.face[1] || u.box[4] < u.face[0]);
+    const max = u ? u.max_box : "";
+    const face = share
+      ? `<span class="mono dmm" data-mm="${i}" title="shared out of what the fixed rows leave">${d.face_height}</span>
+         <input type="number" step="0.1" min="0" class="dshare" data-d="${i}" data-dk="share"
+           value="${d.share === undefined || d.share === null ? 1 : d.share}" title="share weight">`
+      : `<input type="number" step="1" data-d="${i}" data-dk="face_height" value="${d.face_height}">`;
+    const boxCell = auto
+      ? `<input type="number" step="1" class="dbox" data-d="${i}" data-dk="box_height" value=""
+           placeholder="Auto (≤${max})" title="${esc(DTIP.max)} — type a height to fix it">`
+      : `<input type="number" step="1" class="dbox" data-d="${i}" data-dk="box_height"
+           value="${d.box_height}"><span class="note mono${over ? " over" : ""}" data-maxbox="${i}"
+           title="${esc(DTIP.max)}">≤${max}</span><button type="button" class="mini dautob"
+           data-dauto="${i}" title="Auto: the tallest box that fits this face">Auto</button>`;
+    return `<tr title="${esc(drawerRowTip(c, i))}">
+      ${drawerNumCell(c, i, d)}
+      <td><div class="dface"><button type="button" class="dlock${share ? "" : " on"}"
+          data-dlock="${i}" title="${esc(DTIP.lock)}">${share ? "🔓" : "🔒"}</button>${face}</div></td>
+      <td><div class="dboxc">${boxCell}</div></td>
+      <td><input type="number" step="1" data-d="${i}" data-dk="offset"
+           value="${isSet(d.offset) ? d.offset : ""}" placeholder="${rise}" title="${esc(DTIP.offset)}"></td>
+      ${drawerEndCell(c, i)}
+    </tr>${drawerOpen(c, i) ? drawerSubRow(c, i, d, 4) : ""}`;
+  }).join("");
+  return `<div class="dblk" data-dblk="stack"><h4>The stack</h4>
+    <span class="dhelp">${esc(DHELP.stack)}</span>
+    <table class="rows dstack">
+    <colgroup><col class="c-n"><col class="c-face"><col class="c-box"><col class="c-off"><col class="c-end"></colgroup>
+    <thead><tr><th class="n">#</th><th>Face height</th><th>Box height</th>
+      <th title="${esc(DTIP.offset)}">Offset</th><th></th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="5" class="note">No drawers yet — add one.</td></tr>`}</tbody></table>
+    <div class="dtot" id="dtot"></div>
+    <div class="presets">
+      <button data-preset="equal">Equal</button>
+      <button data-preset="graduated">Graduated</button>
+      <button id="dadd">+ Drawer</button>
+    </div></div>`;
+}
+
+// Inner drawers: the same table with Height (the box bottom above the carcass
+// underside) in place of Offset; a count that puts every height back on the
+// equal spacing from the bottom (ruled 28 September 2026). The face is the
+// box's own size, read off the engine (room.drawer_layout).
+function drawerInnerStackHTML(c) {
+  const g = drawerGeom(c);
+  const lay = {};
+  ((g && g.drawer_layout) || []).forEach((u) => { lay[u.n] = u; });
+  const rows = c.drawers.map((d, i) => {
+    const u = lay[i + 1];
+    return `<tr title="${esc(drawerRowTip(c, i))}">
+      ${drawerNumCell(c, i, d)}
+      <td><input type="number" step="1" data-d="${i}" data-dk="z" value="${isSet(d.z) ? d.z : ""}"
+           title="where this box's bottom stands above the carcass underside"></td>
+      <td><input type="number" step="1" data-d="${i}" data-dk="box_height"
+           value="${isSet(d.box_height) ? d.box_height : ""}" title="box side height — the face is the same height"></td>
+      <td class="note mono" data-innerread="${i}" title="the face (width × height) and the box top, off the engine">${
+        u ? `${u.face_w} × ${u.face[1] - u.face[0]} · top ${u.box[5]}` : "…"}</td>
+      ${drawerEndCell(c, i)}
+    </tr>${drawerOpen(c, i) ? drawerSubRow(c, i, d, 4) : ""}`;
+  }).join("");
+  return `<div class="dblk" data-dblk="stack"><h4>The stack</h4>
+    <div class="drow"><label>Number of drawers</label>
+      <input type="number" step="1" min="0" data-dcount="1" value="${c.drawers.length}"
+             title="changing it puts every height back on the equal spacing"></div>
+    <table class="rows dstack">
+    <colgroup><col class="c-n"><col class="c-face"><col class="c-box"><col class="c-read"><col class="c-end"></colgroup>
+    <thead><tr><th class="n">#</th><th title="box bottom above the carcass underside">Height</th>
+      <th>Box height</th><th title="the face, width × height, and the box top">Face</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="presets"><button id="dadd">+ Drawer</button></div></div>`;
+}
+
+function renderDrawers() {
+  const box = slot($("drawerbox"));
+  if (!box) return;
+  const c = S.job.cabinets[S.sel];
+  const inner = c.drawers.length > 0 && c.drawers.every((d) => d.inner);
+  box.innerHTML = drawerSetupHTML(c) + (inner ? drawerInnerStackHTML(c) : drawerStackHTML(c));
+  refreshEdging();
+  if (!inner) solveStack();
 }
 
 // Re-pointing a cabinet at another runner can move its drawer lines (a depth
@@ -2838,70 +3092,15 @@ async function changeRunner(c, to, sel) {
   schedule();
 }
 
-function drawerTypeHTML(c) {
-  const inner = c.drawers.length > 0 && c.drawers.every((d) => d.inner);
-  const mixed = c.drawers.some((d) => d.inner) && !inner;
-  return `<div class="f"><label>Drawer type</label>
-      <select data-dtype="1" title="faces on the front, or drawers behind the door">
-        <option value="outer"${inner ? "" : " selected"}>Outer — faces on the front</option>
-        <option value="inner"${inner ? " selected" : ""}>Inner — behind the door</option>
-      </select>
-      ${mixed ? `<span class="note over">inner and outer drawers are mixed on this
-        cabinet — pick one; the export is blocked until then</span>` : ""}</div>`;
-}
-
-// Inner drawers: a count, and per drawer the height its box starts at — typed
-// and adjustable one by one, and put back on the equal spacing from the bottom
-// whenever the count changes (ruled by Rudolf, 28 September 2026). The face is
-// the box's own size; the readout is the engine's (room.drawer_layout).
-function renderInnerDrawers(box, c) {
-  const keys = (S.res && S.res.boards) || [];
-  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
-  const lay = {};
-  ((g && g.drawer_layout) || []).forEach((u) => { lay[u.n] = u; });
-  const boxDefault = c.drawer_carcass_board || c.carcass_board || "";
-  const faceDefault = c.drawer_face_board || c.exterior_board || "";
-  const boardCell = (i, dk, v, follows, what) => `<td><select data-d="${i}"
-      data-dk="${dk}" title="${esc(what)} — blank follows Structure (${esc(follows || "—")})">
-      <option value=""${v ? "" : " selected"}>(${esc(follows || "—")})</option>
-      ${keys.filter((k) => !boardIsThin(k)).map((k) =>
-        `<option value="${esc(k)}"${k === v ? " selected" : ""}>${esc(k)}</option>`).join("")}</select></td>`;
-  const rows = c.drawers.map((d, i) => {
-    const u = lay[i + 1];
-    return `<tr>
-      <td class="n">${i + 1}</td>
-      <td><input type="number" step="1" data-d="${i}" data-dk="z" value="${d.z === null || d.z === undefined ? "" : d.z}"
-           title="where this box's bottom stands above the carcass underside"></td>
-      <td><input type="number" step="1" data-d="${i}" data-dk="box_height" value="${d.box_height}"></td>
-      <td><select data-d="${i}" data-dk="base">${(S.def.bases || []).map((b) =>
-        `<option${b === d.base ? " selected" : ""}>${esc(b)}</option>`).join("")}</select></td>
-      ${boardCell(i, "box_board", d.box_board || "", boxDefault, "what this drawer's box is cut from")}
-      ${boardCell(i, "face_board", d.face_board || "", faceDefault, "what this drawer's face is cut from")}
-      <td class="note mono" data-innerread="${i}" title="the face (width × height) and the box top, off the engine">${
-        u ? `${u.face_w}×${u.face[1] - u.face[0]}<br>top ${u.box[5]}` : "…"}</td>
-      <td><button data-drm="${i}" title="Remove this drawer">x</button></td>
-    </tr>${boxEdgeRow(c, i, d, 6)}`;
-  }).join("");
-  box.innerHTML = `${drawerTypeHTML(c)}
-    <div class="f"><label>Number of drawers</label>
-      <input type="number" step="1" min="0" data-dcount="1" value="${c.drawers.length}"
-             title="changing it puts every height back on the equal spacing"></div>
-    <table class="rows">
-    <colgroup><col class="c-n"><col class="c-z"><col class="c-box"><col class="c-base">
-      <col class="c-mat"><col class="c-mat"><col class="c-read"><col class="c-rm"></colgroup>
-    <thead><tr><th class="n">#</th><th title="box bottom above the carcass underside">Height</th>
-      <th title="box side height — the face is the same height">Box h</th><th>Base</th>
-      <th title="box material">Box mat.</th><th title="face material">Face mat.</th>
-      <th title="the face, width × height, and the box top">Face</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-    ${runnerHTML(c)}
-    <p class="hint">Inner drawers sit behind the door. Each face is the size of its box's
-      carcass — the box's outside width and its height — so the sides are hidden, and its
-      front is on the shelves' line, flush with the carcass front. <b>Height</b> is where
-      each box starts above the carcass underside: changing the number of drawers spaces
-      them equally from the bottom again (the lowest on a runner standing on the bottom
-      panel); then each can be moved on its own. Listed top to bottom.</p>
-    ${edgingHTML(c, "drawer")}`;
-  refreshEdging();
+// A section default changed: a drawer whose own value was the OLD section
+// value was not saying it differs — it hands back to the section, so the
+// section control moves it too. What a drawer chose differently stays.
+function drawerSectionSet(c, field, value) {
+  const def = drawerDefaults(c);
+  const own = Object.keys(DRAWER_SECTION_OF).find((k) => DRAWER_SECTION_OF[k] === field);
+  const was = own ? def[own] : undefined;
+  c[field] = value;
+  if (own) c.drawers.forEach((d) => { if (isSet(d[own]) && d[own] === was) d[own] = null; });
 }
 
 let solveSeq = 0;
@@ -2949,13 +3148,15 @@ async function solveStack() {
   document.querySelectorAll("#drawerbox [data-mm]").forEach((td) => {
     td.textContent = r.heights[+td.dataset.mm];
   });
+  // an Auto box follows its face: its "≤" is the engine's, on the next compute
+
   const tot = $("dtot");
   if (tot) {
     const over = r.left < 0 || r.heights.some((h) => h <= 0);
     tot.innerHTML =
-      `<span>opening <b>${r.opening}</b></span>` +
-      `<span>faces + gaps <b>${r.used}</b></span>` +
-      `<span class="${over ? "over" : ""}">remainder <b>${r.left}</b></span>` +
+      `<span>opening <b>${r.opening}</b></span><span class="sep">·</span>` +
+      `<span>faces + gaps <b>${r.used}</b></span><span class="sep">·</span>` +
+      `<span class="${over ? "over" : ""}">left <b>${r.left}</b></span>` +
       (over ? `<span class="over">the fixed faces over-run the opening —
                export is blocked until they fit</span>` : "");
   }
@@ -3396,7 +3597,11 @@ function edgeLabel(key) {
   return m.edging_label || key || "";
 }
 
-// One edging control: how thick, and what colour. 'which' is "door" or "drawer".
+// One edging control: how thick, and what colour. 'which' is "door", "drawer"
+// (the faces) or "drawer_box" (the box sides and fronts, 29 September 2026) —
+// the cabinet fields are `<which>_edge_kind` / `<which>_edge_board`. `opts`:
+// `kinds` offered, a `label`, a `help` line, and `quiet` — the resolved name in
+// the control's tooltip rather than printed beside it (the Drawers section).
 // Both dropdowns are filtered by the Boards tab: a kind no board offers is not
 // listed, and the colour list holds only boards that offer the chosen kind. A
 // stored choice that is no longer offered is never silently changed — it stays
@@ -3413,7 +3618,7 @@ function edgingHTML(c, which, opts) {
   // Nothing in the project can be edged at all: say what to do, rather than
   // offering two dropdowns that cannot produce a name.
   if (!all.some(anyBoardOffers)) {
-    return `<div class="tape"><label>Edging</label>
+    return `<div class="tape"><label>${esc((opts && opts.label) || "Edging")}</label>
       <span class="note">No board in this project has edging — tick
       <b>Has Edging</b> on a board in the Boards tab.</span></div>`;
   }
@@ -3422,25 +3627,29 @@ function edgingHTML(c, which, opts) {
   const kindLost = kinds.indexOf(kind) < 0;
   const colourKeys = keys.filter((k) => boardOffers(k, kind));
   const boardLost = colourKeys.indexOf(board) < 0;
+  const label = (opts && opts.label) || "Edging";
+  const quiet = !!(opts && opts.quiet);
+  const kindText = (k) => quiet ? (pre[k] || k) : k;
+  const tip = e.name || (kindLost || boardLost ? `${pre[kind] || kind} not offered by ${board || "that board"}`
+                                               : "no edging");
 
-  return `<div class="tape">
-      <label>Edging</label>
+  return `<div class="tape${quiet ? " drow" : ""}"${quiet ? ` data-edgetip="${which}" title="${esc(tip)}"` : ""}>
+      <label>${esc(label)}</label>
       <div class="leaf">
         <select data-edge="${which}" data-ek="kind" title="how thick">${
-          kindLost ? `<option value="${esc(kind)}" selected>${esc(kind)} (not offered)</option>` : ""
+          kindLost ? `<option value="${esc(kind)}" selected>${esc(kindText(kind))} (not offered)</option>` : ""
           }${kinds.map((k) =>
-          `<option value="${esc(k)}"${k === kind ? " selected" : ""}>${esc(k)}</option>`
+          `<option value="${esc(k)}"${k === kind ? " selected" : ""}>${esc(kindText(k))}</option>`
           ).join("")}</select>
         <select data-edge="${which}" data-ek="board" title="what colour">${
           boardLost ? `<option value="${esc(board)}" selected>${esc(edgeLabel(board) || "—")} (not offered)</option>` : ""
           }${colourKeys.map((k) =>
           `<option value="${esc(k)}"${k === board ? " selected" : ""}>${
             esc(edgeLabel(k))}</option>`).join("")}</select>
-        <b data-edgename="${which}" class="${e.name ? "" : (kindLost || boardLost ? "over" : "off")}">${
-          esc(e.name || (kindLost || boardLost
-            ? `${pre[kind] || kind} not offered by ${board || "that board"}`
-            : "no edging"))}</b>
+        ${quiet ? "" : `<b data-edgename="${which}" class="${e.name ? "" : (kindLost || boardLost ? "over" : "off")}">${
+          esc(tip)}</b>`}
       </div>
+      ${opts && opts.help ? `<span class="dhelp">${esc(opts.help)}</span>` : ""}
       ${(kindLost || boardLost) ? `<span class="note" style="color:var(--crit)">
         This cabinet still asks for an edging its board no longer offers. It is kept
         exactly as it was stored — tick it on the board in the Boards tab, or choose
@@ -3807,8 +4016,13 @@ function renderStructure() {
   const shaped = cornerShaped(c);
   // The back board is only cut when there is a back, or a drawer on a grooved
   // 3 mm base. Nothing on this cabinet uses it otherwise, so it is not asked for.
-  const usesBack = !shaped && (c.back !== "none" ||
-    (tickOn(c, "has_drawers") && (c.drawers || []).some((d) => d.base === "board")));
+  // The engine's answer (Cabinet.needs_back_board) — a drawer's bottom can
+  // follow the Drawers section's since 29 September 2026, so it is not read
+  // off the rows here.
+  const gb = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  const usesBack = !shaped && (gb && gb.needs_back_board !== undefined ? gb.needs_back_board
+    : (c.back !== "none" || (tickOn(c, "has_drawers") &&
+       (c.drawers || []).some((d) => (d.base || c.drawer_base || "board") === "board"))));
   // "three" is no longer offered for a new cabinet (27 September 2026), but a
   // job that carries it still reads and cuts as it did: the stored value is
   // shown beside the two on offer rather than silently replaced.
@@ -3889,6 +4103,10 @@ function refreshEdging() {
       ? `${(S.def.edging_prefix || {})[kind] || kind} not offered by ${board}`
       : "no edging";
     b.className = wanted ? "over" : "off";
+  });
+  document.querySelectorAll("#editor [data-edgetip]").forEach((el) => {
+    const e = g.edging[el.dataset.edgetip] || {};
+    if (e.name) el.title = e.name;
   });
   const boxEdge = document.querySelector("#editor [data-boxedge]");
   if (boxEdge) boxEdge.textContent = (g.edging.drawer_box || {}).name || "no edging";

@@ -228,13 +228,14 @@ def stage_runners(pw):
     ctx, page = new_page(browser, errors)
     dialogs = []
     page.on("dialog", lambda d: dialogs.append(d.message))
-    load_job(page, "Test")
+    load_fixture(page, "Test_drawers")      # the live Test.json is on Gelmar since 29 Sept
     select(page, 4)
     page.wait_for_selector("#drawerbox select[data-runner]", timeout=5000)
     check("cabinet 4 (saved before the catalogue) is on the legacy runner",
           page.evaluate("() => document.querySelector('#drawerbox select[data-runner]').value"), "")
     read = text(page, "#drawerbox [data-runread]")
-    check("  the readout is the engine's: 500 long, 70 behind", ("500" in read and "70 left behind" in read), True)
+    check("  its one status line says it is on the legacy lengths, as quoted",
+          read.strip(), "Legacy lengths (350 / 450 / 500), as quoted")
     openc = page.evaluate("() => { document.querySelector('#druncat').click(); return [S.tab, S.catSub]; }")
     check("Catalogue… in the Drawers section opens Catalogue -> Runners", openc, ["catalogue", "runners"])
     page.wait_for_selector('#runners [data-rpick="GELMAR45"]', timeout=10000)
@@ -325,7 +326,7 @@ def stage_drawers(pw):
     faces = page.evaluate("() => S.res.panels.filter((p) => p.cabinet === 1 && p.role === 'Drawer Face').map((p) => [p.length, p.width, p.qty])")
     check("the cut list: one inner face line, the box's size (150 x 541)", faces, [[150, 541, 3]])
     read = text(page, '#drawerbox [data-innerread="0"]')
-    check("the row reads the engine's face and box top", read.strip(), "541×150top 1650")
+    check("the row reads the engine's face and box top", read.strip(), "541 × 150 · top 1650")
     shot(page, "inner_drawers", "#drawerbox")
     page.fill("#drawerbox input[data-dcount]", "2")
     page.dispatch_event("#drawerbox input[data-dcount]", "change")
@@ -339,7 +340,7 @@ def stage_drawers(pw):
     page.wait_for_function("() => !S.job.cabinets[S.sel].drawers.some((d) => d.inner)", timeout=10000)
     computed(page)
     check("back to Outer: the face stack table, no inner height left",
-          page.evaluate("() => [!!document.querySelector('#drawerbox [data-dk=\"mode\"]'), S.job.cabinets[S.sel].drawers.some((d) => 'z' in d && d.z !== null)]"),
+          page.evaluate("() => [!!document.querySelector('#drawerbox [data-dlock]'), S.job.cabinets[S.sel].drawers.some((d) => 'z' in d && d.z !== null)]"),
           [True, False])
     check("no console errors", errors, [])
     ctx.close()
@@ -429,20 +430,22 @@ def stage_offset(pw):
 
 
 def stage_boxedge(pw):
-    print("\ndrawer box edging, per drawer (29 Sept) — the Box edging row under each drawer")
+    print("\ndrawer box edging, per drawer (29 Sept) — in the drawer's differs… sub-row")
     browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
     errors = []
     ctx, page = new_page(browser, errors)
     load_fixture(page, "Test_drawers")
     select(page, 4)                          # GREY exterior, WHITEMEL boxes, four drawers
-    page.wait_for_selector('#drawerbox select[data-dk="box_edge_board"]', timeout=5000)
+    page.wait_for_selector('#drawerbox [data-ddiff="1"]', timeout=5000)
+    check("no drawer differs, so no sub-row and no per-drawer Box edging dropdown",
+          page.evaluate("() => document.querySelectorAll('#drawerbox select[data-dk=\"box_edge_board\"]').length"), 0)
+    page.click('#drawerbox [data-ddiff="1"]')
+    page.wait_for_selector('#drawerbox select[data-d="1"][data-dk="box_edge_board"]', timeout=5000)
     sel = '#drawerbox select[data-d="1"][data-dk="box_edge_board"]'
-    check("a Box edging dropdown per drawer",
-          page.evaluate("() => document.querySelectorAll('#drawerbox select[data-dk=\"box_edge_board\"]').length"), 4)
-    check("the nine columns above keep their room (a row of its own, not a tenth column)",
-          page.evaluate("() => [...document.querySelectorAll('#drawerbox thead th')].length"), 10)
+    check("differs… on drawer 2 opens its sub-row, and only its",
+          page.evaluate("() => [...document.querySelectorAll('#drawerbox tr.dsub')].map((r) => r.dataset.dsub)"), ["1"])
     opts = page.evaluate(f"() => [...document.querySelector({json.dumps(sel)}).options].map((o) => [o.value, o.textContent.trim()])")
-    check("blank follows the exterior, shown by its Edging Name", opts[0], ["", "(Grey)"])
+    check("blank follows the section (the exterior), shown by its Edging Name", opts[0], ["", "(section: Grey)"])
     check("  and the boards offering PVC, by Edging Name",
           sorted(o for o in opts[1:] if o[0] in ("WHITEMEL", "BROOKHILL")),
           [["BROOKHILL", "BROOKHILL"], ["WHITEMEL", "WHITE (WHITEMEL)"]])
@@ -456,14 +459,195 @@ def stage_boxedge(pw):
           [None, "WHITEMEL", None, None])
     check("  the cut list: drawer 2's sides are their own line in PVC WHITE",
           sorted((x[1], x[2]) for x in side()), [("PVC Grey", 2), ("PVC Grey", 2), ("PVC Grey", 2), ("PVC WHITE", 2)])
-    check("  the row reads the engine's name",
-          text(page, '#drawerbox [data-boxedgerow="1"]').strip(), "PVC WHITE")
+    check("  the row's tooltip reads the engine's name",
+          page.evaluate("() => document.querySelector('#drawerbox [data-dsub=\"1\"]').previousElementSibling.title"),
+          "Box edging: PVC WHITE · Face edging: 1mm Grey")
+    check("  and its # cell carries the dot",
+          page.evaluate("() => !!document.querySelector('#drawerbox tbody tr:nth-child(2) .ddot')"), True)
     shot(page, "box_edging", "#drawerbox")
-    page.select_option(sel, "")
+    check("the link reads 'same as section'", text(page, '#drawerbox [data-ddiff="1"]').strip(), "same as section")
+    page.click('#drawerbox [data-ddiff="1"]')
     computed(page)
-    check("back to blank: stored as nothing, the exterior again",
-          (page.evaluate("() => S.job.cabinets[S.sel].drawers[1].box_edge_board"), sorted({x[1] for x in side()})),
-          (None, ["PVC Grey"]))
+    check("same as section: stored as nothing, the exterior again, the sub-row gone",
+          (page.evaluate("() => S.job.cabinets[S.sel].drawers[1].box_edge_board"), sorted({x[1] for x in side()}),
+           page.evaluate("() => document.querySelectorAll('#drawerbox tr.dsub').length")),
+          (None, ["PVC Grey"], 0))
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+def blk_labels(page):
+    return page.evaluate("() => [...document.querySelectorAll('#drawerbox [data-dblk=\"setup\"] > .drow > label, "
+                         "#drawerbox [data-dblk=\"setup\"] > .tape > label')].map((l) => l.textContent.trim())")
+
+
+def stage_layout(pw):
+    print("\nthe Drawers section redone (29 Sept) — Setup, the stack's five columns, the differs… sub-row")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    load_fixture(page, "Test_drawers")
+    select(page, 4)
+    page.wait_for_selector("#drawerbox [data-dblk=setup]", timeout=5000)
+    check("two headed blocks in the Drawers tint: Setup, then the stack",
+          page.evaluate("() => [...document.querySelectorAll('#drawerbox .dblk > h4')].map((h) => h.textContent.trim())"),
+          ["Setup", "The stack"])
+    check("Setup, in order: type, runner, bottom, the two boards, box edging, face edging",
+          blk_labels(page), ["Drawer type", "Runner", "Bottom", "Box board · Face board", "Box edging", "Face edging"])
+    helps = page.evaluate("() => [...document.querySelectorAll('#drawerbox .dhelp')].map((h) => h.textContent.trim())")
+    check("one help line under each control, the brief's words verbatim",
+          [h in helps for h in (
+              "Outer: the faces show on the front. Inner: the drawers sit behind a door and each face is the size of its box.",
+              "Quoted on the old lengths and cut exactly as quoted. Pick a catalogue runner to update it; the drawer lines that change are listed before anything moves.",
+              "3 mm sheet grooved into all four sides (the backing board), or 16 mm melamine housed between them.",
+              "Every drawer in this cabinet, unless its row says it differs.",
+              "The top edge of the box sides and fronts.",
+              "All four edges of every face.")], [True] * 6)
+    check("  and the stack's", any(h.startswith("Faces are set out from the bottom: 2 mm between faces") for h in helps), True)
+    check("no paragraph of prose left in the section",
+          page.evaluate("() => document.querySelectorAll('#drawerbox p.hint').length"), 0)
+    check("the edging names are not printed beside the controls",
+          page.evaluate("() => document.querySelectorAll('#drawerbox [data-edgename]').length"), 0)
+    check("  they are in the controls' tooltips (the engine's names)",
+          page.evaluate("() => [...document.querySelectorAll('#drawerbox [data-edgetip]')].map((x) => x.title)"),
+          ["PVC Grey", "1mm Grey"])
+    check("Bottom offers the two, in words",
+          page.evaluate("() => [...document.querySelector('#drawerbox [data-dsec=\"drawer_base\"]').options].map((o) => o.textContent)"),
+          ["3 mm grooved sheet", "16 mm housed melamine"])
+    check("the stack: five columns — # · Face height · Box height · Offset · (remove)",
+          page.evaluate("() => [...document.querySelectorAll('#drawerbox table.dstack thead th')].map((t) => t.textContent.trim())"),
+          ["#", "Face height", "Box height", "Offset", ""])
+    check("  under it the readout and Equal · Graduated · + Drawer",
+          page.evaluate("() => [...document.querySelectorAll('#drawerbox [data-dblk=stack] .presets button')].map((b) => b.textContent)"),
+          ["Equal", "Graduated", "+ Drawer"])
+    check("  the readout", text(page, "#dtot").replace("\n", " ").strip(), "opening 777·faces + gaps 777·left 0")
+    check("the settings column is still 560 wide, and the table fits it",
+          page.evaluate("() => [Math.round(document.querySelector('#editor').getBoundingClientRect().width) <= 560 + 2, "
+                        "document.querySelector('#drawerbox table.dstack').scrollWidth <= document.querySelector('#drawerbox .dblk[data-dblk=stack]').clientWidth]"),
+          [True, True])
+    shot(page, "layout_setup_stack", ".sec.s-drawers")
+    # the section's defaults: Box board and Bottom, stored on the cabinet
+    page.select_option('#drawerbox [data-dsec="drawer_base"]', "melamine")
+    computed(page)
+    check("Bottom -> 16 mm housed melamine: stored on the cabinet, and every drawer (typed 'board', "
+          "the section's value) follows it",
+          page.evaluate("() => [S.job.cabinets[S.sel].drawer_base, S.job.cabinets[S.sel].drawers.map((d) => d.base)]"),
+          ["melamine", [None, None, None, None]])
+    check("  the cut list: every drawer base a 16 mm housed one in the box board",
+          sorted(set(page.evaluate("() => S.res.panels.filter((p) => p.cabinet === 4 && p.role === 'Drawer Base').map((p) => p.material)"))),
+          ["WHITEMEL"])
+    page.select_option('#drawerbox [data-dsec="drawer_base"]', "board")
+    computed(page)
+    check("  and back: the default is stored as nothing",
+          page.evaluate("() => S.job.cabinets[S.sel].drawer_base"), None)
+    # a drawer carrying a board of its own opens with its sub-row showing
+    page.evaluate("() => { S.job.cabinets[S.sel].drawers[2].face_board = 'BROOKHILL'; renderDrawers(); }")
+    computed(page)
+    check("a drawer with a board of its own shows its sub-row open, the dot in its # cell",
+          page.evaluate("() => [[...document.querySelectorAll('#drawerbox tr.dsub')].map((r) => r.dataset.dsub), "
+                        "document.querySelectorAll('#drawerbox .ddot').length]"), [["2"], 1])
+    check("  the sub-row: Box board, Face board, Bottom, Box edging",
+          page.evaluate("() => [...document.querySelectorAll('#drawerbox tr.dsub .dsubgrid > label')].map((l) => l.firstChild.textContent.trim())"),
+          ["Box board", "Face board", "Bottom", "Box edging"])
+    shot(page, "layout_differs", "#drawerbox [data-dblk=stack]")
+    page.click('#drawerbox [data-ddiff="2"]')
+    computed(page)
+    check("same as section clears all of it",
+          page.evaluate("() => [S.job.cabinets[S.sel].drawers[2].face_board, document.querySelectorAll('#drawerbox tr.dsub').length]"),
+          [None, 0])
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+def stage_lock(pw):
+    print("\nthe stack — the lock: unlocked rows share what the fixed rows leave")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    load_fixture(page, "Test_drawers")
+    select(page, 7)                          # faces 192 (Share) / 208 / 171 / 200 (Fixed), opening 777
+    page.wait_for_selector('#drawerbox [data-dlock="0"]', timeout=5000)
+    check("drawer 1 unlocked (Share), the rest locked (Fixed)",
+          page.evaluate("() => [...document.querySelectorAll('#drawerbox [data-dlock]')].map((b) => b.classList.contains('on'))"),
+          [False, True, True, True])
+    check("the unlocked row: its mm greyed beside its weight, no typed height",
+          page.evaluate("() => [!!document.querySelector('#drawerbox [data-mm=\"0\"]'), "
+                        "!!document.querySelector('#drawerbox [data-d=\"0\"][data-dk=\"share\"]'), "
+                        "!!document.querySelector('#drawerbox [data-d=\"0\"][data-dk=\"face_height\"]')]"),
+          [True, True, False])
+    check("  it shares what is left: 777 - 6 - 579 = 192", text(page, '#drawerbox [data-mm="0"]').strip(), "192")
+    page.fill('#drawerbox input[data-d="1"][data-dk="face_height"]', "150")
+    page.dispatch_event('#drawerbox input[data-d="1"][data-dk="face_height"]', "input")
+    page.wait_for_function("() => document.querySelector('#drawerbox [data-mm=\"0\"]').textContent === '250'", timeout=10000)
+    computed(page)
+    check("drawer 2 typed down to 150: drawer 1's mm follows to 250, the engine's figure",
+          (text(page, '#drawerbox [data-mm="0"]').strip(), page.evaluate("() => S.job.cabinets[S.sel].drawers[0].face_height")),
+          ("250", 250))
+    check("  and the cut list has it", 250 in page.evaluate(
+        "() => S.res.panels.filter((p) => p.cabinet === 7 && p.role === 'Drawer Face').map((p) => p.length)"), True)
+    page.click('#drawerbox [data-dlock="3"]')
+    page.wait_for_function("() => document.querySelector('#drawerbox [data-mm=\"3\"]') && document.querySelector('#drawerbox [data-mm=\"3\"]').textContent === '225'", timeout=10000)
+    computed(page)
+    check("unlocking drawer 4 (weight 1): the two share 777 - 6 - 150 - 171 = 450, 225 each",
+          (page.evaluate("() => [S.job.cabinets[S.sel].drawers[3].mode, S.job.cabinets[S.sel].drawers[3].share]"),
+           text(page, '#drawerbox [data-mm="0"]').strip(), text(page, '#drawerbox [data-mm="3"]').strip()),
+          (["share", 1], "225", "225"))
+    shot(page, "lock_unlocked", "#drawerbox [data-dblk=stack]")
+    page.click('#drawerbox [data-dlock="0"]')
+    computed(page)
+    check("locking drawer 1 keeps the height it has, as typed",
+          page.evaluate("() => [S.job.cabinets[S.sel].drawers[0].mode, S.job.cabinets[S.sel].drawers[0].face_height]"),
+          ["fixed", 225])
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+def stage_auto(pw):
+    print("\nthe stack — box height Auto follows its face")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    load_fixture(page, "Test_drawers")
+    select(page, 7)                          # faces 192 (Share) / 208 / 171 / 200, boxes 150
+    page.wait_for_selector('#drawerbox [data-dauto="1"]', timeout=5000)
+    page.click('#drawerbox [data-dauto="1"]')
+    computed(page)
+    box1 = '#drawerbox input[data-d="1"][data-dk="box_height"]'
+    check("Auto on drawer 2: stored as null, shown as Auto (≤187)",
+          (page.evaluate("() => S.job.cabinets[S.sel].drawers[1].box_height"),
+           page.evaluate(f"() => [document.querySelector({json.dumps(box1)}).value, document.querySelector({json.dumps(box1)}).placeholder]")),
+          (None, ["", "Auto (≤187)"]))
+    sides = lambda: sorted(page.evaluate("() => S.res.panels.filter((p) => p.cabinet === 7 && p.role === 'Drawer Side').map((p) => p.width)"))
+    check("  the cut list cuts it at 187 (face 208 less 21)", 187 in sides(), True)
+    page.fill('#drawerbox input[data-d="1"][data-dk="face_height"]', "200")
+    page.dispatch_event('#drawerbox input[data-d="1"][data-dk="face_height"]', "input")
+    computed(page)
+    page.wait_for_function(f"() => document.querySelector({json.dumps(box1)}).placeholder === 'Auto (≤179)'", timeout=10000)
+    computed(page)
+    check("the face to 200: Auto follows to 179, and so does the cut list",
+          (page.evaluate(f"() => document.querySelector({json.dumps(box1)}).placeholder"), 179 in sides(), 187 in sides()),
+          ("Auto (≤179)", True, False))
+    check("  a typed box on every other drawer is untouched",
+          page.evaluate("() => S.job.cabinets[S.sel].drawers.map((d) => d.box_height)"), [150, None, 150, 150])
+    check("  and an Auto box never raises drawer-box-face",
+          page.evaluate("() => S.res.issues.filter((i) => i.where === '7' && i.check === 'drawer-box-face' && /drawer 2:/.test(i.message)).length"), 0)
+    page.click('#drawerbox [data-preset="graduated"]')
+    computed(page)
+    page.wait_for_function(f"() => document.querySelector({json.dumps(box1)}).placeholder !== 'Auto (≤179)'", timeout=10000)
+    computed(page)
+    face2 = page.evaluate("() => S.job.cabinets[S.sel].drawers[1].face_height")
+    check("Graduated moves the face; Auto follows it (face less 21), the typed boxes stay",
+          (page.evaluate(f"() => document.querySelector({json.dumps(box1)}).placeholder") == f"Auto (≤{face2 - 21})",
+           page.evaluate("() => S.job.cabinets[S.sel].drawers.map((d) => d.box_height)")),
+          (True, [150, None, 150, 150]))
+    shot(page, "auto_follows", "#drawerbox [data-dblk=stack]")
+    page.fill(box1, "160")
+    page.dispatch_event(box1, "input")
+    computed(page)
+    check("typing a figure fixes it as typed", page.evaluate("() => S.job.cabinets[S.sel].drawers[1].box_height"), 160)
     check("no console errors", errors, [])
     ctx.close()
     browser.close()
@@ -471,7 +655,8 @@ def stage_boxedge(pw):
 
 STAGES = {"supports": stage_supports, "catalogue": stage_catalogue, "runners": stage_runners,
           "drawers": stage_drawers, "3d": stage_3d, "offset": stage_offset,
-          "boxedge": stage_boxedge}
+          "boxedge": stage_boxedge, "layout": stage_layout, "lock": stage_lock,
+          "auto": stage_auto}
 
 with sync_playwright() as pw:
     for key, fn in STAGES.items():

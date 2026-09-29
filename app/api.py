@@ -329,6 +329,9 @@ def _geometry_info(job, cab, std):
             # is why the Size fields can be greyed and still say something true.
             "corner": _corner_info(cab, std, job.materials),
             "drawers_on": bool(cab.drawer_list),
+            # whether anything is cut from the back board: a back, or a drawer
+            # whose bottom (its own, else the section's) is the grooved sheet
+            "needs_back_board": cab.needs_back_board,
             # The runner the drawers hang on, as the engine reads it: the
             # length it picks, what is left behind, how far it pulls out. The
             # editor shows these and works out none of them.
