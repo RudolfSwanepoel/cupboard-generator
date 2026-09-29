@@ -16,8 +16,9 @@ from .model import (PANEL_ORIENTATIONS, TAPE_PREFIX, WHITE_TOKEN, Cabinet, Job,
 from .room import (above_ceiling, arm_shelf_depth, arm_shelf_max_depth,
                    attached_carcass_overlaps, cabinet_by_number, host_of,
                    blind_door_width, blind_opening, blocked_openings,
-                   cab_corner_outline, corner_shadow,
+                   cab_corner_outline, corner_angle, corner_shadow,
                    clashes as room_clashes, closure_error, corner_offset,
+                   corner_exists, crossing_walls, unit_corner,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
                    panel_clashes as room_panel_clashes, placed,
                    plinth_choice_for, run_key, runs as room_runs, tip_inputs,
@@ -1050,6 +1051,12 @@ def _room(job: Job, std):
     for w in rm.walls:
         if w.length <= 0:
             out.append(Issue(CRITICAL, f"wall {w.id}", "wall length not measured", check="wall-length"))
+        elif getattr(w, "drawn", False):
+            # A length off a mouse sketch (29 September 2026) is not a site
+            # figure, and a cut list never goes out on one.
+            out.append(Issue(CRITICAL, f"wall {w.id}",
+                             f"wall {w.id}: drawn, not measured — type its length, or tick "
+                             f"it as measured", check="wall-drawn"))
 
     ids = [w.id for w in rm.walls]
     dupes = sorted({i for i in ids if ids.count(i) > 1})
@@ -1065,6 +1072,29 @@ def _room(job: Job, std):
                          f"contradict each other, remeasure before placing anything", check="room-closure"))
     elif err > std.closure_warn:
         out.append(Issue(WARNING, rm.name, f"walls miss closing by {err} mm"))
+
+    for i, w in enumerate(rm.walls):
+        if not corner_exists(rm, i):
+            continue
+        a = getattr(w, "corner_end", 90)
+        try:
+            ok = 0 < float(a) < 360
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            nxt = rm.walls[(i + 1) % len(rm.walls)]
+            out.append(Issue(CRITICAL, f"{w.id}-{nxt.id}",
+                             f"corner {w.id}→{nxt.id}: angle {a!r} is not between 0 and "
+                             f"360 degrees — drawn as 90 until it is", check="corner-angle"))
+    # Walls that cross each other in plan cannot be built as drawn — usually
+    # a corner entered as 90 that is really 270, or a length on the wrong wall.
+    # Not asked while a wall has no length: that is its own critical, and a
+    # wall of nothing folds its neighbours onto each other.
+    unmeasured = any(w.length <= 0 for w in rm.walls)
+    for a, b in ([] if unmeasured else crossing_walls(rm)):
+        out.append(Issue(CRITICAL, f"{a}/{b}",
+                         f"walls {a} and {b} cross each other in plan — check the corner "
+                         f"angles and the lengths", check="room-self-intersect"))
 
     for i, w in enumerate(rm.walls):
         _, disagree = corner_offset(rm, i)
@@ -1097,6 +1127,17 @@ def _room(job: Job, std):
             out.append(Issue(WARNING, str(p.cabinet),
                              f"sits {p.x}-{end} on wall {p.wall}, which is "
                              f"{lengths[p.wall]} long"))
+        # A mitre or a blind unit only at a nominal 90-degree inside corner
+        # (ruling 4, 29 September 2026). In any other corner its construction
+        # has not been ruled: a critical, and no shadow is cast there — so the
+        # "not standing in a corner" warning below is not said as well.
+        k = unit_corner(rm, cab, p) if cab.corner_on else None
+        if (k is not None and cab.corner_kind in ("mitre", "blind")
+                and corner_angle(rm, k) != 90):
+            out.append(Issue(CRITICAL, str(p.cabinet),
+                             f"Corner unit at a {corner_angle(rm, k):g}° corner: "
+                             f"construction not ruled.", check="corner-unit-angle"))
+            continue
         # A corner unit stands in a corner. The editor moves it there whenever
         # its type, hand or length changes; this catches one dragged back out.
         if cab.corner_on and cab.corner_kind in ("mitre", "ell", "blind") \

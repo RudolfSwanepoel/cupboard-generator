@@ -1520,6 +1520,22 @@ class Wall:
     each corner, taken Room.offset_depth mm out from this wall's face. Zero is
     square; positive means the return wall opens away from the room. The corner
     angle follows from atan(offset / offset_depth).
+
+    `corner_end` is the NOMINAL interior angle of the corner after this wall,
+    measured inside the room between the two wall faces (ruled 29 September
+    2026): 90 an inside corner, 270 an outside one (a chimney breast, a nib),
+    135 / 225 a splay in and out, 180 walls in line — anything strictly
+    between 0 and 360. The offsets stay the fine correction on top of it,
+    measured exactly as before. On a closed room the last wall's is the corner
+    back to the first wall; on an open run the last wall's is not read.
+
+    `drawn` says the length came off a mouse sketch on Room -> Plan, not a
+    tape: a CRITICAL until it is typed or ticked as measured, so a cut list
+    never goes out on a drawn length.
+
+    Both are written to the job file only when they are not at their default
+    (`store.room_to_dict`), so every room saved before them round-trips byte
+    for byte — the discipline of `Placement.y`.
     """
     id: str                # 'A', 'B', 'C' ... clockwise
     length: int            # measured tight against the wall
@@ -1527,6 +1543,8 @@ class Wall:
     offset_end: int = 0
     openings: List[Opening] = field(default_factory=list)
     obstructions: List[Obstruction] = field(default_factory=list)
+    corner_end: float = 90     # nominal interior angle of the corner after this wall
+    drawn: bool = False        # length drawn with the mouse, not yet measured
 
 
 @dataclass

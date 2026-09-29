@@ -121,9 +121,24 @@ def placement_to_dict(p: Placement) -> dict:
     return d
 
 
+# Wall fields added after the room format had settled (29 September 2026):
+# each written only when it is not at its default, so every room saved before
+# walls could turn at any angle reads and writes byte for byte.
+LATE_WALL_FIELDS = ("corner_end", "drawn")
+
+
+def wall_to_dict(w: Wall) -> dict:
+    d = asdict(w)
+    defaults = {f.name: f.default for f in fields(Wall)}
+    for name in LATE_WALL_FIELDS:
+        if d.get(name) == defaults[name]:
+            d.pop(name, None)
+    return d
+
+
 def room_to_dict(room: Room) -> dict:
     d = asdict(room)
-    d["walls"] = [asdict(w) for w in room.walls]
+    d["walls"] = [wall_to_dict(w) for w in room.walls]
     return d
 
 

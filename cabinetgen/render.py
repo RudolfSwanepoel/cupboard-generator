@@ -1374,10 +1374,20 @@ def _plan_obstructions(rm, T):
             depth = max(ob.proud, 60)
             c0 = T(to_world(rm, w.id, ob.x - ob.width // 2, 0)[:2])
             c1 = T(to_world(rm, w.id, ob.x + ob.width // 2, depth)[:2])
-            x0, y0 = min(c0[0], c1[0]), min(c0[1], c1[1])
-            out.append(f'<rect x="{x0:.1f}" y="{y0:.1f}" '
-                       f'width="{abs(c1[0] - c0[0]):.1f}" height="{abs(c1[1] - c0[1]):.1f}" '
-                       f'fill="#f6e0e3" stroke="{CRIT}" stroke-width="1"/>')
+            (_s, (dx, dy), _n) = wall_frames(rm)[w.id]
+            if abs(dx) < 1e-9 or abs(dy) < 1e-9:
+                x0, y0 = min(c0[0], c1[0]), min(c0[1], c1[1])
+                out.append(f'<rect x="{x0:.1f}" y="{y0:.1f}" '
+                           f'width="{abs(c1[0] - c0[0]):.1f}" height="{abs(c1[1] - c0[1]):.1f}" '
+                           f'fill="#f6e0e3" stroke="{CRIT}" stroke-width="1"/>')
+            else:
+                # a wall at an angle (29 September 2026): the box turned with
+                # it, not the rectangle its two corners would span square
+                q = [T(to_world(rm, w.id, ob.x + sx * (ob.width // 2), dep)[:2])
+                     for sx, dep in ((-1, 0), (1, 0), (1, depth), (-1, depth))]
+                pts = " ".join(f"{a:.1f},{b:.1f}" for a, b in q)
+                out.append(f'<polygon points="{pts}" '
+                           f'fill="#f6e0e3" stroke="{CRIT}" stroke-width="1"/>')
             out.append(f'<text x="{(c0[0] + c1[0]) / 2:.1f}" y="{(c0[1] + c1[1]) / 2 + 3:.1f}" '
                        f'font-size="7.5" text-anchor="middle" fill="{CRIT}">'
                        f'{escape(ob.kind[:4])}</text>')

@@ -49,7 +49,8 @@ from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, 
                              blind_door_width, blind_opening,
                              blind_panel_height, blind_spans, carcass_z,
                              clashes as room_clashes,
-                             closure_error, free_x, gaps as room_gaps, geometry,
+                             closure_error, corner_angle, corner_points, crossing_walls,
+                             free_x, gaps as room_gaps, geometry, walls_from_points,
                              layer_of, mitre_blank, mitre_inner_span, mitre_legs,
                              overlaps as room_overlaps,
                              panel_clashes as room_panel_clashes, placed_panels,
@@ -1385,9 +1386,18 @@ def _room_info(job):
                                    "layer": lay, "override": bool(p.layer)}
     return {
         "name": rm.name,
-        "walls": [{"id": w.id, "length": w.length} for w in rm.walls],
+        "walls": [{"id": w.id, "length": w.length,
+                   # the corner after it, as the chain turns by it (29 Sept 2026)
+                   "corner": corner_angle(rm, i) if (rm.closed or i < len(rm.walls) - 1)
+                   else None,
+                   "drawn": bool(getattr(w, "drawn", False))}
+                  for i, w in enumerate(rm.walls)],
         "closed": rm.closed,
         "closure_error": closure_error(rm),
+        # the corner chain in world plan mm, for the Draw walls canvas to show
+        # the room being replaced under the new outline
+        "corners": [[round(x), round(y)] for x, y in corner_points(rm)],
+        "crossing": [list(pr) for pr in crossing_walls(rm)],
         "placed": len(job.placements),
         "layers": counts,
         "panels": panels,
@@ -2128,6 +2138,30 @@ def room_extend(payload):
     return {"ok": True, "room": room_to_dict(rm)}
 
 
+def room_draw(payload):
+    """Walls off an outline drawn with the mouse on Room -> Plan (29 September
+    2026). The browser sends the corners it clicked, in world plan mm, and
+    whether the outline was closed; the engine names the walls, measures them,
+    works out every corner's angle and puts the chain clockwise
+    (`room.walls_from_points`). The room's name, ceiling and offset depth are
+    kept; its walls — openings and obstructions with them — are replaced.
+    Every wall comes back `drawn`, a critical until it is measured."""
+    closed = bool(payload.get("closed"))
+    try:
+        pts = [(float(x), float(y)) for x, y in (payload.get("points") or [])]
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "the drawn corners must be numbers"}
+    walls = walls_from_points(pts, closed)
+    if len(walls) < (3 if closed else 1):
+        return {"ok": False, "error": ("a closed room needs at least three walls" if closed
+                                       else "draw at least one wall")}
+    old = room_from_dict(payload["room"]) if payload.get("room") else None
+    rm = old or rectangular(1, 1, name=str(payload.get("name") or "room"))
+    rm.walls = walls
+    rm.closed = closed
+    return {"ok": True, "room": room_to_dict(rm)}
+
+
 def room_new(payload):
     """A fresh square room to start measuring from. The browser does not invent
     wall lists any more than it invents panel sizes."""
@@ -2415,6 +2449,7 @@ ROUTES = {
     "/api/attach-move": attach_move,
     "/api/snapshot": snapshot,
     "/api/room-extend": room_extend,
+    "/api/room-draw": room_draw,
 }
 
 

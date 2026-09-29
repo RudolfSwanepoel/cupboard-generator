@@ -18,8 +18,13 @@ Everything downstream — plan view, elevations, 3D, DXF, the SolidWorks table �
 calls `to_world`. Nothing else does its own trig. That is the whole point of
 this module: one place to be wrong, and one place to fix.
 
-Walls chain in list order, clockwise as drawn in plan. Each corner turns
-90 degrees less the measured deviation from square.
+Walls chain in list order, clockwise as drawn in plan. Each corner has a
+NOMINAL interior angle — `Wall.corner_end` on the wall before it, 90 an inside
+corner, 270 an outside one, anything strictly between 0 and 360 (ruled 29
+September 2026) — and the chain turns by 180 degrees less that angle, less the
+measured deviation from it (the offsets, exactly as before). At 90 on every
+corner that is the 90-less-the-deviation turn this module always made, and
+every coordinate comes out identical (pinned in tools/check_room.py).
 """
 import math
 from dataclasses import dataclass
@@ -119,6 +124,41 @@ def corner_offset(rm: Room, i: int) -> Tuple[int, int]:
     return (here or nxt), 0
 
 
+def corner_angle(rm: Room, i: int):
+    """The NOMINAL interior angle of the corner after wall `i`, in degrees —
+    measured inside the room between the two wall faces. 90 is an inside
+    corner, 270 an outside one. A value the chain cannot turn by (not a
+    number, or not strictly between 0 and 360) reads as 90, the default, so a
+    hand-edited file cannot fold the chain back on itself; `validate` names it.
+
+        corner_angle(EXAMPLE_ROOM, 0)  ->  90
+    """
+    a = getattr(rm.walls[i], "corner_end", 90)
+    try:
+        a = float(a)
+    except (TypeError, ValueError):
+        return 90
+    if math.isnan(a) or not 0 < a < 360:
+        return 90
+    return int(a) if a == int(a) else a
+
+
+def corner_turn(rm: Room, i: int) -> float:
+    """Radians the chain turns at the corner after wall `i`: 180 degrees less
+    the nominal interior angle, less the measured deviation. Positive is the
+    way wall A turns into wall B in a clockwise room.
+
+    At a nominal 90 the turn is `math.pi / 2` itself, not `radians(90)`, so a
+    room of 90-degree corners goes through exactly the arithmetic it always
+    did and not one coordinate moves.
+    """
+    offset, _ = corner_offset(rm, i)
+    deviation = math.atan2(offset, rm.offset_depth)
+    a = corner_angle(rm, i)
+    nominal = math.pi / 2 if a == 90 else math.radians(180 - a)
+    return nominal - deviation
+
+
 def wall_frames(rm: Room) -> Dict[str, Tuple[Point, Point, Point]]:
     """Chain the walls around the room.
 
@@ -132,10 +172,109 @@ def wall_frames(rm: Room) -> Dict[str, Tuple[Point, Point, Point]]:
         out[w.id] = ((px, py), (dx, dy), (-dy, dx))
         px += w.length * dx
         py += w.length * dy
-        offset, _ = corner_offset(rm, i)
-        deviation = math.atan2(offset, rm.offset_depth)
-        theta += math.pi / 2 - deviation
+        theta += corner_turn(rm, i)
     return out
+
+
+def corner_exists(rm: Room, i: int) -> bool:
+    """Whether wall `i` ends in a corner at all: on an open run the last wall
+    just stops."""
+    return 0 <= i < len(rm.walls) and (rm.closed or i < len(rm.walls) - 1)
+
+
+def crossing_walls(rm: Room) -> List[Tuple[str, str]]:
+    """Pairs of walls that cross or touch each other in plan — the room
+    outline intersecting itself, which no real room does. Two walls meeting at
+    their own shared corner are not a crossing; any other touch is.
+
+        crossing_walls(EXAMPLE_ROOM)  ->  []
+    """
+    pts = corner_points(rm)
+    n = len(rm.walls)
+    segs = [(pts[i], pts[i + 1]) for i in range(n)]
+
+    def adjacent(i, j):
+        return j - i == 1 or (rm.closed and n > 2 and (i, j) == (0, n - 1))
+
+    return [(rm.walls[i].id, rm.walls[j].id)
+            for i in range(n) for j in range(i + 1, n)
+            if not adjacent(i, j) and _segments_touch(segs[i], segs[j])]
+
+
+def _segments_touch(s, t, eps: float = 1e-6) -> bool:
+    """Whether two plan segments share any point, their ends included."""
+    (a, b), (c, d) = s, t
+
+    def orient(p, q, r):
+        v = (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+        return 0 if abs(v) < eps else (1 if v > 0 else -1)
+
+    def on(p, q, r):              # r lies on p-q, given the three are collinear
+        return (min(p[0], q[0]) - eps <= r[0] <= max(p[0], q[0]) + eps and
+                min(p[1], q[1]) - eps <= r[1] <= max(p[1], q[1]) + eps)
+
+    o1, o2, o3, o4 = orient(a, b, c), orient(a, b, d), orient(c, d, a), orient(c, d, b)
+    if o1 != o2 and o3 != o4:
+        return True
+    return ((o1 == 0 and on(a, b, c)) or (o2 == 0 and on(a, b, d)) or
+            (o3 == 0 and on(c, d, a)) or (o4 == 0 and on(c, d, b)))
+
+
+def walls_from_points(points, closed: bool) -> List[Wall]:
+    """Walls off an outline drawn with the mouse on Room -> Plan — the corners
+    clicked, in world plan mm — named A, B, C… in the order they run, each
+    marked `drawn` (29 September 2026).
+
+    Lengths are rounded to the millimetre, and each corner's interior angle is
+    worked out from the two walls' directions, to 0.1 degree and whole where it
+    is whole. The model is clockwise, so an outline drawn the other way round
+    is walked in reverse first (an open run by the way it mostly turns) —
+    a closed one still starting on the first wall drawn, so that wall stays A.
+    A closed outline's last wall runs back to the first point. The browser
+    sends the points and works out nothing else. Pinned in
+    tools/check_room.py.
+    """
+    pts = []
+    for x, y in points:
+        q = (float(x), float(y))
+        if not pts or math.dist(q, pts[-1]) >= 1:      # a point on the last adds no wall
+            pts.append(q)
+    if closed and len(pts) > 1 and math.dist(pts[0], pts[-1]) < 1:
+        pts.pop()
+
+    def chain(ps):
+        segs = [(ps[i], ps[i + 1]) for i in range(len(ps) - 1)]
+        if closed and len(ps) > 2:
+            segs.append((ps[-1], ps[0]))
+        pairs = list(zip(segs, segs[1:] + (segs[:1] if closed and len(ps) > 2 else [])))
+        return segs, pairs
+
+    def turn(s, t):
+        d = (math.atan2(t[1][1] - t[0][1], t[1][0] - t[0][0]) -
+             math.atan2(s[1][1] - s[0][1], s[1][0] - s[0][0]))
+        while d <= -math.pi:
+            d += 2 * math.pi
+        while d > math.pi:
+            d -= 2 * math.pi
+        return d
+
+    segs, pairs = chain(pts)
+    if sum(turn(s, t) for s, t in pairs) < -1e-9:
+        # Anticlockwise: walked the other way. A closed outline is started on
+        # the first wall drawn, so that wall is still A.
+        rev = pts[::-1]
+        if closed and len(rev) > 2:
+            rev = rev[-2:] + rev[:-2]
+        segs, pairs = chain(rev)
+
+    walls = []
+    for k, s in enumerate(segs):
+        w = Wall(chr(ord("A") + k), int(round(math.dist(*s))), drawn=True)
+        if k < len(pairs):
+            a = round(180 - math.degrees(turn(*pairs[k])), 1)
+            w.corner_end = int(round(a)) if a == round(a) else a
+        walls.append(w)
+    return walls
 
 
 def corner_points(rm: Room) -> List[Point]:
@@ -702,6 +841,12 @@ def corner_shadow(rm: Room, cab, p, std: Standard = STANDARD):
         return None
     wall_ids = [x.id for x in rm.walls]
     i = wall_ids.index(p.wall)
+    # Only at a nominal 90-degree inside corner (ruling 4, 29 September 2026):
+    # a mitre or a blind unit in any other corner is a construction nobody has
+    # ruled, and it is named by a critical rather than given a shadow.
+    k = unit_corner(rm, cab, p)
+    if k is None or corner_angle(rm, k) != 90:
+        return None
     if cab.hand == "L":
         if p.x != 0:
             return None
@@ -714,6 +859,21 @@ def corner_shadow(rm: Room, cab, p, std: Standard = STANDARD):
     if not rm.closed and i == len(wall_ids) - 1:
         return None
     return wall_ids[(i + 1) % len(wall_ids)], 0, width, depth
+
+
+def unit_corner(rm: Room, cab, p) -> Optional[int]:
+    """The corner a corner unit belongs in — the one at its HAND end of the wall
+    it is placed on, as an index for `corner_angle` (the corner after wall k) —
+    or None where that end of the wall has no corner (an open run's ends, or a
+    wall the room does not have). Whether it is flush there is not asked."""
+    ids = [w.id for w in rm.walls]
+    if p.wall not in ids:
+        return None
+    i = ids.index(p.wall)
+    k = (i - 1) % len(ids) if cab.hand == "L" else i
+    if cab.hand == "L" and i == 0 and not rm.closed:
+        return None
+    return k if corner_exists(rm, k) else None
 
 
 def _shadow_geometry(cab, width: int, depth: int, std: Standard) -> CabinetGeometry:
@@ -2961,6 +3121,10 @@ def plinth_butt_wall(job, run: Run, std: Standard = STANDARD) -> Optional[str]:
     against it. The run on the earlier wall continues, so each corner shortens
     exactly one of the two boards — never both, which would leave a gap, and
     never neither, which would not fit.
+
+    Only at an INSIDE corner — interior under 180 degrees, of any angle (29
+    September 2026). Walls in line or an outside corner give no butt: each
+    plinth simply ends at the corner.
     """
     rm = job.room
     if rm is None or not run.touches_start:
@@ -2968,6 +3132,8 @@ def plinth_butt_wall(job, run: Run, std: Standard = STANDARD) -> Optional[str]:
     wall_ids = [w.id for w in rm.walls]
     i = wall_ids.index(run.wall)
     if i == 0 and not rm.closed:
+        return None
+    if corner_angle(rm, (i - 1) % len(wall_ids)) >= 180:
         return None
     prev_id = wall_ids[i - 1]
     for other in runs(job, std):
@@ -3309,6 +3475,28 @@ def _deviation(rm: Room, corner_index: int) -> float:
     return math.atan2(offset, rm.offset_depth)
 
 
+def _front_gap(rm: Room, corner_index, nominal: int, depth: int) -> int:
+    """A gap that meets a corner, measured at the front of the run `depth` out
+    from the wall face: `nominal` at the wall face, widened or narrowed by how
+    the return wall runs away from the corner.
+
+    At a nominal 90 it is the measured deviation alone, exactly as always. At
+    any other INSIDE corner the return wall leans by its real interior angle
+    (nominal and deviation together), so a splayed 135 corner shows the gap it
+    really leaves at the front. At an outside corner, or walls in line, no
+    return wall stands in front of the run at all: the gap is what it is at the
+    wall, and the run simply ends at the corner (ruling 5).
+    """
+    dev = _deviation(rm, corner_index)
+    a = 90 if corner_index is None else corner_angle(rm, corner_index)
+    if a == 90:
+        return nominal + round(depth * math.tan(dev))
+    real = math.radians(a) + dev
+    if a >= 180 or real >= math.pi:
+        return nominal
+    return nominal - round(depth * math.cos(real) / math.sin(real))
+
+
 def _corner_indices(rm: Room, wall_index: int):
     """(corner before this wall, corner after it). None where the run just stops."""
     n = len(rm.walls)
@@ -3364,20 +3552,19 @@ def gaps(job, std: Standard = STANDARD) -> List[Gap]:
         edges = []
         first_x, first_cab, _, _ = items[0]
         if first_x > 0:
-            edges.append((None, first_cab, 0, first_x, _deviation(rm, before_corner)))
+            edges.append((None, first_cab, 0, first_x, before_corner))
         for (x0, c0, g0, end0), (x1, c1, _g1, _e1) in zip(items, items[1:]):
             if x1 > end0:
-                edges.append((c0, c1, end0, x1 - end0, 0.0))
+                edges.append((c0, c1, end0, x1 - end0, None))
         last_x, last_cab, last_g, end = items[-1]
         if w.length > end:
-            edges.append((last_cab, None, end, w.length - end,
-                          _deviation(rm, after_corner)))
+            edges.append((last_cab, None, end, w.length - end, after_corner))
 
-        for left, right, x, nominal, dev in edges:
+        for left, right, x, nominal, corner in edges:
             bounds = [c for c in (left, right) if c is not None]
             depth = max(geoms[c.number].depth for c in bounds)
             height = max(geoms[c.number].height for c in bounds)
-            front = nominal + round(depth * math.tan(dev))
+            front = _front_gap(rm, corner, nominal, depth)
             width = max(nominal, front)
             proposal = ("grow" if width < std.filler_min
                         else "filler" if width <= std.filler_max else "cabinet")
