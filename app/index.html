@@ -847,6 +847,21 @@ function places() {
   return S.job.placements;
 }
 
+/* The job's gap and plinth choices, always arrays — the same fault as
+   `places`, found 29 September 2026 on Liam_Room: store writes no `gaps` or
+   `plinths` key while there are none, so the FIRST treatment picked in the
+   Gaps card (or the first plinth ticked) threw in its handler, was never
+   stored, and the dropdown showed a choice the job did not have. */
+function gapChoices() {
+  if (!Array.isArray(S.job.gaps)) S.job.gaps = [];
+  return S.job.gaps;
+}
+
+function plinthChoices() {
+  if (!Array.isArray(S.job.plinths)) S.job.plinths = [];
+  return S.job.plinths;
+}
+
 function blankCabinet(number) {
   return {
     number: number, width: 600, height: 2400, depth: 500,
@@ -6576,14 +6591,15 @@ $("gaps").addEventListener("input", (e) => {
   const num = (v) => (v === "null" ? null : parseInt(v, 10));
   const match = (g) => g.wall === wall && g.layer === layer &&
                        g.after === num(after) && g.before === num(before);
-  const i = S.job.gaps.findIndex(match);
+  const gaps = gapChoices();
+  const i = gaps.findIndex(match);
   if (!e.target.value) {
-    if (i >= 0) S.job.gaps.splice(i, 1);
+    if (i >= 0) gaps.splice(i, 1);
   } else if (i < 0) {
-    S.job.gaps.push({wall: wall, after: num(after), before: num(before),
+    gaps.push({wall: wall, after: num(after), before: num(before),
                      layer: layer, treatment: e.target.value, note: ""});
   } else {
-    S.job.gaps[i].treatment = e.target.value;
+    gaps[i].treatment = e.target.value;
   }
   schedule();
 });
@@ -6637,14 +6653,15 @@ $("plinth").addEventListener("change", (e) => {
   if (key === undefined) return;
   const [wall, layer, first] = key.split("|");
   const n = parseInt(first, 10);
-  const i = S.job.plinths.findIndex(
+  const plinths = plinthChoices();
+  const i = plinths.findIndex(
     (p) => p.wall === wall && p.layer === layer && p.first === n);
   if (e.target.checked) {
-    if (i < 0) S.job.plinths.push({wall: wall, layer: layer, first: n,
-                                   fitted: true, note: ""});
-    else S.job.plinths[i].fitted = true;
+    if (i < 0) plinths.push({wall: wall, layer: layer, first: n,
+                             fitted: true, note: ""});
+    else plinths[i].fitted = true;
   } else if (i >= 0) {
-    S.job.plinths.splice(i, 1);
+    plinths.splice(i, 1);
   }
   schedule();
 });
