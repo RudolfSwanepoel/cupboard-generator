@@ -461,6 +461,9 @@
   #drawerbox .dstatus{display:block;font-size:11.5px;margin-top:3px;color:var(--ink)}
   #drawerbox .pair{display:grid;grid-template-columns:1fr 1fr;gap:6px}
   #drawerbox .pair select{width:100%;min-width:0}
+  /* one label over each control, as the differs… sub-row has them */
+  #drawerbox .pair>label{display:flex;flex-direction:column;gap:2px;font-size:11.5px;
+                         font-weight:600;color:var(--ink)}
   #drawerbox .tape{margin:0 0 9px}
   #drawerbox table{table-layout:fixed}
   #drawerbox th,#drawerbox td{padding:3px 4px;font-size:12px;vertical-align:middle}
@@ -2969,12 +2972,12 @@ function drawerSetupHTML(c) {
           `<option value="${esc(b)}"${b === base ? " selected" : ""}>${
           esc(DRAWER_BASE_LABEL[b] || b)}</option>`).join("")}</select>
       <span class="dhelp">${esc(DHELP.base)}</span></div>
-    <div class="drow"><label>Box board · Face board</label>
+    <div class="drow">
       <div class="pair">
-        ${drawerBoardSelect('data-dsec="drawer_carcass_board"', c.drawer_carcass_board || "",
-          "Carcass: " + (c.carcass_board || "—"), "what every drawer's box is cut from")}
-        ${drawerBoardSelect('data-dsec="drawer_face_board"', c.drawer_face_board || "",
-          "Exterior: " + (c.exterior_board || "—"), "what every drawer's face is cut from")}
+        <label>Box board ${drawerBoardSelect('data-dsec="drawer_carcass_board"', c.drawer_carcass_board || "",
+          "Carcass: " + (c.carcass_board || "—"), "what every drawer's box is cut from")}</label>
+        <label>Face board ${drawerBoardSelect('data-dsec="drawer_face_board"', c.drawer_face_board || "",
+          "Exterior: " + (c.exterior_board || "—"), "what every drawer's face is cut from")}</label>
       </div>
       <span class="dhelp">${esc(DHELP.boards)}</span></div>
     ${edgingHTML(c, "drawer_box", {kinds: ["pvc", "1mm", "2mm"], label: "Box edging",

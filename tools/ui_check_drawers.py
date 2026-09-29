@@ -511,7 +511,8 @@ def stage_boxedge(pw):
 
 def blk_labels(page):
     return page.evaluate("() => [...document.querySelectorAll('#drawerbox [data-dblk=\"setup\"] > .drow > label, "
-                         "#drawerbox [data-dblk=\"setup\"] > .tape > label')].map((l) => l.textContent.trim())")
+                         "#drawerbox [data-dblk=\"setup\"] > .drow > .pair > label, "
+                         "#drawerbox [data-dblk=\"setup\"] > .tape > label')].map((l) => l.firstChild.textContent.trim())")
 
 
 def stage_layout(pw):
@@ -526,7 +527,11 @@ def stage_layout(pw):
           page.evaluate("() => [...document.querySelectorAll('#drawerbox .dblk > h4')].map((h) => h.textContent.trim())"),
           ["Setup", "The stack"])
     check("Setup, in order: type, runner, bottom, the two boards, box edging, face edging",
-          blk_labels(page), ["Drawer type", "Runner", "Bottom", "Box board · Face board", "Box edging", "Face edging"])
+          blk_labels(page), ["Drawer type", "Runner", "Bottom", "Box board", "Face board", "Box edging", "Face edging"])
+    check("  one label over each board dropdown, each lined up with its control",
+          page.evaluate("() => [...document.querySelectorAll('#drawerbox [data-dblk=\"setup\"] .pair > label')].map((l) => "
+                        "Math.round(l.getBoundingClientRect().left - l.querySelector('select').getBoundingClientRect().left))"),
+          [0, 0])
     helps = page.evaluate("() => [...document.querySelectorAll('#drawerbox .dhelp')].map((h) => h.textContent.trim())")
     check("one help line under each control, the brief's words verbatim",
           [h in helps for h in (
