@@ -1352,7 +1352,7 @@
       "code": "08",
       "role": "Filler",
       "material": "DECOR",
-      "length": 2882,
+      "length": 2730,
       "width": 50,
       "qty": 1,
       "edge_l": 0,
@@ -1360,7 +1360,7 @@
       "edge_material": "",
       "pot_holes": 0,
       "grain": 1,
-      "note": "as ordered — exceeds the board, see finding W2"
+      "note": "as cut by Plazaboard (ordered 2882, over board length - finding W2)"
     },
     {
       "cabinet": 19,
@@ -1391,51 +1391,6 @@
       "pot_holes": 0,
       "grain": 1,
       "note": ""
-    },
-    {
-      "cabinet": 21,
-      "code": "08",
-      "role": "Filler",
-      "material": "DECOR",
-      "length": 2300,
-      "width": 50,
-      "qty": 0,
-      "edge_l": 0,
-      "edge_w": 0,
-      "edge_material": "",
-      "pot_holes": 0,
-      "grain": 1,
-      "note": "cancelled"
-    },
-    {
-      "cabinet": 22,
-      "code": "08",
-      "role": "Filler",
-      "material": "DECOR",
-      "length": 500,
-      "width": 50,
-      "qty": 0,
-      "edge_l": 0,
-      "edge_w": 0,
-      "edge_material": "",
-      "pot_holes": 0,
-      "grain": 1,
-      "note": "cancelled"
-    },
-    {
-      "cabinet": 23,
-      "code": "08",
-      "role": "Filler",
-      "material": "DECOR",
-      "length": 1750,
-      "width": 50,
-      "qty": 0,
-      "edge_l": 0,
-      "edge_w": 0,
-      "edge_material": "",
-      "pot_holes": 0,
-      "grain": 1,
-      "note": "cancelled"
     },
     {
       "cabinet": 24,
