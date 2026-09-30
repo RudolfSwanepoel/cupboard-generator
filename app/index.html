@@ -818,7 +818,27 @@ async function post(path, body) {
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(body || {}),
   });
-  return r.json();
+  const j = await r.json();
+  if (j && j.demo_stop) demoStop(j.error);
+  return j;
+}
+
+// A demo build past its date, or with the clock put back (app/demo.py): the
+// server answers every request with the reason, and it is shown over
+// everything. Never happens outside a demo build.
+function demoStop(msg) {
+  let d = $("demoStop");
+  if (!d) {
+    d = document.createElement("div");
+    d.id = "demoStop";
+    d.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(25,28,26,.72);" +
+      "display:flex;align-items:center;justify-content:center;padding:16px";
+    d.innerHTML = '<div style="background:var(--panel);color:var(--ink);max-width:34em;' +
+      'padding:24px 28px;border-radius:var(--r-l);box-shadow:var(--shadow-2);' +
+      'font-size:16px;line-height:1.45"></div>';
+    document.body.appendChild(d);
+  }
+  d.firstChild.textContent = msg;
 }
 
 let toastTimer = null;

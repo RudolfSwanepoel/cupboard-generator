@@ -13,6 +13,10 @@ Under pythonw there is no console: `sys.stdout` and `sys.stderr` are None, and
 held in memory, so a second launch refused because the app is already open
 appends to the running app's log rather than wiping it. A failure to start is written there and
 shown in a message box, since nothing else would show it.
+
+A demo build (`Build Demo.bat`, `app/demo.py`) refuses to start past its date,
+or with the clock put back, in a message box, and titles its window with the
+date it runs until. Anywhere else `demo.DEMO` is False and nothing changes.
 """
 import argparse
 import errno
@@ -27,6 +31,8 @@ from http.server import ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
+
+from app import demo  # noqa: E402  — off unless `Build Demo.bat` built this
 
 LOG = os.path.join(ROOT, "output", "app.log")
 DEFAULT_PORT = 8765
@@ -96,7 +102,8 @@ def tell(message: str, headless: bool):
     if headless and sys.platform == "win32":
         import ctypes
         # MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST
-        ctypes.windll.user32.MessageBoxW(None, message, TITLE, 0x10 | 0x10000 | 0x40000)
+        ctypes.windll.user32.MessageBoxW(None, message, demo.title() if demo.DEMO else TITLE,
+                                         0x10 | 0x10000 | 0x40000)
 
 
 def wait_forever():
@@ -111,6 +118,11 @@ def main(argv=None) -> int:
     headless = no_console()
     if headless:
         sys.stdout = sys.stderr = io.StringIO()   # held until the port is ours
+    stop = demo.refusal()                         # None outside a demo build
+    if stop:
+        # A demo is double-clicked, so the box shows even with a console.
+        tell(stop, sys.platform == "win32")
+        return 1
     try:
         return start(argv)
     except PortInUse as e:
@@ -157,7 +169,7 @@ def start(argv=None) -> int:
     # behind Browse… on a board picture. Everything else is the HTTP server, and
     # under --no-window or the browser fallback there is simply no window — the
     # picker says so and the browser's own file input takes over.
-    set_window(webview.create_window("CupboardApp", url, **WINDOW))
+    set_window(webview.create_window(demo.title() if demo.DEMO else "CupboardApp", url, **WINDOW))
     webview.start()
     return 0
 

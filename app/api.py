@@ -7,6 +7,7 @@ import base64
 import binascii
 import copy
 import glob
+import html
 import json
 import math
 import os
@@ -17,6 +18,7 @@ from dataclasses import asdict, fields as dc_fields, replace
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import unquote
 
+from app import demo
 from cabinetgen import boards as B
 from cabinetgen import nest as N
 from cabinetgen import pictures as PIC
@@ -2491,8 +2493,27 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code, obj):
         self._send(code, json.dumps(obj), "application/json; charset=utf-8")
 
+    def _demo_stopped(self, path) -> bool:
+        """In a demo build past its date (or with the clock put back), answer
+        with the reason instead: `demo_stop` for the page's `post`, which
+        shows it over everything, or a page of its own. Always False outside
+        a demo build (`app/demo.py`)."""
+        msg = demo.refusal()
+        if not msg:
+            return False
+        if path.startswith("/api/"):
+            self._json(200, {"ok": False, "demo_stop": True, "error": msg})
+        else:
+            page = ("<!doctype html><meta charset='utf-8'><title>Cupboard App</title>"
+                    "<body style='font:16px system-ui,sans-serif;margin:15vh auto;"
+                    f"max-width:36em;padding:0 16px'><p>{html.escape(msg)}</p></body>")
+            self._send(403, page, "text/html; charset=utf-8")
+        return True
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        if self._demo_stopped(path):
+            return
         if path in ("/", "/index.html"):
             try:
                 with open(os.path.join(ROOT, "app", "index.html"), encoding="utf-8") as fh:
@@ -2571,6 +2592,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path not in ROUTES:
             return self._send(404, "not found", "text/plain")
+        if self._demo_stopped(path):
+            return
         try:
             n = int(self.headers.get("Content-Length") or 0)
             payload = json.loads(self.rfile.read(n) or b"{}")

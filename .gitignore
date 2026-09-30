@@ -24,3 +24,10 @@ Thumbs.db
 .DS_Store
 # per-work snapshots taken by tools/snapshot.py --out, per machine like baseline.json
 snapshot-*.json
+
+# the demo build (Build Demo.bat): the zips, Nuitka's working folders, and the
+# one-build switch it writes and deletes. Never commit an .exe or a zip.
+demo/
+build-demo/
+app/_demo_build.py
+*.exe

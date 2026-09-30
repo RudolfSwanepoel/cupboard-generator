@@ -68,7 +68,64 @@ It is expected at `..\..\Wardrobes\R Swanepoel Cutlist.xlsx`, two levels above
 line, and `regen_check` says so rather than failing. Every other figure in this
 list comes out of the engine and is checked on any machine.
 
+## Demo build
+
+**`Build Demo.bat`** (one click, repo root; the work is `tools/build_demo.py`)
+makes `demo\Cupboard App Demo <build date>.zip`: the whole app, compiled by
+Nuitka to machine code (no `.py` / `.pyc` of this repo inside — the build lists
+the zip and fails if there is), which a friend unzips and double-clicks. No
+Python needed on their machine. It stops working 60 days after the build.
+
+1. `pip install nuitka` if missing; Nuitka downloads its own C compiler
+   (MinGW) the first time. Its cache is `%USERPROFILE%\NuitkaCache`
+   (`NUITKA_CACHE_DIR`): **Store Python hides what it writes under AppData in a
+   private folder, and the downloaded gcc then cannot find `windows.h`.**
+2. Writes `app/_demo_build.py` (`DEMO = True`, `EXPIRES` = today + 60), builds,
+   and deletes it again whatever happened (gitignored, never committed).
+3. Standalone FOLDER build, not onefile — onefile unpacks to a temp folder on
+   every run, and `ROOT` comes from `__file__`, so saved jobs, `output/` and new
+   pictures would vanish. The folder build keeps them beside the exe (proved:
+   a save, an export, a snapshot and a new picture all landed in the unzipped
+   folder). No console; `app/cupboard.ico`; `Cupboard App Demo.exe`.
+   `jobs.wardrobe_oct2025` is named for Nuitka (imported inside a function).
+   pywebview (WebView2 through pythonnet / clr_loader) needed no flags: Nuitka's
+   own package config brings its DLLs.
+4. Copies in by NAME, never by exclusion: `boards.json`, `hardware.json`,
+   `jobs/*.json` (**not `jobs/_deleted/`**, ruled 30 Sept 2026), `Pictures/`,
+   `app/index.html`, `app/view3d.js`, `app/vendor/`, `app/cupboard.ico`.
+   `READ ME FIRST.txt` sits beside the `Cupboard App Demo` folder in the zip.
+
+**Demo mode is `app/demo.py`**, off unless `_demo_build.py` exists, so a normal
+run behaves exactly as before. On: start-up past `EXPIRES` shows "This demo of
+Cupboard App expired on <date>. Contact Rudolf for a new copy." in a message box
+and exits; every request asks again (`api.Handler._demo_stopped`), and the page
+shows the reason over everything (`demoStop` in `index.html`); the latest date
+seen is kept in `output/demo-seen.txt`, and a clock more than 1 day behind it is
+refused. The window is titled `Cupboard App — Demo (until 29 Nov 2026)`.
+Geometry, nesting, costing and export are untouched.
+
+**To extend a demo: build again** — the date is baked in. `Build Demo.bat
+--test-expired` makes a throwaway copy that expired yesterday (a test; the zip
+says TEST-EXPIRED — never send it, and delete it after). Building needs the
+Python that runs the app (it must have pywebview). `build-demo/` and `demo/` are
+gitignored; never commit an .exe or a zip.
+
 ## Status
+
+**The demo build (30 September 2026, brief
+`Claude outputs/demo-build-brief-2026-09-29.md`).** See **Demo build** above.
+Nothing in `cabinetgen/` changed; `check_all` 23 of 23 with demo mode off;
+benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50). The
+first zip, `demo\Cupboard App Demo 2026-09-30.zip`, 16 MB, expires 29 Nov 2026.
+Tested unzipped on the Desktop with every Python folder off the PATH (the only
+`python312.dll` loaded was the zip's own): the window, its title and the board
+pictures; Test.json and the Oct 2025 job (272 / 59 / 30, 92, 18 / 9 / 6,
+R28,363.50 inside the exe); `ui_check_restructure.py` and `ui_check_3d.py`
+pointed at the exe (`--port`) pass but for their known lines — the three
+`attach` lines, the flaky Esc `sceneStale` line (failed on the normal app too),
+and the lines that look for an export or a snapshot in the REPO's `output/`,
+which went to the demo's own folder instead. Expired copy and clock roll-back
+both refuse in a message box; the left-open case shows the message over the page.
 
 **Walls at any angle, either direction, and Draw walls (29 September 2026,
 brief `Claude outputs/room-walls-any-angle-brief-2026-09-29.md`, ruled by
@@ -2141,6 +2198,10 @@ Make Desktop Shortcut.bat  run once per laptop: Cupboard App.lnk on the desktop,
                            pythonw run_app.py, no console
 Start Cupboard App.bat     the console launch, for when something breaks
 Check It Still Works.bat   python tools\check_all.py, then the 22-cabinets reminder
+Build Demo.bat             the demo zip: python tools\build_demo.py (see Demo build)
+app/demo.py                demo mode: off unless the build wrote app/_demo_build.py
+tools/build_demo.py        Nuitka build, data copied in by name, zip, zip listing
+demo/, build-demo/         the demo zips and Nuitka's working folders. Not in git
 app/cupboard.ico           the shortcut's icon
 app/api.py                 request handlers. Thin — they call cabinetgen.
 app/index.html             the whole UI. Vanilla JS, no build step.
