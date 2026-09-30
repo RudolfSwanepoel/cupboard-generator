@@ -1,0 +1,48 @@
+{
+  "name": "untitled",
+  "boards": [],
+  "materials": {},
+  "cabinets": [],
+  "loose": [],
+  "room": {
+    "name": "untitled",
+    "ceiling": null,
+    "offset_depth": 600,
+    "closed": false,
+    "walls": [
+      {
+        "id": "A",
+        "length": 4000,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "B",
+        "length": 3000,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "C",
+        "length": 2000,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": [],
+        "corner_end": 270
+      },
+      {
+        "id": "D",
+        "length": 3000,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      }
+    ]
+  }
+}

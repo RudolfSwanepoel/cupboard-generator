@@ -486,9 +486,9 @@
           "mode": "share",
           "share": 1,
           "box_board": null,
-          "face_board": "BROOKHILL",
+          "face_board": null,
           "offset": 10,
-          "box_edge_board": "BROOKHILL"
+          "box_edge_board": "GREY"
         },
         {
           "face_height": 140,
@@ -507,9 +507,8 @@
           "mode": "share",
           "share": 1,
           "box_board": null,
-          "face_board": "BROOKHILL",
-          "offset": 21,
-          "box_edge_board": "BROOKHILL"
+          "face_board": null,
+          "offset": 21
         },
         {
           "face_height": 351,
@@ -1498,7 +1497,8 @@
       "x": 814,
       "z": 100,
       "flip": false,
-      "layer": null
+      "layer": null,
+      "y": 14
     },
     {
       "cabinet": 9,

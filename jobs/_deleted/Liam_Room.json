@@ -1,0 +1,248 @@
+{
+  "name": "Liam_Room",
+  "boards": [
+    "WHITEMEL",
+    "BACK",
+    "CASCADE"
+  ],
+  "materials": {
+    "WHITEMEL": {
+      "board": "SUPER WHITE MELAMINE 16MM",
+      "name": "SUPER WHITE MELAMINE 16MM",
+      "tape": "WHITE",
+      "thickness": 16,
+      "grain": "plain",
+      "price": 575,
+      "picture": "",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#ffffff"
+    },
+    "BACK": {
+      "board": "WHITE MASONITE BACKING 3MM",
+      "name": "WHITE MASONITE BACKING 3MM",
+      "tape": "WHITE",
+      "thickness": 3,
+      "grain": "plain",
+      "price": 310,
+      "picture": "",
+      "has_edging": false,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#ffffff"
+    },
+    "CASCADE": {
+      "board": "Cascade Grey",
+      "name": "Cascade Grey",
+      "tape": "Cascade",
+      "thickness": 16,
+      "grain": "grain",
+      "price": 1054.79,
+      "picture": "Pictures/Cascade Grey.jpg",
+      "has_edging": true,
+      "edging_kinds": [
+        "pvc",
+        "1mm",
+        "2mm"
+      ],
+      "colour": "#b0b0b0"
+    }
+  },
+  "cabinets": [
+    {
+      "number": 1,
+      "width": 850,
+      "height": 2400,
+      "depth": 570,
+      "kind": "tall",
+      "back": "four",
+      "template": "standard",
+      "support_rows": [
+        {
+          "edge": "none",
+          "qty": 0,
+          "board": "CASCADE",
+          "cut_board": "CASCADE",
+          "type": "front",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 0,
+          "board": "CASCADE",
+          "cut_board": "CASCADE",
+          "type": "top_rear",
+          "edges": [
+            "front"
+          ]
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "CASCADE",
+          "kind": "pvc",
+          "cut_board": "CASCADE",
+          "type": "back",
+          "edges": []
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "CASCADE",
+          "kind": "pvc",
+          "cut_board": "CASCADE",
+          "type": "back",
+          "edges": []
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "CASCADE",
+          "kind": "pvc",
+          "cut_board": "CASCADE",
+          "type": "back",
+          "edges": []
+        },
+        {
+          "edge": "none",
+          "qty": 1,
+          "board": "CASCADE",
+          "kind": "pvc",
+          "cut_board": "CASCADE",
+          "type": "back",
+          "edges": []
+        }
+      ],
+      "supports": 0,
+      "edged_supports": 0,
+      "white_supports": 0,
+      "shelves": 3,
+      "fixed_shelves": 0,
+      "shelf_width": null,
+      "divider_height": null,
+      "divider_count": 0,
+      "doors": 2,
+      "door_height": null,
+      "door_hinges": [],
+      "has_doors": true,
+      "door_boards": [
+        "CASCADE",
+        "CASCADE"
+      ],
+      "drawers": [],
+      "has_drawers": null,
+      "exposed_sides": 0,
+      "carcass_board": "WHITEMEL",
+      "exterior_board": "CASCADE",
+      "back_board": "BACK",
+      "exterior_tape": "2mm",
+      "door_edge_kind": null,
+      "door_edge_board": "CASCADE",
+      "drawer_edge_kind": null,
+      "drawer_edge_board": null,
+      "drawer_carcass_board": null,
+      "drawer_face_board": null,
+      "carcass_edge": null,
+      "door_edge": null,
+      "drawer_box_edge": null,
+      "bespoke": [],
+      "note": "",
+      "footprint": [],
+      "corner_style": "",
+      "arm_a": null,
+      "arm_b": null,
+      "face_a": null,
+      "face_b": null,
+      "corner_unit": null,
+      "runner": "GELMAR45"
+    }
+  ],
+  "loose": [],
+  "room": {
+    "name": "Liam_Room",
+    "ceiling": 2600,
+    "offset_depth": 600,
+    "closed": false,
+    "walls": [
+      {
+        "id": "A",
+        "length": 3000,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "B",
+        "length": 2000,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "C",
+        "length": -700,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "D",
+        "length": -800,
+        "offset_start": 0,
+        "offset_end": 0,
+        "openings": [],
+        "obstructions": []
+      }
+    ]
+  },
+  "placements": [
+    {
+      "cabinet": 1,
+      "wall": "B",
+      "x": 0,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    }
+  ],
+  "runners": {
+    "GELMAR45": {
+      "id": "GELMAR45",
+      "name": "Gelmar 45 mm full-extension ball-bearing",
+      "supplier": "Gelmar",
+      "sku": "7011-7017",
+      "price": 0,
+      "type": "side-mount ball-bearing",
+      "height": 45,
+      "side_clearance": 13.5,
+      "rail_thickness": 12.7,
+      "lengths": [
+        300,
+        350,
+        400,
+        450,
+        500,
+        550,
+        600
+      ],
+      "extension": "full",
+      "capacity_kg": 35,
+      "lift": 5,
+      "setback": 2,
+      "inner_height": 37,
+      "inner_thickness": 6
+    }
+  }
+}
