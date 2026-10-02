@@ -2156,33 +2156,6 @@ def attach_move(payload):
     return dict(_panel_reply(job, panel), ok=True, placed_at=_placed_at(job, panel))
 
 
-def room_extend(payload):
-    """Add a wall at either end of the room's walk — how a straight run becomes
-    an L or a U (kept for the Walls card until Part 2 replaces it with the Wall
-    card's "+ Wall before / after"). The length is a starting figure to be
-    measured, like the pre-filled room's walls."""
-    rm = room_from_dict(payload.get("room") or {})
-    order = walk_order(rm)
-    if not order:
-        return {"ok": False, "error": "the room has no wall to add one to"}
-    at = str(payload.get("at") or "end")
-    try:
-        if at == "start":
-            add_wall(rm, before=order[0], length=int(payload.get("length") or 3000))
-        else:
-            add_wall(rm, after=order[-1], length=int(payload.get("length") or 3000))
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
-    return {"ok": True, "room": room_to_dict(rm)}
-
-
-def room_flip(payload):
-    """Flip side is gone with the chain (2 October 2026): a wall's face is
-    turned round one wall at a time, `/api/wall-flip` (Part 3)."""
-    return {"ok": False, "error": "Flip side went with the wall chain — flip one wall's face "
-                                  "from its Wall card"}
-
-
 def room_draw(payload):
     """Walls off an outline drawn with the mouse on Room -> Plan, ADDED to the
     room (2 October 2026): the browser sends the corners it clicked, in world
@@ -2341,8 +2314,9 @@ def room_renumber(payload):
 
 
 def room_new(payload):
-    """A fresh square room to start measuring from. The browser does not invent
-    wall lists any more than it invents panel sizes."""
+    """A fresh square room to start measuring from — the 4000 x 3000 pre-fill,
+    four walls A-D as positioned segments. The browser does not invent wall
+    lists any more than it invents panel sizes."""
     return {"ok": True, "room": room_to_dict(rectangular(
         int(payload.get("length") or 4000),
         int(payload.get("width") or 3000),
@@ -2626,9 +2600,10 @@ ROUTES = {
     "/api/attach-snaps": attach_snaps,
     "/api/attach-move": attach_move,
     "/api/snapshot": snapshot,
-    "/api/room-extend": room_extend,
+    # Room redo Phase 1 (2 October 2026): /api/room-extend and /api/room-flip
+    # went with the wall chain; a wall is added off a free end (wall-add) and
+    # flipped one at a time (wall-flip)
     "/api/room-draw": room_draw,
-    "/api/room-flip": room_flip,
     "/api/wall-set": wall_set,
     "/api/wall-add": wall_add,
     "/api/wall-delete": wall_delete,

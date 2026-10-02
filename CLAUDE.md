@@ -112,6 +112,107 @@ gitignored; never commit an .exe or a zip.
 
 ## Status
 
+**Room redo, Phase 1 of 4 — walls become positioned segments (2 October 2026,
+brief `Claude outputs/room-redo-phase1-brief-2026-10-02.md`, ruled by Rudolf;
+Phases 2-4 — the draw mode, openings and obstructions, free cabinets — NOT
+built).** Three commits, Parts 1 to 3; `check_all` 23 of 23 at each; benchmark
+unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50); `snapshot.py
+--compare` against the tree before: the benchmark and every panel, issue and
+total identical, Test.json's plan moved by the room-side tint and the wall hit
+lines only (its elevations byte for byte). Every Playwright script passes
+(`ui_check_walls` rewritten, `ui_check_restructure`'s Room and export stages
+re-pointed; `ui_check_3d`, `ui_check_attached`, `ui_check_drawers` unchanged).
+
+1. **The model.** `Wall` is `id, x0, y0, x1, y1` (whole mm), `height` (None =
+   the ceiling), `thickness` (None = `Standard.wall_thickness` 110, drawing
+   only), `drawn`; `length`, `offset_start`, `offset_end` and `corner_end` are
+   gone from the dataclass (`Wall.length` is a property off the points),
+   `Room.closed` is derived. The drawn line is the inside face and **the room
+   is on the RIGHT of x0 → x1** (`wall_normal`, `(-dy, dx)` — the normal the
+   chain always gave). `room.py` derives the rest, one function each:
+   `wall_frames` (same shape), `connections` (ends within
+   `Standard.join_tolerance` 1 mm), `chains` / `walk_order` / `main_chain` /
+   `is_closed`, `corner_angle` (after a wall, to 0.1°; `corner_angle_exact`
+   for geometry), `corner_before`, `out_of_square` (mm at `offset_depth` when
+   within `Standard.square_within` 10° of 90 / 180 / 270), `corner_points`,
+   `closure_error` (a near miss within `closure_block` only — a bigger miss is
+   an open run and nothing is said), `crossing_walls` (proper crossings only:
+   a T-wall is legal). A wall meeting nothing at either end is **free**: no
+   corner, no butt, no shadow, nothing beside it.
+2. **Edits move points, server-side, whole mm**: `set_length` (the chain
+   after it follows), `set_corner` (the walls after the corner turn; on a loop
+   every other wall, so the last corner can be typed too and the loop opens
+   where the walk came back), `set_out_of_square`, `add_wall(after= |
+   before=)` at 90 off a FREE end (refused where the end meets a wall; nothing
+   re-origined), `walls_from_points(rm, …)` ADDS drawn walls (no replacing, no
+   re-orienting; a first point within `snap_tolerance` of an existing corner
+   joins it), `flip_face` per wall (`flip_side` is gone), `renumber_walls`
+   along the walk (placements, gap and plinth decisions, an acceptance's
+   `where` follow; letters are otherwise for life, A..Z then AA),
+   `delete_wall` (placements unplaced, decisions dropped, never an orphan).
+3. **Migration, once** (ruling 8): `store.room_from_dict` runs a room saved as
+   a chain through `room._legacy_frames` (the old arithmetic, read by nothing
+   else) and writes points; every job and fixture with a room was re-saved in
+   the new form in Part 1's commit — all exact, every corner 90. Load → save →
+   load is stable; a job with no room does not change by a byte.
+4. **Height**: `wall_height(rm, w)`; the elevation draws the wall to it with
+   the ceiling dashed above a lower wall, 3D draws each wall to it; new
+   `opening-height` (CRITICAL, an opening's head above its wall) and
+   `above-wall` (WARNING, a cabinet reaching above a wall lower than the
+   ceiling — a tall unit can stand against a half wall). `corner-angle` and
+   the corner-disagreement check are gone; `room-closure` is the near miss.
+5. **The Room tab**: a toolbar (Select · Draw walls, Esc back to Select), the
+   plan, one dock showing the **Room card** (nothing / the room selected), a
+   **Wall card** (a wall clicked in the plan or in the table) or the editor;
+   Placements, Gaps and Plinth under the plan. The room side is SHOWN (a
+   closed room's floor tinted, an open run's or a free wall's face side a
+   band fading out, the thickness hatched on the back); a one-wall room
+   draws; Draw walls adds. Units on screen: mm and °. See **The UI → Room**
+   and the where-it-lives-now table.
+6. **API**: `/api/wall-set` (length / angle_after / angle_before /
+   square_after / square_before / height / thickness / drawn), `/api/wall-add`,
+   `/api/wall-delete` (an `ask` step for the confirm), `/api/wall-flip`,
+   `/api/room-renumber` (a dry run for the confirm), `/api/room-draw` (adds),
+   `/api/room-new`; `/api/room-extend` and `/api/room-flip` are gone.
+   `_room_info` carries per wall the points, length, height, thickness, drawn,
+   `free`, the corner before and after (angle, out-of-square, the wall met),
+   and `closed`, `walk`, `closure_error`, `crossing`, `corners`.
+7. **Checks**: `check_room.py` rewritten (migration, walk, renumber,
+   flip_face, height, single_wall, touching, delete, the angled-room pins on
+   points); `check_attached`, `check_elevation`, `check_fillers`,
+   `check_plinth` and `check_scene` build their rooms with points, `chain_walls`,
+   `set_corner` / `set_out_of_square`. No pinned figure moved: every fixture
+   room is 90 at every corner, so the migration is exact.
+
+**What the audit found and changed** (every chain-by-index read, Part 1):
+`corner_shadow` and `unit_corner` (prev / next wall by connection; `unit_corner`
+now names the wall whose corner-after it is), `_beside` (so `return_profiles`
+and `return_faces`), `clashes` (each wall's own segment, not the corner
+chain), `_plinth_meets` / `plinth_butt_wall` / `plinth_open_corners` (the
+previous wall by connection), `gaps`' `_corner_indices` → `_corner_walls` and
+`_deviation` / `_front_gap` (the real angle, one formula: `nominal − depth ·
+cot(angle)`, the nominal at 180 and beyond), `scene._room_payload` (walls off
+their points, `is_closed`), `render._plan_walls` / `_plan_tracks` (own points),
+`plan_svg`'s bounds (walls and footprints, one wall or many), `validate._room`
+and `api._room_info`. `corner_offset`, `corner_turn`, `corner_exists`,
+`flip_side` and `next_wall_id`'s A-Z limit are gone.
+
+**What a free wall or a one-wall room made the engine do**: nothing the brief
+did not foresee. A one-wall room gaps to both ends with no taper, runs end at
+the wall's ends with no butt and no plinth-corner warning, the elevation sees
+nothing beside it, 3D draws the one wall over a one-segment "floor" (the
+corner chain is two points; three's floor shape is degenerate and draws
+nothing), and a corner unit on it is told it is not standing in a corner. A
+flipped wall in a closed room meets nothing afterwards: the room becomes an
+open run and the flipped wall a free wall (the walk puts it last).
+
+**For Rudolf:** (a) typing a length or an angle on a closed room opens the
+loop by the difference — the toast says so and the Room card reads "open run";
+type the matching figure on the opposite wall, or Draw walls, to close it
+again (Phase 2's corner drag is the real answer); (b) the `offset_depth`
+default and sign stay open, as ruled; (c) the plan's room-side tint moved
+Test.json's plan SVG in the snapshot — by design.
+
 **The demo build (30 September 2026, brief
 `Claude outputs/demo-build-brief-2026-09-29.md`).** See **Demo build** above.
 Nothing in `cabinetgen/` changed; `check_all` 23 of 23 with demo mode off;
@@ -2196,8 +2297,11 @@ cabinetgen/nest.py         guillotine nesting + sheet layout SVGs
 cabinetgen/render.py       SVG drawings: side-by-side elevation, plan, per-wall elevations
 cabinetgen/scene.py        the 3D scene, built here from room.solid_parts and only DRAWN
                            in the browser. Nothing reads it back.
-cabinetgen/room.py         walls, corners (a nominal angle each, 29 Sept 2026), to_world,
-                           walls_from_points (Draw walls). The only trigonometry.
+cabinetgen/room.py         walls as positioned segments (2 Oct 2026): connections, the walk,
+                           corner angles, closure derived; set_length / set_corner / add_wall /
+                           flip_face / renumber_walls / delete_wall; walls_from_points (Draw
+                           walls, adds); _legacy_frames (migration only); to_world. The only
+                           trigonometry.
 cabinetgen/store.py        job files: JSON save / load
 cabinetgen/export_plaza.py Plazaboard CSV + costing off the real rate card
 run_app.py                 starts the local server, opens the window (maximised); under
@@ -2239,9 +2343,11 @@ tools/check_launch.py      the launcher: no-console logging, "already running", 
                            anywhere else "skipped: Windows only", exit 0
 tools/regen_check.py       the regression check above
 tools/check_examples.py    verifies the worked examples in docstrings are true
-tools/check_room.py        room geometry: closure, corners, to_world; walls at any angle
-                           (angles(): all-90 float-identical, L / hexagon / splay / bay
-                           close, crossing walls, drawn walls, ruling 4, plinth butt,
+tools/check_room.py        room geometry on points: migration (every legacy room within 1 mm,
+                           exact where it should be, load->save->load stable), walk, renumber,
+                           flip_face, height, single_wall, touching, delete; closure, to_world,
+                           the plan, isolate, the job file; the angled-room pins (L / hexagon /
+                           splay / bay, crossing walls, drawn walls, ruling 4, plinth butt,
                            gaps, elevations, 3D floor, swing, tip-up)
 tools/check_fillers.py     gap detection, taper, scribe, filler panels
 tools/check_plinth.py      runs, butt joints, long-run splits, plinth panels
@@ -2279,8 +2385,10 @@ tools/ui_check_3d.py       the 3D view in the running app, with a real mouse (Pl
 tools/ui_shots_3d.py       the four 3D screenshots the realism brief compares, before and after
                            (Playwright), into Claude outputs/3d-realism-screenshots/
 tools/ui_check_attached.py attached panels in the running app (Playwright)
-tools/ui_check_walls.py    walls at any angle and Draw walls in the running app (Playwright),
-                           screenshots into output/_checks/ui_check_walls/
+tools/ui_check_walls.py    the Room tab on positioned walls (Playwright): the toolbar, the Room
+                           and Wall cards, Draw walls adding and starting on a corner, a one-wall
+                           room, Flip face, Renumber, wall height, refused inputs, a drag onto a
+                           45-degree wall, 3D; screenshots into output/_checks/ui_check_walls/
 tools/ui_check_restructure.py  the UI restructure in the running app (Playwright),
                            with screenshots into output/_checks/ui_check_restructure/
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
@@ -3687,6 +3795,24 @@ panel is a column of its own**, starting level with the top of the 3D view. The
 wall elevations are in Room -> Elevation. See the Status entry and **The
 Cabinets tab's 3D**.
 
+**Room -> Plan since the room redo (2 October 2026)**: a slim toolbar on the
+left (Select, the default; Draw walls; Esc returns to Select — Phase 2 adds
+Nook, Phase 3 the openings palette), the plan in the middle (zoom and layer
+chips in its header; click a wall's line to select it, a cabinet to select it,
+empty canvas to select the room), and the dock on the right showing what is
+selected: the **Room card** (name, ceiling mm, offset depth mm, Draw walls,
+Renumber, Remove room, the walls in walk order — Wall · Length (mm) · Corner
+after (°) · Height (mm) · Face (Flip) · Op. · Obs. · ×; a row click selects
+that wall), a **Wall card** (length, the corner before and after it with the
+out-of-square mm where near square, height blank = the ceiling, thickness,
+drawn / measured, Flip face, + Wall after / before where that end is free,
+Delete, its openings and obstructions read-only until Phase 3), or the one
+editor for a cabinet or panel. Placements, Gaps and Plinth are under the plan.
+Every figure on a card is the engine's; every wall edit is a server call and
+the room comes back (`takeRoomReply`); a refused entry is said in the card
+(`wallNote`, held in state across repaints). The one help line: "The line is
+the inside face; the room is the tinted side. Flip face turns it round."
+
 The cabinet editor is seven sections, each a bold heading over its own coloured
 block: **Size · Outline · Structure · Doors · Drawers · Corner Unit ·
 Supports**. An item whose **Kind** is Panel shows **Size · Panel design** and
@@ -3842,19 +3968,49 @@ does its own. Wall-local axes are x along the wall from its start corner, y out
 from the wall face into the room, z up. World is X right, Y into the room from
 wall A, Z up — which maps onto SVG with no flip.
 
-Two things about corners that are easy to get wrong:
+**Walls are positioned segments** (room redo Phase 1, ruled 2 October 2026).
+A `Wall` is its two end points, `x0, y0 → x1, y1`, whole mm; nothing else
+stores a wall position. The drawn line is the inside face and **the room is
+on the right of x0 → x1** — the right-hand normal, which in this frame is
+`(-dy, dx)`, the normal the old chain gave; the thickness band is drawn on
+the left, the back. Everything a room used to store is derived in `room.py`:
 
-- Every corner is measured **twice**, once from each wall that meets there
-  (`walls[i].offset_end` and `walls[i+1].offset_start` are the same physical
-  angle). The first wall's figure drives the geometry; the second is
-  cross-checked and a disagreement is reported, never averaged. If only one is
-  given, it is used — so a corner need only be measured from the reachable side.
-- A square room closes even if the corner turn has the wrong sign. The
-  parallelogram case in `check_room.py` is what actually proves it; do not
-  delete it.
+- `wall_length`, `wall_dir`, `wall_normal`, `wall_frames` (the same return
+  shape as ever, so everything that takes (start, dir, normal) is untouched).
+- `connections`: B is A's next when B's start lies within
+  `Standard.join_tolerance` (1 mm) of A's end. Each end meets at most one
+  wall; the lower letter wins a tie. A wall meeting nothing at either end is
+  **free** — no corner, no butt, no shadow, nothing returned beside it.
+- `chains` / `walk_order` / `main_chain` / `is_closed`: each chain is walked
+  from its head (for a loop, its lowest letter); chains come in the order of
+  their lowest letter, free walls last; the room is the first closed chain,
+  else the first chain. `corner_points` is the main chain; `closure_error`
+  is a near miss within `closure_block` only — a bigger miss is simply an
+  open run and nothing is said.
+- `corner_angle(rm, wall)` is the interior angle AFTER that wall, to 0.1°
+  (`corner_angle_exact` for geometry — a gap's taper); `corner_before` the
+  one before it; `out_of_square` the mm a site would read at
+  `Room.offset_depth` when the angle is within `Standard.square_within` (10°)
+  of 90, 180 or 270, positive opening away from the room.
+- `crossing_walls` names proper crossings only: meeting at an end, or an end
+  lying on another wall (a T-wall), is legal geometry.
+- **Edits move points**: `set_length` (the end moves along the wall; the
+  walls after it in its chain follow), `set_corner` (the walls after the
+  corner turn about it — round a loop, every other wall, so the last corner
+  can be typed and the loop opens where the walk came back), `set_out_of_square`,
+  `add_wall(after= | before=)` at 90 off a free end, `walls_from_points` adds,
+  `flip_face` swaps the ends and re-measures what is on the wall from the
+  other end, `renumber_walls` re-letters along the walk, `delete_wall`.
+- **Letters are for life**: nothing re-letters a wall but Renumber. A new
+  wall takes the first unused letter, AA after Z (`next_wall_id`).
+- **Migration, once**: `store.room_from_dict` reads the old keys (`length`,
+  `offset_start`, `offset_end`, `corner_end`, the room's `closed`) through
+  `room._legacy_frames` — the old chain arithmetic, used by nothing else —
+  and writes points; the old keys are never written again. The parallelogram
+  with offsets at every corner is now a migration case in `check_room.py`.
 
 Thresholds live in `Standard` like every other dimension: `closure_warn`,
-`closure_block`, `corner_disagree`.
+`closure_block`, `join_tolerance`, `wall_thickness`, `square_within`.
 
 **Layers** come from `room.layer_of`: kind `tall` is tall, kind `upper` is wall,
 anything else off the floor (`Placement.z > 0`) is wall, everything else is
@@ -3908,19 +4064,19 @@ that drawing you cannot afford to miss.
 `/api/plan` is separate from `/api/compute` on purpose: flipping a layer should
 cost a redraw, not a re-nest.
 
-**Every corner has a nominal interior angle** (29 September 2026):
-`Wall.corner_end` on the wall before it, 90 inside, 270 outside, anything
-strictly between 0 and 360; the offsets are the fine correction on top, as
-ever. `room.corner_turn` is the one place the turn is worked out. See the
-Status entry and `docs/ROOM-LAYOUT-SPEC.md`, **Ruled — 29 Sept 2026**.
+**Every corner's angle is derived from the two walls' directions** (since 2
+October 2026; before that `Wall.corner_end` was typed and the chain turned by
+it): 90 inside, 270 outside, anything strictly between 0 and 360. Typing an
+angle in the Wall card turns the walls after the corner (`room.set_corner`).
+See the Status entry and `docs/ROOM-LAYOUT-SPEC.md`, **Ruled — 2 Oct 2026**.
 
-**Walls are added at either end of the sequence** — `room.add_wall(rm, "start" |
-"end", length)`, behind `/api/room-extend` and the "+ Wall before / after" buttons.
-That is how a straight run becomes an L or a U; the 4000 × 3000 pre-fill for a new
-room stays (ruled 14 September 2026). A new wall takes the next free letter and
-starts square. Placements name walls by id, so nothing moves along its wall, but a
-wall added at the start re-origins the chain and becomes the "earlier" wall at that
-corner for the plinth butt rule.
+**Walls are added off a free end** — `room.add_wall(rm, after=id | before=id,
+length)`, behind `/api/wall-add` and the Wall card's "+ Wall after / before",
+offered only where that end meets nothing. That is how a straight run becomes
+an L or a U; the 4000 × 3000 pre-fill for a new room stays (ruled 14 September
+2026). A new wall takes the next free letter and starts at 90. Nothing is
+re-origined: wall A stays where it is, and which wall is "earlier" at a corner
+for the plinth butt rule is the walk (`walk_order`).
 
 ## Gaps, fillers and scribes
 
