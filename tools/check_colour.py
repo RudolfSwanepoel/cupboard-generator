@@ -91,7 +91,7 @@ def job():
 def main():
     print("one resolver, and no board colour stated anywhere else")
     src = open(os.path.join(ROOT, "cabinetgen", "render.py"), encoding="utf-8-sig").read()
-    paper = {R.INK, R.RULE, R.FAINT, R.MUTED, R.CRIT, R.PAPER, "#dfe3dd",
+    paper = {R.INK, R.RULE, R.FAINT, R.MUTED, R.CRIT, R.PAPER, R.ROOM_TINT, "#dfe3dd",
              "#f6e0e3", "#fff"}
     stray = sorted({h for h in re.findall(r'"#[0-9a-fA-F]{3,6}"', src)
                     if h.strip('"') not in paper})

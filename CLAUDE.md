@@ -1179,6 +1179,17 @@ dirty. Nothing else about either changed.
 | Outline section | every cupboard | **Plan shape**, only on a `template "none"` cabinet or one with a footprint |
 | A wall turning the other way | a negative length (ran the wall backwards) | **Corner** column in Room -> Plan's Walls card: the angle of the corner after each wall, `B→C`, 90 / 270 / 135 / 225 / 180 / custom (walls brief, 29 Sept 2026) |
 | Entering walls | typed, one row at a time | typed as before, **or Draw walls** on Room -> Plan (click the corners); drawn lengths marked **drawn** in the Walls card until measured |
+| Walls card (Room -> Plan, under the plan) | one card: name, ceiling, offset depth, closed / open, the wall table | **Room card** in the Room tab's dock (nothing or the room selected): name, ceiling (mm), offset depth (mm), Draw walls, Renumber, Remove room, the walls in walk order; and a **Wall card** per wall (click it in the plan, or its row) — room redo Phase 1, 2 Oct 2026 |
+| "+ Wall before / after" | the Walls card's two buttons, at either end of the chain | the **Wall card**'s "+ Wall after" / "+ Wall before", offered where that end meets nothing; at 90, the next free letter, nothing re-origined |
+| Flip side (the whole open run) | the Walls card | **Flip face** per wall, in the Room card's Face column and the Wall card; a closed room's wall can be flipped too (it then meets nothing) |
+| The Corner column (nominal angle, quick picks) | the Walls card | the Room card's **Corner after (°)** column (typed, derived off the points), and the Wall card's **corner before / after**: the angle to 0.1° and, near 90 / 180 / 270, the **out-of-square** mm at the offset depth |
+| Offsets (offset start / end per wall) | the Walls card | gone from the model (read once for migration); the Wall card's out-of-square field is the way a site figure is typed |
+| `Room.closed` ("walls form a loop") | typed on the room | **derived** (`room.is_closed`): the walls close when the chain returns to its start |
+| A wall's id, typed by hand | the Walls card's first column | gone; **Renumber** (the Room card) re-letters along the walk, behind a confirm that lists the changes |
+| Removing a wall | × on its row, the placements on it left orphaned | × on its row or **Delete** on its card, behind a confirm naming what becomes unplaced; the placements and decisions on it go |
+| Draw walls | a button in the plan's header; REPLACED the room, re-oriented to +X | the **toolbar**'s Draw walls (Select is the default, Esc returns to it) and the Room card's button; ADDS to the room, starts on an existing corner clicked near, the points kept as drawn |
+| Which side the room is | not shown | **shown**: a closed room's floor tinted; an open run's or a free wall's face side a fading band; the thickness hatched on the back |
+| Wall height | — | the Room card's **Height (mm)** column and the Wall card (blank = the ceiling); the elevation and 3D draw the wall to it |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**

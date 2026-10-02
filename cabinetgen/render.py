@@ -26,6 +26,12 @@ MUTED = "#767e78"
 CRIT = "#a4303f"
 
 PAPER = "#ffffff"
+# The room side of a wall, shown (room redo Phase 1, 2 October 2026): a closed
+# room's floor tinted, an open run's or a free wall's face side a band of
+# ROOM_BAND_MM fading out, so which side the room is on can be seen and
+# pointed at. Drawing only.
+ROOM_TINT = "#cfe0f6"
+ROOM_BAND_MM = 300
 
 # Line weights, in screen pixels, for the plan and every elevation — one table,
 # read by both (23 September 2026, brief item 3, confirmed by Rudolf). Every
@@ -1149,7 +1155,7 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
         pts += cabinet_footprint(rm, p, cab, std, job.materials)
     xs = [q[0] for q in pts]
     ys = [q[1] for q in pts]
-    pad = 54
+    pad = 66          # room for the thickness band and the length label outside the walls
     span_x = max(max(xs) - min(xs), 1)
     span_y = max(max(ys) - min(ys), 1)
     scale = min((max_width - pad * 2) / span_x, (max_height - pad * 2) / span_y)
@@ -1171,9 +1177,14 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
            '</pattern></defs>',
            f'<rect width="{W}" height="{H}" fill="none"/>']
 
-    out += _plan_walls(rm, corners, T, scale)
+    out += _plan_room_side(rm, T, std)
+    out += _plan_walls(rm, corners, T, scale, std)
     gap_shapes, labels = _plan_gaps(job, show, T)
     out += gap_shapes
+    # a wall is selected by a click on it: a fat invisible line under the
+    # cabinets (a panel's PANEL_GRAB, the same bargain), so a cabinet on the
+    # wall line still wins the press
+    out += _plan_wall_hits(rm, T)
     under_at = len(out)          # a wide panel's grab area goes here, under the cabinets
     # ghosted first so the selected layers sit on top of them
     if isolate is None:
@@ -1234,12 +1245,70 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     return "\n".join(out)
 
 
-def _plan_walls(rm, corners, T, scale):
-    """Wall lines, their lengths, openings as breaks, obstructions as boxes."""
+def _plan_room_side(rm, T, std):
+    """WHICH SIDE THE ROOM IS, shown (2 October 2026): a closed room's floor is
+    tinted; on an open run, and on a free wall, a band `ROOM_BAND_MM` deep on
+    the face side of each wall is tinted, fading out into the room. The line
+    is the inside face and the room is on its right (`wall_normal`)."""
+    out = []
+    from .room import main_chain
+    ids, closed = main_chain(rm, std)
+    if closed:
+        pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in (T(q) for q in corner_points(rm, std)[:-1]))
+        out.append(f'<polygon class="roomside" points="{pts}" fill="{ROOM_TINT}" '
+                   f'fill-opacity="0.35" stroke="none" pointer-events="none"/>')
+    frames = wall_frames(rm)
+    for w in rm.walls:
+        if closed and w.id in ids:
+            continue
+        (sx, sy), (dx, dy), (nx, ny) = frames[w.id]
+        L = w.length
+        if L <= 0:
+            continue
+        d = ROOM_BAND_MM
+        quad = [(w.x0, w.y0), (w.x1, w.y1), (w.x1 + nx * d, w.y1 + ny * d), (w.x0 + nx * d, w.y0 + ny * d)]
+        pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in (T(q) for q in quad))
+        mx, my = (w.x0 + w.x1) / 2, (w.y0 + w.y1) / 2
+        (gx0, gy0), (gx1, gy1) = T((mx, my)), T((mx + nx * d, my + ny * d))
+        gid = f"side-{escape(w.id)}"
+        out.append(f'<defs><linearGradient id="{gid}" gradientUnits="userSpaceOnUse" '
+                   f'x1="{gx0:.1f}" y1="{gy0:.1f}" x2="{gx1:.1f}" y2="{gy1:.1f}">'
+                   f'<stop offset="0" stop-color="{ROOM_TINT}" stop-opacity="0.55"/>'
+                   f'<stop offset="1" stop-color="{ROOM_TINT}" stop-opacity="0"/>'
+                   f'</linearGradient></defs>')
+        out.append(f'<polygon class="roomside" data-wall="{escape(w.id)}" points="{pts}" '
+                   f'fill="url(#{gid})" stroke="none" pointer-events="none"/>')
+    return out
+
+
+def _plan_wall_hits(rm, T):
+    """One fat, invisible line per wall for a click to select it by
+    (`data-wallhit`); the selected one is coloured by the page's stylesheet."""
+    out = []
+    for w in rm.walls:
+        (ax, ay), (bx, by) = T((w.x0, w.y0)), T((w.x1, w.y1))
+        out.append(f'<line class="wallhit" data-wallhit="{escape(w.id)}" '
+                   f'x1="{ax:.1f}" y1="{ay:.1f}" x2="{bx:.1f}" y2="{by:.1f}" '
+                   f'stroke="transparent" stroke-width="{PANEL_GRAB}" stroke-linecap="round" '
+                   f'style="pointer-events:stroke;cursor:pointer"/>')
+    return out
+
+
+def _plan_walls(rm, corners, T, scale, std: Standard = STANDARD):
+    """Wall lines, their lengths, openings as breaks, obstructions as boxes;
+    and the wall's thickness as a hatched band on its BACK (`Wall.thickness`,
+    drawing only, `Standard.wall_thickness` where none is set)."""
     out = []
     frames = wall_frames(rm)
     for w in rm.walls:
         (ax, ay), (bx, by) = T((w.x0, w.y0)), T((w.x1, w.y1))
+        (_s, _d, (nx, ny)) = frames[w.id]
+        t = w.thickness if w.thickness else std.wall_thickness
+        if w.length > 0 and t > 0:
+            back = [(w.x0, w.y0), (w.x1, w.y1), (w.x1 - nx * t, w.y1 - ny * t), (w.x0 - nx * t, w.y0 - ny * t)]
+            pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in (T(q) for q in back))
+            out.append(f'<polygon class="wallband" points="{pts}" fill="url(#hatch)" '
+                       f'fill-opacity="0.45" stroke="none" pointer-events="none"/>')
         spans = _wall_spans(w)
         for s0, s1 in spans:
             p0 = T(to_world(rm, w.id, s0, 0)[:2])
@@ -1256,10 +1325,11 @@ def _plan_walls(rm, corners, T, scale):
             mid = ((q0[0] + q1[0]) / 2, (q0[1] + q1[1]) / 2)
             out.append(f'<text x="{mid[0]:.1f}" y="{mid[1] - 6:.1f}" font-size="8.5" '
                        f'text-anchor="middle" fill="{MUTED}">{escape(op.kind)} {op.width}</text>')
-        # length label, pushed outside the room along the outward normal
-        (_, _, (nx, ny)) = frames[w.id]
+        # length label, pushed outside the room along the outward normal, clear
+        # of the thickness band
+        off = max(22, t * scale + 12)
         mx, my = (ax + bx) / 2, (ay + by) / 2
-        out.append(f'<text x="{mx - nx * 22:.1f}" y="{my - ny * 22 + 4:.1f}" font-size="10.5" '
+        out.append(f'<text x="{mx - nx * off:.1f}" y="{my - ny * off + 4:.1f}" font-size="10.5" '
                    f'text-anchor="middle" fill="{INK}">{escape(w.id)} · {w.length}</text>')
     return out
 

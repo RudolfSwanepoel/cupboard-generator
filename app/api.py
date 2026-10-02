@@ -2206,6 +2206,140 @@ def room_draw(payload):
     return {"ok": True, "room": room_to_dict(rm), "added": [w.id for w in new]}
 
 
+def _room_reply(job):
+    """What a room edit hands back: every record a wall edit can move, so the
+    browser stores them and works nothing out."""
+    d = job_to_dict(job)
+    return {"room": d["room"], "placements": d.get("placements", []),
+            "gaps": d.get("gaps", []), "plinths": d.get("plinths", []),
+            "acceptances": d.get("acceptances", []),
+            "hands": {str(c.number): c.corner_hand for c in job.cabinets if c.corner_on}}
+
+
+def _room_only(payload):
+    rm = room_from_dict(payload.get("room") or {})
+    if not rm.walls:
+        raise ValueError("the room has no walls")
+    return rm
+
+
+def wall_set(payload):
+    """A typed figure on one wall (2 October 2026): `length` moves its end
+    point and carries the chain after it; `angle_after` / `angle_before` turn
+    the walls after that corner (before = the corner after the wall meeting
+    its start); `square_after` / `square_before` the same, typed as mm out of
+    square at the room's offset depth; `height`, `thickness` (blank = the
+    default) and `drawn` are stored as they are. Whole mm, server-side
+    (`room.set_length` / `set_corner` / `set_out_of_square`). Says whether the
+    room was closed and still is, so the browser can say when a loop opened."""
+    try:
+        rm = _room_only(payload)
+        wid = str(payload.get("wall") or "")
+        w = next((x for x in rm.walls if x.id == wid), None)
+        if w is None:
+            return {"ok": False, "error": f"the room has no wall {wid!r}"}
+        was = is_closed(rm, STANDARD)
+        if "length" in payload:
+            v = int(round(float(payload["length"])))
+            if v < 0:
+                return {"ok": False, "error": f"Wall {wid}: a length cannot be negative. To turn "
+                                              f"the other way, set the corner angle to 270."}
+            set_length(rm, wid, v, STANDARD)
+            w.drawn = False                     # a length typed is a measured length
+        for key, before in (("angle_after", False), ("angle_before", True)):
+            if key in payload:
+                target = prev_wall(rm, wid, STANDARD) if before else wid
+                if target is None:
+                    return {"ok": False, "error": f"nothing meets the start of wall {wid}: it has no corner there"}
+                a = float(payload[key])
+                if not 0 < a < 360:
+                    return {"ok": False, "error": "A corner angle is between 0 and 360 degrees — "
+                                                  "90 inside, 270 outside."}
+                set_corner(rm, target, a, STANDARD)
+        for key, before in (("square_after", False), ("square_before", True)):
+            if key in payload:
+                target = prev_wall(rm, wid, STANDARD) if before else wid
+                if target is None:
+                    return {"ok": False, "error": f"nothing meets the start of wall {wid}: it has no corner there"}
+                set_out_of_square(rm, target, int(round(float(payload[key]))), STANDARD)
+        if "height" in payload:
+            v = payload["height"]
+            w.height = None if v in (None, "", 0, "0") else int(round(float(v)))
+            if w.height is not None and w.height <= 0:
+                return {"ok": False, "error": "a wall's height is a positive number of mm, or blank for the ceiling"}
+        if "thickness" in payload:
+            v = payload["thickness"]
+            w.thickness = None if v in (None, "", 0, "0") else int(round(float(v)))
+            if w.thickness is not None and w.thickness <= 0:
+                return {"ok": False, "error": "a wall's thickness is a positive number of mm, or blank for the default"}
+        if "drawn" in payload:
+            w.drawn = bool(payload["drawn"])
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    now = is_closed(rm, STANDARD)
+    return {"ok": True, "room": room_to_dict(rm), "was_closed": was, "closed": now,
+            "closure_error": closure_error(rm, STANDARD)}
+
+
+def wall_add(payload):
+    """A wall at 90 off one wall's free end (`where` after | before), the next
+    free letter (`room.add_wall`). Nothing is re-origined."""
+    try:
+        rm = _room_only(payload)
+        wid = str(payload.get("wall") or "")
+        length = int(payload.get("length") or 3000)
+        where = str(payload.get("where") or "after")
+        w = add_wall(rm, after=wid, length=length) if where == "after" \
+            else add_wall(rm, before=wid, length=length)
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "room": room_to_dict(rm), "added": w.id}
+
+
+def wall_delete(payload):
+    """Take a wall out (`room.delete_wall`): what stood on it is unplaced, its
+    gap and plinth decisions go, nothing is orphaned. With `ask` set it only
+    says what WOULD go, for the confirm."""
+    job = _job(payload)
+    wid = str(payload.get("wall") or "")
+    if job.room is None or wid not in {w.id for w in job.room.walls}:
+        return {"ok": False, "error": f"the room has no wall {wid!r}"}
+    if payload.get("ask"):
+        return {"ok": True, "wall": wid,
+                "unplaced": [p.cabinet for p in job.placements if p.wall == wid],
+                "gaps": sum(1 for g in job.gaps if g.wall == wid),
+                "plinths": sum(1 for c in job.plinths if c.wall == wid)}
+    gone = delete_wall(job, wid)
+    return dict(_room_reply(job), ok=True, gone=gone)
+
+
+def wall_flip(payload):
+    """Turn one wall's face round (`room.flip_face`): the room on its other
+    side, everything on it kept where it is along the wall."""
+    job = _job(payload)
+    wid = str(payload.get("wall") or "")
+    if job.room is None or wid not in {w.id for w in job.room.walls}:
+        return {"ok": False, "error": f"the room has no wall {wid!r}"}
+    flip_face(job, wid, job.std)
+    return dict(_room_reply(job), ok=True)
+
+
+def room_renumber(payload):
+    """Re-letter the walls A, B, C… along the walk (`room.renumber_walls`),
+    every record naming a wall following. Without `apply` it only hands back
+    the mapping, for the confirm that lists the changes."""
+    job = _job(payload)
+    if job.room is None or not job.room.walls:
+        return {"ok": False, "error": "the job has no walls to renumber"}
+    if not payload.get("apply"):
+        order = walk_order(job.room, job.std)
+        mapping = {old: new for old, new in zip(order, (chr(65 + k) if k < 26 else "A" + chr(65 + k - 26)
+                                                        for k in range(len(order))))}
+        return {"ok": True, "mapping": mapping, "applied": False}
+    mapping = renumber_walls(job, job.std)
+    return dict(_room_reply(job), ok=True, mapping=mapping, applied=True)
+
+
 def room_new(payload):
     """A fresh square room to start measuring from. The browser does not invent
     wall lists any more than it invents panel sizes."""
@@ -2495,6 +2629,11 @@ ROUTES = {
     "/api/room-extend": room_extend,
     "/api/room-draw": room_draw,
     "/api/room-flip": room_flip,
+    "/api/wall-set": wall_set,
+    "/api/wall-add": wall_add,
+    "/api/wall-delete": wall_delete,
+    "/api/wall-flip": wall_flip,
+    "/api/room-renumber": room_renumber,
 }
 
 
