@@ -15,8 +15,8 @@ from .room import (LAYERS, cabinet_footprint, carcass_z, clashes, corner_points,
                    gap_outline, gaps, geometry, layer_of, overlaps,
                    panel_clashes, placed, placed_panels, plinth_choice_for,
                    plinth_lengths, pullout_envelope, return_profiles, run_key,
-                   runs, swing_envelopes, to_world, wall_frames,
-                   blind_spans, front_outlines, return_faces)
+                   runs, swing_envelopes, to_world, wall_frames, wall_height,
+                   is_closed, blind_spans, front_outlines, return_faces)
 from .standard import Standard, STANDARD
 
 INK = "#191c1a"
@@ -752,11 +752,18 @@ def _wall_elevation_svg(job: Job, wall_id: str, max_width: int, pictures: str,
                f'data-ceiling="{rm.ceiling or 0}" x="0" y="0" width="0" height="0" '
                f'fill="none" pointer-events="none"/>')
 
-    # the wall itself, with the ceiling as a datum line — only if it was measured
-    if rm.ceiling:
-        out.append(f'<rect x="{X(0):.1f}" y="{Y(rm.ceiling):.1f}" '
-                   f'width="{length * scale:.1f}" height="{rm.ceiling * scale:.1f}" '
+    # the wall itself, to ITS height (`Wall.height`, 2 October 2026; the ceiling
+    # where none is set), and the ceiling as a datum line — only if measured —
+    # dashed above a wall that stops short of it
+    wh = wall_height(rm, wall)
+    if wh:
+        out.append(f'<rect x="{X(0):.1f}" y="{Y(wh):.1f}" '
+                   f'width="{length * scale:.1f}" height="{wh * scale:.1f}" '
                    f'fill="none" stroke="{INK}" stroke-width="{WEIGHT["wall"]}"/>')
+    if rm.ceiling and wh and wh < rm.ceiling:
+        out.append(f'<line class="ceilingline" x1="{X(0):.1f}" y1="{Y(rm.ceiling):.1f}" '
+                   f'x2="{X(length):.1f}" y2="{Y(rm.ceiling):.1f}" '
+                   f'stroke="{RULE}" stroke-width="{WEIGHT["internal"]}" stroke-dasharray="6 4"/>')
 
     for op in wall.openings:
         kind = escape(op.kind)
@@ -1109,14 +1116,16 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     rm = job.room
     if rm is None:
         return _note_svg("This job has no room")
-    if len(rm.walls) < 2:
+    if not rm.walls:
         return _note_svg("Add walls to see the plan")
 
     std = job.std
     show = tuple(LAYERS) if show is None else tuple(show)
     ghost = tuple(ghost or ())
 
-    corners = corner_points(rm)
+    # the bounds come off the walls' own points (one wall or many) and the footprints
+    corners = [(float(w.x0), float(w.y0)) for w in rm.walls] + \
+              [(float(w.x1), float(w.y1)) for w in rm.walls]
     # The isolated item is drawn whatever the layer toggle says about it: the
     # whole point is that selecting it from the list always reaches it.
     items = [(c, p, lay) for c, p, lay in placed(job)
@@ -1229,9 +1238,8 @@ def _plan_walls(rm, corners, T, scale):
     """Wall lines, their lengths, openings as breaks, obstructions as boxes."""
     out = []
     frames = wall_frames(rm)
-    for i, w in enumerate(rm.walls):
-        a, b = corners[i], corners[i + 1]
-        (ax, ay), (bx, by) = T(a), T(b)
+    for w in rm.walls:
+        (ax, ay), (bx, by) = T((w.x0, w.y0)), T((w.x1, w.y1))
         spans = _wall_spans(w)
         for s0, s1 in spans:
             p0 = T(to_world(rm, w.id, s0, 0)[:2])
@@ -1351,8 +1359,8 @@ def _plan_tracks(rm, corners, T):
     """
     frames = wall_frames(rm)
     out = ['<g id="tracks" style="pointer-events:none">']
-    for i, w in enumerate(rm.walls):
-        (ax, ay), (bx, by) = T(corners[i]), T(corners[i + 1])
+    for w in rm.walls:
+        (ax, ay), (bx, by) = T((w.x0, w.y0)), T((w.x1, w.y1))
         # The unit direction INTO THE ROOM off this wall, on the drawing. The
         # plan maps world onto the page with one scale and no flip, so it is the
         # wall's own normal; a panel's drag reads its depth off the wall with it.

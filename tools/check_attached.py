@@ -74,8 +74,8 @@ def panel(number, a=576, b=720, orientation="end", board="BROOKHILL", **kw):
 def job():
     """Two base units butting on wall A, one with a door on wall A further along,
     and a standalone end panel standing against cabinet 1's left side."""
-    rm = Room("r", ceiling=2600, walls=[Wall(id="A", length=4000), Wall(id="B", length=3000),
-                                        Wall(id="C", length=4000), Wall(id="D", length=3000)])
+    rm = Room("r", ceiling=2600, walls=[Wall("A", 0, 0, 4000, 0), Wall("B", 4000, 0, 4000, 3000),
+                                        Wall("C", 4000, 3000, 0, 3000), Wall("D", 0, 3000, 0, 0)])
     j = Job("attached", room=rm, materials={k: dict(v) for k, v in MATERIALS.items()},
             boards=["MEL", "BROOKHILL", "BACK"])
     j.cabinets = [box(1, 1000), box(2, 1600), box(3, 3000, doors=1), panel(5)]

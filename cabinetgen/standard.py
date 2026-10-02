@@ -87,8 +87,16 @@ class Standard:
 
     # ---- room --------------------------------------------------------------
     closure_warn: int = 5       # mm the wall chain may miss closing by before it is queried
-    closure_block: int = 20     # above this the measurements contradict each other
-    corner_disagree: int = 5    # mm the two measurements of one corner may differ by
+    closure_block: int = 20     # a chain missing by more than this is simply an open run
+    # Walls are positioned segments (room redo Phase 1, 2 October 2026). Two
+    # wall ends within `join_tolerance` of each other meet: that is a corner.
+    # `wall_thickness` is drawing only — the band on the back of the face line;
+    # it moves no check. `square_within` is how near a corner's real angle has
+    # to be to 90, 180 or 270 for the Wall card to show it as an out-of-square
+    # figure in mm (at Room.offset_depth) beside the angle.
+    join_tolerance: int = 1
+    wall_thickness: int = 110
+    square_within: int = 10
     # Draw walls on Room -> Plan (29 September 2026): a drawn wall's direction
     # snaps to this many degrees (Shift for a free angle), its length to this
     # many mm. A sketch, not a measurement — a drawn wall is a critical until

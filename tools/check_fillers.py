@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from cabinetgen.engine import generate_job, room_panels                   # noqa: E402
 from cabinetgen.model import Cabinet, GapChoice, Job, Placement           # noqa: E402
-from cabinetgen.room import gaps, rectangular                             # noqa: E402
+from cabinetgen.room import gaps, rectangular, set_out_of_square           # noqa: E402
 from cabinetgen.standard import STANDARD                                  # noqa: E402
 from cabinetgen.store import job_from_dict, job_to_dict                   # noqa: E402
 from cabinetgen.validate import validate                                  # noqa: E402
@@ -46,7 +46,10 @@ def cab(n, w, d=580, h=720, kind="base"):
 def kitchen(offset_start=0, widths=((1, 900, 0), (2, 600, 1000)), wall="A"):
     """A room with a base run on wall A, positioned exactly where asked."""
     rm = rectangular(4000, 3000)
-    rm.walls[0].offset_start = offset_start
+    # the corner before wall A — after D — out of square by this much at the
+    # 600 mm measuring depth, positive opening away from the room
+    if offset_start:
+        set_out_of_square(rm, "D", offset_start)
     cabs = [cab(n, w) for n, w, _ in widths]
     places = [Placement(n, wall, x) for n, _, x in widths]
     return Job(name="k", cabinets=cabs, room=rm, placements=places)
