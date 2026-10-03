@@ -784,6 +784,23 @@ def stage_layout(pw):
                     [...$('roomtools').querySelectorAll('[data-tool]')].map((b) => b.textContent.trim())]; }""")
         check(f"{w}: the tools in the strip, on the sub-tabs' line, to their right, above the plan",
               tb, [True, True, True, ["Select", "Draw walls", "Wall nook"]])
+        pc = page.evaluate("() => [$('placescard').classList.contains('closed'), Math.round($('placescard').getBoundingClientRect().width), "
+                           "$('placesopen').innerText.replace(/\\s+/g, ' ').trim()]")
+        check(f"{w}: Placements starts collapsed to a slim strip, named down its side", [pc[0], pc[1] <= 30, pc[2]],
+              [True, True, "❯ PLACEMENTS"])
+        rd = page.evaluate("""() => { const r = $('room').getBoundingClientRect(), p = $('plancard').getBoundingClientRect();
+            const ths = [...$('walltable').querySelectorAll('th')].map((x) => x.textContent.trim());
+            return [!$('room').hidden, Math.round(r.width), ths, !!$('roomhelp') && $('roomhelp').hidden,
+                    $('room').querySelector('table').getBoundingClientRect().width <= $('room').clientWidth + 1,
+                    Math.round(p.width)]; }""")
+        check(f"{w}: the Room card compact, visible, its table whole, the help behind '?'",
+              rd[:5], [True, 360, ["Wall", "Length", "Corner", "Height", "Flip", ""], True, True])
+        print(f"      the plan's card is {rd[5]} px wide")
+        page.click("#placesopen")
+        time.sleep(0.3)
+        check(f"{w}:   the chevron opens it, and the viewer's choice is remembered",
+              page.evaluate("() => [$('placescard').classList.contains('closed'), localStorage.getItem('cupboard.places')]"),
+              [False, "open"])
         pl = page.evaluate("""() => { const c = $('placescard'), r = c.getBoundingClientRect(), m = $('roommain').getBoundingClientRect(),
             p = $('plancard').getBoundingClientRect(), box = $('places'), t = box.querySelector('table');
             const ths = [...t.querySelectorAll('th')].map((x) => x.textContent.trim());

@@ -284,13 +284,27 @@
   #roomstrip{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
   #roomstrip .subtabs{margin:0}
   #roomtools[hidden]{display:none}
-  .dockcard{width:560px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
+  /* The Room card and the Wall card are COMPACT (round 2, 3 October 2026):
+     360 wide whatever the editor's width, and always shown — the dock's
+     collapse is the editor's, so on the Room tab with nothing selected the
+     chevron is not offered */
+  .dockcard{width:360px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
             overflow:auto;margin:0}
-  .dock.closed .dockcard{display:none}
+  .dock.cardmode .dockstrip{visibility:hidden}
+  .dockcard .body{padding:10px 12px}
+  .dockcard .grid{gap:8px}
+  .dockcard .f label{font-size:10.5px}
+  .dockcard input{padding:3px 6px}
+  .dockcard button.sm{font-size:11px;padding:2px 9px}
+  .dockcard table.rows th,.dockcard table.rows td{padding:3px 4px}
+  .dockcard table.rows input{width:calc(5ch + 12px);padding:2px 4px;-moz-appearance:textfield}
+  .dockcard table.rows input::-webkit-inner-spin-button,
+  .dockcard table.rows input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+  .dockcard table.rows button{font-size:11px;padding:1px 6px}
+  .dockcard #closure{font-size:11.5px}
   .dockcard h2 .edsave{float:right;font-size:11px;padding:2px 10px}
   .dockcard table.rows tbody tr{cursor:pointer}
   .dockcard table.rows tr.sel td{background:var(--accent-soft)}
-  .dockcard table.rows input{width:72px}
   .dockcard table.rows th{white-space:nowrap}
   .dockcard .wallnote{margin-top:8px}
   .dockcard .wallnote:empty{display:none}
@@ -633,6 +647,18 @@
   #placescard{flex:none;width:max-content;display:flex;flex-direction:column;margin:0;min-height:0}
   #placescard[hidden]{display:none}
   #placescard>h2{flex:none}
+  #placescard h2 .placestog{float:right;width:20px;height:20px;padding:0;border-radius:50%;font-size:9px;
+                            line-height:1;color:var(--muted);text-transform:none}
+  .placesstrip{display:none}
+  #placescard.closed{width:28px;padding:0;overflow:hidden}
+  #placescard.closed>*:not(.placesstrip){display:none !important}
+  #placescard.closed .placesstrip{display:flex;flex-direction:column;align-items:center;gap:10px;
+       width:100%;height:100%;padding:8px 0;border:none;border-radius:0;background:none;box-shadow:none;cursor:pointer}
+  #placescard.closed .placesstrip:hover{background:var(--surface)}
+  .placesstrip .docktog{width:18px;height:18px;font-size:9px;line-height:16px;border:1px solid var(--line);
+       border-radius:999px;color:var(--muted);display:inline-block;text-align:center}
+  .placesstrip .vlabel{writing-mode:vertical-rl;transform:rotate(180deg);font-size:10.5px;font-weight:600;
+       letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
   #placescard .cardhelp{contain:inline-size;flex:none;max-height:40%;overflow:auto}
   #places{flex:1 1 auto;min-height:0;overflow:auto}
   #places .body{padding:4px 6px}
@@ -782,9 +808,14 @@
       </div></div>
     <div id="roomwrap">
       <!-- Placements, in the left column beside the plan (touch-ups, 3 October
-           2026): the plan's height, its table narrowed, scrolled within. -->
+           2026): the plan's height, its table narrowed, scrolled within; it
+           collapses to a slim strip (round 2: collapsed by default, remembered
+           per viewer), so the plan has the screen. -->
       <div class="card" id="placescard">
-        <h2>Placements <button class="qhelp" data-help="placeshelp" title="what this table is">?</button></h2>
+        <button class="placesstrip" id="placesopen" title="show Placements"><span class="docktog">&#x276F;</span><span
+          class="vlabel">Placements</span></button>
+        <h2>Placements <button class="qhelp" data-help="placeshelp" title="what this table is">?</button>
+          <button class="placestog" id="placesclose" title="collapse Placements to a strip">&#x276E;</button></h2>
         <div class="cardhelp" id="placeshelp" hidden>
           <p>X is from the wall's start corner to the item's left edge, facing the
           wall. Z is 0 for anything standing on the floor — it stands on its legs,
@@ -5859,6 +5890,13 @@ window.addEventListener("resize", () => {
 
 // Placements stands beside the plan, as tall as it (the unplaced strip and the
 // plan card), and scrolls within itself (touch-ups, 3 October 2026).
+// Placements collapses to a slim strip, the dock's own pattern (round 2,
+// 3 October 2026): collapsed by default, remembered per viewer.
+function placesShow(open) {
+  if (open !== undefined) dockPref("places", open ? "open" : "closed");
+  $("placescard").classList.toggle("closed", dockPref("places") !== "open");
+}
+
 // And the plan is drawn at its card's size, so a column that changes width
 // beside it (Placements filled in, the dock closed) draws it again.
 let planBoxW = 0;
@@ -5873,6 +5911,9 @@ function fitPlaces() {
   }
   planBoxW = w;
 }
+$("placesopen").addEventListener("click", () => placesShow(true));
+$("placesclose").addEventListener("click", () => placesShow(false));
+placesShow();
 if (window.ResizeObserver) {
   const ro = new ResizeObserver(fitPlaces);
   ro.observe($("roommain"));
@@ -5990,7 +6031,8 @@ function renderRoom() {
     before: {angle: null}, after: {angle: null}, openings: w.openings.length,
     obstructions: w.obstructions.length}));
   const ceil = rm.ceiling === null || rm.ceiling === undefined ? "" : rm.ceiling;
-  const rows = walls.map((w) => `<tr data-wallrow="${esc(w.id)}" class="${S.selWall === w.id ? "sel" : ""}">
+  const rows = walls.map((w) => `<tr data-wallrow="${esc(w.id)}" class="${S.selWall === w.id ? "sel" : ""}"
+    title="wall ${esc(w.id)}: ${w.openings || 0} opening${w.openings === 1 ? "" : "s"}, ${w.obstructions || 0} obstruction${w.obstructions === 1 ? "" : "s"}">
     <td><b>${esc(w.id)}</b> ${w.free ? `<span class="pill" title="meets no other wall at either end">free</span>` : ""}
       ${drawnPill(w)}</td>
     <td><input type="number" step="1" min="0" data-wall="${esc(w.id)}" data-wk="length" value="${w.length}"
@@ -6005,11 +6047,16 @@ function renderRoom() {
     <td><input type="number" step="1" min="0" data-wall="${esc(w.id)}" data-wk="height" value="${w.height === null || w.height === undefined ? "" : w.height}"
       placeholder="${ceil}" title="the wall's own height, mm — blank is the ceiling${ceil === "" ? "" : " (" + ceil + ")"}"></td>
     <td><button data-wflip="${esc(w.id)}" title="put the room on the other side of this wall">Flip</button></td>
-    <td class="n note">${w.openings || ""}</td>
-    <td class="n note">${w.obstructions || ""}</td>
     <td><button data-wdel="${esc(w.id)}" title="remove this wall">×</button></td></tr>`).join("");
-  paint(box, `<h2>Room</h2><div class="body">
-    <div class="grid" style="grid-template-columns:repeat(3,1fr)">
+  const help = !!(S.helpOpen && S.helpOpen.roomhelp);
+  // compact (round 2, 3 October 2026): one row of short fields, small
+  // buttons, the narrow table, the help behind a "?"
+  paint(box, `<h2>Room <button class="qhelp${help ? " on" : ""}" data-help="roomhelp" title="how the walls read">?</button></h2>
+  <div class="cardhelp" id="roomhelp"${help ? "" : " hidden"}>The line is the inside face; the room is the tinted side.
+    Flip face turns it round. Click a row, or a wall in the plan, for its card. A row's tooltip counts its
+    openings and obstructions.</div>
+  <div class="body">
+    <div class="grid" style="grid-template-columns:1.3fr 1fr 1fr">
       <div class="f"><label>Name</label>
         <input data-r="name" value="${esc(rm.name)}"></div>
       <div class="f"><label>Ceiling (mm)</label>
@@ -6018,19 +6065,17 @@ function renderRoom() {
         <input type="number" step="1" data-r="offset_depth" value="${rm.offset_depth}"
           title="the depth an out-of-square figure is measured at"></div>
     </div>
-    <div id="closure" style="margin:10px 0"></div>
-    <div class="roombtns" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0 10px">
-      <button id="roomdraw" title="sketch more walls with the mouse — added to the room">Draw walls</button>
-      <button id="roomrenumber" title="re-letter the walls A, B, C… along the walk; every placement follows">Renumber</button>
-      <button id="roomdel" style="margin-left:auto">Remove room</button>
+    <div id="closure" style="margin:8px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+    <div class="roombtns" style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:6px 0 8px">
+      <button class="sm" id="roomdraw" title="sketch more walls with the mouse — added to the room">Draw walls</button>
+      <button class="sm" id="roomrenumber" title="re-letter the walls A, B, C… along the walk; every placement follows">Renumber</button>
+      <button class="sm" id="roomdel" style="margin-left:auto">Remove room</button>
     </div>
     <table class="rows" id="walltable"><thead><tr>
-      <th>Wall</th><th>Length (mm)</th><th title="the interior angle of the corner after the wall, degrees">Corner after (°)</th><th>Height (mm)</th>
-      <th>Face</th><th class="n" title="openings">Op.</th><th class="n" title="obstructions">Obs.</th><th></th>
+      <th>Wall</th><th title="length, mm">Length</th><th title="the interior angle of the corner after the wall, degrees">Corner</th>
+      <th title="the wall's own height, mm — blank is the ceiling">Height</th><th title="Flip face">Flip</th><th></th>
     </tr></thead><tbody>${rows}</tbody></table>
     <div class="wallnote pill crit">${esc(S.wallNote)}</div>
-    <p class="note" style="margin-top:12px">The line is the inside face; the room is the tinted side.
-      Flip face turns it round. Click a row, or a wall in the plan, for its card.</p>
   </div>`);
   renderClosure();
 }
@@ -6111,7 +6156,8 @@ function renderWallCard(id) {
 // for a wall, else the Room card.
 function renderRoomDock() {
   const ed = $("editor"), rc = $("room"), wc = $("wallcard");
-  if (S.tab !== "room") { rc.hidden = true; wc.hidden = true; ed.hidden = false; return; }
+  if (S.tab !== "room") { rc.hidden = true; wc.hidden = true; ed.hidden = false;
+    $("roomdock").classList.remove("cardmode"); return; }
   const item = S.sel !== null && S.sel !== undefined && !!S.job.cabinets[S.sel];
   const rm = S.job.room;
   if (S.selWall !== null && !(rm && rm.walls.some((w) => w.id === S.selWall))) S.selWall = null;
@@ -6119,6 +6165,8 @@ function renderRoomDock() {
   ed.hidden = !item;
   wc.hidden = wall === null;
   rc.hidden = item || wall !== null;
+  // a card is compact and always shown; the dock's collapse is the editor's
+  $("roomdock").classList.toggle("cardmode", !item);
   if (wall !== null) renderWallCard(wall);
   else if (!item) renderRoom();
 }
@@ -8038,7 +8086,11 @@ document.addEventListener("click", (e) => {
   const q = e.target.closest(".qhelp");
   if (!q) return;
   const box = $(q.dataset.help);
-  if (box) { box.hidden = !box.hidden; q.classList.toggle("on", !box.hidden); }
+  if (box) {
+    box.hidden = !box.hidden;
+    q.classList.toggle("on", !box.hidden);
+    (S.helpOpen = S.helpOpen || {})[q.dataset.help] = !box.hidden;   // a repainted card keeps it
+  }
 });
 
 $("plinth").addEventListener("change", (e) => {
@@ -8355,7 +8407,6 @@ function dockEditor() {
   const host = $(id);
   if (ed.parentElement !== host) host.appendChild(ed);
   if (S.tab !== "cabinets") ed.style.marginTop = "";
-  document.querySelectorAll(".dockcard").forEach((c) => { c.style.width = ed.style.width; });
   if (S.tab === "room") renderRoomDock(); else ed.hidden = false;
   if (S.tab === "view3d") size3D();
 }
@@ -8379,7 +8430,6 @@ document.addEventListener("pointerdown", (e) => {
   const move = (ev) => {
     const w = Math.max(320, Math.min(900, Math.round(w0 - (ev.clientX - start))));
     ed.style.width = w + "px";
-    document.querySelectorAll(".dockcard").forEach((c) => { c.style.width = ed.style.width; });
     if (V3D) V3D.resize();
     if (V3C) V3C.resize();
   };

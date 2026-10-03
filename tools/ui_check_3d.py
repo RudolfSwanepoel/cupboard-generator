@@ -1106,6 +1106,7 @@ def stage_room(pw):
     page.wait_for_function("() => S.job.cabinets.length === 1", timeout=15000)
     number = page.evaluate("() => S.job.cabinets[0].number")
     page.click('nav [data-tab="room"]')
+    page.click("#placesopen")          # Placements starts collapsed to a strip (round 2, 3 Oct 2026)
     page.wait_for_selector(f'#places select[data-p="{number}"]', timeout=15000)
     page.select_option(f'#places select[data-p="{number}"]', "A")
     page.wait_for_function(f"() => S.res && S.res.room && S.res.room.placements['{number}']", timeout=15000)
