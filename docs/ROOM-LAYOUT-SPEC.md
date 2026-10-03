@@ -541,7 +541,18 @@ cut list is worse than a form that produces a right one.
    in the room model as objects with clearances, or are they just cabinet
    openings you size by hand?
 9. **Worktops.** In scope as a plan object with its own scribe, or out of
-   scope because Plazaboard does not cut them?
+   scope because Plazaboard does not cut them? — **Ruled 2 Oct 2026:** worktops and table
+   tops are post-form or stone, never cut by this app, drawing only, and
+   later; how they are drawn is open.
+
+Ruled 2 Oct 2026, recorded in
+`Claude outputs/brief-0-protocol-and-claude-md-2026-10-02.md`:
+
+- **Worktops** and table tops are post-form or stone, never cut by this app —
+  drawing only, and later; how they are drawn is open.
+- A **peninsula** is a run of ordinary base units of the island Kind standing
+  end-on to a wall, placed free (room Phase 4), with an attached end panel.
+- A **table nook** is out of scope.
 
 ## Ruled — 14 Sept 2026 (corner units)
 
