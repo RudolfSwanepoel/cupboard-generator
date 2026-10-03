@@ -41,7 +41,7 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES, D
                               material_offers, material_price,
                               material_record, material_thickness, material_token,
                               edging_label, tape_for)
-from cabinetgen.render import pictures_drawn, plan_svg, wall_elevation_svg
+from cabinetgen.render import PLAN_MARGIN_MM, pictures_drawn, plan_svg, wall_elevation_svg
 from cabinetgen import scene as SCENE
 from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, drawer_rise,
                              drawer_layout, inner_drawer_z,
@@ -1945,9 +1945,21 @@ def plan(payload):
     iso = int(iso) if iso not in (None, "") else None
     if iso is not None and not any(c.number == iso for c in job.cabinets):
         iso = None
+    # The Room tab asks for the plan at the size of its card (ruling 11, 3
+    # October 2026: it fits on load and on Fit) and with room to draw walls into
+    # (ruling 10: Draw walls is a mode of this plan, not a canvas of its own).
+    size = {}
+    for key, lo in (("width", 300), ("height", 240)):
+        try:
+            v = int(payload.get(key) or 0)
+        except (TypeError, ValueError):
+            v = 0
+        if v:
+            size["max_" + key] = max(lo, min(v, 6000))
     return {"ok": True, "isolate": iso,
             "svg": plan_svg(job, show=show, ghost=keep(payload.get("ghost")),
-                            isolate=iso)}
+                            isolate=iso, margin=PLAN_MARGIN_MM if payload.get("margin") else 0,
+                            **size)}
 
 
 def elevation(payload):

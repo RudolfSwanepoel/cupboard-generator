@@ -114,12 +114,14 @@ def empty_job(name):
 
 
 def at_mm(page, x, y):
-    """Where a point in world plan mm is on screen, through the drawing canvas's
-    own transform — the same one a click is read back through."""
-    return page.evaluate("""([x, y]) => {
-        const svg = document.querySelector('#drawsvg');
-        const p = new DOMPoint(x, y).matrixTransform(svg.getScreenCTM());
-        return [p.x, p.y]; }""", [x, y])
+    """Where a point in world plan mm is on screen, through the plan's own
+    mapping (`mmToScreen`) — the same one a click is read back through."""
+    return page.evaluate("([x, y]) => mmToScreen(x, y)", [x, y])
+
+
+def plan_svgs(page):
+    """How many plan drawings there are on the Room tab (ruling 10: one, always)."""
+    return page.evaluate("() => document.querySelectorAll('#tab-room svg.drw').length")
 
 
 def click_mm(page, x, y, **kw):
@@ -199,9 +201,13 @@ def stage_draw(pw):
           [["select", True], ["draw", False]])
     check("with no room the dock shows the Room card, offering a room",
           (page.locator("#roomdock #room").is_visible(), page.locator("#room #roomadd").count()), (True, 1))
+    check("no plan drawing before drawing (no room yet)", plan_svgs(page), 0)
     page.click("#drawwalls")
-    page.wait_for_selector("#drawsvg", timeout=5000)
+    page.wait_for_selector("#plan svg #drawlayer", timeout=5000)
     check("Draw walls is the tool now", page.evaluate("() => $('drawwalls').classList.contains('on')"), True)
+    check("drawing is ON the plan: one plan SVG, the grid laid over it, no canvas of its own",
+          [plan_svgs(page), page.locator("#plan svg #drawlayer .drawgrid").count() > 0,
+           page.locator("#drawsvg").count()], [1, True, 0])
     check("no room, so nothing is asked", dialogs, [])
     check("the hint says how", "Shift" in page.inner_text("#drawhint"), True)
     click_mm(page, 1000, 1000)
@@ -242,12 +248,13 @@ def stage_draw(pw):
     check("closed, and the plan tints the floor",
           (page.evaluate("() => S.res.room.closed"), page.locator("#plan polygon.roomside").count()), (True, 1))
     check("back on Select", page.evaluate("() => $('toolselect').classList.contains('on')"), True)
+    check("  one plan SVG after, the grid gone", [plan_svgs(page), page.locator("#plan .drawgrid").count()], [1, 0])
     check("every drawn wall is a critical", len(issues(page, "wall-drawn")), 4)
     check("the Room card marks them drawn",
           page.evaluate("() => document.querySelectorAll('#room [data-wmeasured]').length"), 4)
     shot(page, "draw_closed")
     # measured: typed on A in the Room card's table, ticked on B
-    page.fill('#room input[data-wall="A"][data-wk="length"]', "4010")
+    page.fill('#room input[data-wall="A"][data-wk="length"]', str(got[0][1] + 10))
     page.press('#room input[data-wall="A"][data-wk="length"]', "Enter")
     page.wait_for_function("() => !S.job.room.walls.find((w) => w.id === 'A').drawn", timeout=5000)
     page.click('#room [data-wmeasured="B"]')
@@ -255,7 +262,7 @@ def stage_draw(pw):
     computed(page)
     check("typing a length or ticking measured clears it",
           [w[3] for w in walls(page)], [False, False, True, True])
-    check("  the typed length moved the end point, and the walls after it followed", walls(page)[0][1], 4010)
+    check("  the typed length moved the end point, and the walls after it followed", walls(page)[0][1], got[0][1] + 10)
     check("  so the loop opened by the 10 mm: reported as a near miss, the room an open run",
           page.evaluate("() => [S.res.room.closed, S.res.room.closure_error]"), [False, 10])
     page.fill('#room input[data-wall="A"][data-wk="length"]', str(got[0][1]))
@@ -269,12 +276,23 @@ def stage_draw(pw):
 
     print("\nDrawing again ADDS walls, starting on an existing corner; nothing is asked")
     corner = points(page)[1][3:5]               # B's end: the far corner
+    before_box = page.evaluate("() => { const r = document.querySelector('#plan svg').getBoundingClientRect(); "
+                               "return [Math.round(r.width), Math.round(r.height)]; }")
     page.click("#drawwalls")
-    page.wait_for_selector("#drawsvg", timeout=5000)
+    page.wait_for_selector("#plan svg #drawlayer", timeout=5000)
     check("no 'Replace walls' question", dialogs, [])
-    check("the canvas shows the existing walls, and marks their corners",
-          page.evaluate("() => [document.querySelectorAll('#drawsvg line[stroke-dasharray]').length, "
-                        "document.querySelectorAll('#drawsvg circle[fill=\"none\"]').length]"), [4, 8])
+    check("the plan is the same drawing at the same size, the walls solid (4 hit lines), "
+          "the corners marked, the floor tint shown",
+          page.evaluate("""() => { const r = document.querySelector('#plan svg').getBoundingClientRect();
+            return [document.querySelectorAll('#tab-room svg.drw').length, Math.round(r.width), Math.round(r.height),
+                    document.querySelectorAll('#plan .wallhit').length,
+                    document.querySelectorAll('#plan #drawlayer .drawend').length,
+                    document.querySelectorAll('#plan polygon.roomside').length]; }"""),
+          [1] + before_box + [4, 8, 1])
+    shot(page, "draw_on_plan", "#plancard")
+    page.click('#planzoombar [data-zoom="0.8"]')
+    page.click('#planzoombar [data-zoom="0.8"]')     # zoomed out: room round the plan to draw into
+    time.sleep(0.2)
     click_mm(page, corner[0] + 40, corner[1] + 30)      # near the corner: starts on it
     check("the first click lands on the corner itself", page.evaluate("() => DRAW.pts[0]"), corner)
     click_mm(page, corner[0] + 2000, corner[1])
@@ -292,7 +310,7 @@ def stage_draw(pw):
           page.evaluate("() => [S.res.room.closed, S.res.room.walk]"), [True, ["A", "B", "C", "D", "E", "F"]])
     shot(page, "draw_added", "#plancard")
     page.click("#drawwalls")
-    page.wait_for_selector("#drawsvg", timeout=5000)
+    page.wait_for_selector("#plan svg #drawlayer", timeout=5000)
     click_mm(page, 0, 0)
     page.keyboard.press("Escape")
     time.sleep(0.2)
@@ -312,7 +330,7 @@ def stage_one(pw):
     adopt(page, empty_job("one"))
     room_plan(page)
     page.click("#drawwalls")
-    page.wait_for_selector("#drawsvg", timeout=5000)
+    page.wait_for_selector("#plan svg #drawlayer", timeout=5000)
     click_mm(page, 0, 0)
     cx, cy = at_mm(page, 3000, 0)
     page.mouse.move(cx, cy, steps=3)
@@ -708,9 +726,70 @@ def stage_closure(pw):
     browser.close()
 
 
+def stage_layout(pw):
+    print("\nThe Room tab's cards fit (ruling 11), at 1360 x 900 and at full HD")
+    from cabinetgen.store import job_from_dict
+    with open(os.path.join(ROOT, "tools", "fixtures", "Test_3d.json"), encoding="utf-8") as f:
+        job = job_from_dict(json.load(f))
+    job.name = "layout"
+    job.placements = [p for p in job.placements if p.cabinet != 15]     # one unplaced: the strip shows
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    for w, h in ((1360, 900), (1920, 1080)):
+        errors = []
+        ctx = browser.new_context(viewport={"width": w, "height": h})
+        page = ctx.new_page()
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(URL)
+        page.wait_for_function("() => S.def !== null && S.res", timeout=15000)
+        adopt(page, job)
+        room_plan(page)
+        fit = page.evaluate("""() => { const box = $('plan'), svg = box.querySelector('svg');
+            const b = box.getBoundingClientRect(), r = svg.getBoundingClientRect();
+            return {inW: r.width <= box.clientWidth, inH: r.height <= box.clientHeight,
+                    fills: Math.max(r.width / (box.clientWidth - 24), r.height / (box.clientHeight - 16)),
+                    scrollX: box.scrollWidth > box.clientWidth + 1, scrollY: box.scrollHeight > box.clientHeight + 1,
+                    pct: $('planzoom').textContent}; }""")
+        check(f"{w}: the plan fits its card, width and height, at 100%",
+              [fit["inW"], fit["inH"], fit["fills"] > 0.9, fit["scrollX"], fit["scrollY"], fit["pct"]],
+              [True, True, True, False, False, "100%"])
+        page.click('#planzoombar [data-zoom="1.25"]')
+        page.click('#planzoom')
+        computed(page)
+        check(f"{w}:   and Fit brings it back", page.evaluate(
+            "() => { const box = $('plan'); return [box.scrollWidth <= box.clientWidth + 1, $('planzoom').textContent]; }"),
+            [True, "100%"])
+        g = page.evaluate("""() => { const c = $('gapscard'), t = c.querySelector('table');
+            const ths = [...t.querySelectorAll('th')].map((x) => x.getBoundingClientRect().right <= c.getBoundingClientRect().right + 0.5);
+            return {full: Math.abs(c.getBoundingClientRect().width - $('roomplanonly').getBoundingClientRect().width) < 2,
+                    noScroll: t.getBoundingClientRect().width <= c.clientWidth + 1, cols: ths.every(Boolean),
+                    under: c.getBoundingClientRect().top > $('plancard').getBoundingClientRect().bottom - 1}; }""")
+        check(f"{w}: Gaps the full width under the plan, every column visible, no sideways scroll",
+              [g["full"], g["noScroll"], g["cols"], g["under"]], [True, True, True, True])
+        sb = page.evaluate("""() => { const a = $('plinthcard').getBoundingClientRect(), b = $('placescard').getBoundingClientRect(),
+            gp = $('gapscard').getBoundingClientRect();
+            const nat = (id) => { const c = $(id), t = c.querySelector('table'); return t ? t.getBoundingClientRect().width <= c.clientWidth + 1 : true; };
+            return [Math.abs(a.top - b.top) < 2, a.right <= b.left, a.top > gp.bottom - 1, nat('plinthcard'), nat('placescard')]; }""")
+        check(f"{w}: Plinth and Placements side by side under Gaps, each table whole",
+              sb, [True, True, True, True, True])
+        check(f"{w}: the notes are behind a '?', hidden",
+              page.evaluate("() => ['gapshelp', 'plinthhelp', 'placeshelp'].map((id) => $(id).hidden)"), [True, True, True])
+        page.click('#placescard .qhelp')
+        check(f"{w}:   '?' shows them", page.evaluate("() => !$('placeshelp').hidden && $('placeshelp').innerText.includes('X is from')"), True)
+        page.click('#placescard .qhelp')
+        check(f"{w}: the unplaced strip stays above the plan",
+              page.evaluate("() => $('unplaced-room').getBoundingClientRect().bottom <= $('plancard').getBoundingClientRect().top + 1 "
+                            "&& $('unplaced-room').querySelectorAll('.upchip').length"), 1)
+        os.makedirs(SHOTS, exist_ok=True)
+        page.screenshot(path=os.path.join(SHOTS, f"layout_after_{w}x{h}.png"), full_page=True)
+        print(f"      screenshot output/_checks/ui_check_walls/layout_after_{w}x{h}.png")
+        check(f"{w}: no console errors", errors, [])
+        ctx.close()
+    browser.close()
+
+
 STAGES = {"draw": stage_draw, "one": stage_one, "flip": stage_flip, "renumber": stage_renumber,
           "height": stage_height, "input": stage_input, "drag": stage_drag, "3d": stage_3d,
-          "closure": stage_closure}
+          "closure": stage_closure, "layout": stage_layout}
 
 
 def main() -> int:

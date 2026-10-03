@@ -591,7 +591,30 @@
      grabbed — and a panel's number sits beside it, over the next cabinet. Text
      that took the press left dead spots where a drag did nothing (22 Sept 2026). */
   #plan svg text{pointer-events:none}
-  #plan svg.drawing{cursor:crosshair;background:var(--surface)}
+  #plan.drawing,#plan.drawing svg{cursor:crosshair}
+  #plan.drawing svg{overflow:visible}
+  /* the hint floats over the plan's foot, so drawing moves nothing on screen */
+  #plancard{position:relative}
+  #drawhint{position:absolute;left:14px;right:14px;bottom:10px;z-index:4;pointer-events:none;
+            background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+            padding:6px 10px !important;opacity:.94;box-shadow:var(--shadow-1)}
+  /* the plan fits its card (ruling 11): a box sized to the window, the drawing
+     asked for at that size, scrolled within when zoomed */
+  #plan{height:clamp(380px, calc(100vh - 250px), 1400px);overflow:auto;box-sizing:border-box}
+  #roomplanonly{margin-top:16px}
+  #gaps table{width:100%}
+  #gaps td.note{white-space:normal}
+  #gaps select{width:auto;min-width:132px}
+  .roomlow{flex-wrap:wrap;margin-top:16px}
+  .roomlow>.card{flex:none;max-width:100%;min-width:0}
+  #places table,#plinth table{width:auto}
+  #places input{width:76px}
+  #places select{width:auto}
+  .qhelp{width:20px;height:20px;padding:0;border-radius:50%;font-size:11px;line-height:1;
+         margin-left:6px;vertical-align:middle;text-transform:none}
+  .qhelp.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .cardhelp{font-size:11.5px;color:var(--muted);padding:6px 14px 2px;line-height:1.45;max-width:720px}
+  .cardhelp p{margin:0 0 6px}
   #plan svg .front{transition:opacity .08s}
   #plan.showfronts svg .front{opacity:1 !important}
   #dragreadout{position:absolute;background:var(--ink);color:#fff;font-size:11px;
@@ -729,10 +752,11 @@
         <div class="card" id="plancard">
           <h2>Plan <span id="planzoombar" class="zoombar"><button data-zoom="0.8"
             title="zoom out">&minus;</button><button data-zoom="reset"
-            id="planzoom" title="back to 100%">100%</button><button data-zoom="1.25"
+            id="planzoom" title="fit the plan to its card (100%)">100%</button><button data-zoom="1.25"
             title="zoom in">+</button></span> <span id="layers"></span></h2>
           <div id="drawhint" class="note" hidden style="padding:6px 12px 0"></div>
           <div class="scroll" id="plan" style="padding:8px 12px"></div>
+          <div id="plannote"></div>
         </div>
         <!-- The wall elevations, moved here from the Cabinets tab unchanged
              (UI restructure, 28 Sept 2026). One wall face on; no Run. -->
@@ -751,21 +775,40 @@
         <div class="dockcard card" id="wallcard" hidden></div>
       </div>
     </div>
+    <!-- Under the plan (ruling 11, 3 October 2026): Gaps the full width, every
+         column visible; Plinth and Placements side by side under it, each at its
+         natural width; each card's notes behind a "?" beside its title. -->
     <div id="roomplanonly">
-    <div class="split">
-      <div class="card" style="flex:1;min-width:0">
-        <h2>Placements</h2>
-        <div id="places"></div>
-      </div>
-      <div class="card" style="flex:1;min-width:0">
-        <h2>Gaps</h2>
+      <div class="card" id="gapscard">
+        <h2>Gaps <button class="qhelp" data-help="gapshelp" title="what this table is">?</button></h2>
+        <div class="cardhelp" id="gapshelp" hidden></div>
         <div id="gaps"></div>
       </div>
-      <div class="card" style="width:460px;flex:none">
-        <h2>Plinth</h2>
-        <div id="plinth"></div>
+      <div class="split roomlow">
+        <div class="card" id="plinthcard">
+          <h2>Plinth <button class="qhelp" data-help="plinthhelp" title="what this table is">?</button></h2>
+          <div class="cardhelp" id="plinthhelp" hidden></div>
+          <div id="plinth"></div>
+        </div>
+        <div class="card" id="placescard">
+          <h2>Placements <button class="qhelp" data-help="placeshelp" title="what this table is">?</button></h2>
+          <div class="cardhelp" id="placeshelp" hidden>
+            <p>X is from the wall's start corner to the item's left edge, facing the
+            wall. Z is 0 for anything standing on the floor — it stands on its legs,
+            which the engine allows for, plinth board or not. Set Z only for a hung
+            unit, to its underside; a panel stands on no legs, so its Z is its
+            underside exactly as typed. Layer is read from the cabinet's kind and its
+            Z. Pick a wall to place an item, or “—” to take it out; it lands clear of
+            whatever is already on that wall.</p>
+            <p>Y is out from the wall face to the back of an independent PANEL — 0 is
+            flush against the wall, and it is what puts a bulkhead underside out over
+            the units below it. A cabinet is against its wall, so it has no Y.
+            A panel attached to a cabinet stands where the cabinet puts it: its
+            offsets are typed in Panel design, and it moves with the cabinet.</p>
+          </div>
+          <div id="places"></div>
+        </div>
       </div>
-    </div>
     </div>
   </section>
 
@@ -5639,7 +5682,7 @@ function applyZoom(id) {
   svg.style.width = (w * z).toFixed(1) + "px";
   svg.style.height = (h * z).toFixed(1) + "px";
   // Zoomed in, the box scrolls rather than pushing the rest of the page down.
-  box.style.maxHeight = z > 1 ? Math.round(h) + "px" : "";
+  if (id !== "plan") box.style.maxHeight = z > 1 ? Math.round(h) + "px" : "";
 }
 
 function zoomAt(id, factor, evt) {
@@ -5663,7 +5706,15 @@ function zoomReset(id) {
   applyZoom(id);
   $(id).scrollLeft = 0;
   $(id).scrollTop = 0;
+  if (id === "plan") renderPlan();          // Fit: drawn again at the card's size
 }
+
+// The plan fits its card: a window resized draws it again at the new size.
+let planResizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(planResizeTimer);
+  planResizeTimer = setTimeout(() => { if (S.tab === "room" && S.roomSub === "plan") renderPlan(); }, 200);
+});
 
 // Ctrl+wheel zooms; a plain wheel is left alone and scrolls the page. A plain
 // two-finger trackpad scroll arrives as a wheel event too, so zooming on every
@@ -6066,42 +6117,89 @@ function refreshPlan() {
 }
 
 async function renderPlan() {
-  if (DRAW) { drawPaint(); return; }      // sketching walls: the canvas is the plan
   const rm = S.job.room;
-  if (!rm) {
-    $("plan").innerHTML = `<div class="empty">No room yet — add one below.</div>`;
+  const box = $("plan");
+  if (!rm && !DRAW) {
+    box.innerHTML = `<div class="empty">No room yet — add one below, or Draw walls.</div>`;
     $("layers").innerHTML = "";
+    $("plannote").innerHTML = "";
     return;
   }
   renderLayers();
   const show = planLayers();
   const ghost = allLayers().filter((l) => show.indexOf(l) < 0);
-  const r = await post("/api/plan", {job: S.job, show: show, ghost: ghost,
-                                     isolate: S.isolate});
+  // The plan fits its card (ruling 11, 3 October 2026): asked for at the size of
+  // the box it sits in, so 100 % is "fits", and the zoom is measured from there.
+  // It carries room beyond the walls to draw into (ruling 10): Draw walls is a
+  // mode of THIS drawing, so the drawing does not change when the mode does —
+  // only the cabinets ghost while drawing, as the layer toggle ghosts them.
+  const job = rm ? S.job : Object.assign({}, S.job, {room: {name: S.job.name || "room", walls: []}});
+  const r = await post("/api/plan", {job: job, show: DRAW ? [] : show,
+                                     ghost: DRAW ? allLayers() : ghost,
+                                     isolate: DRAW ? null : S.isolate, margin: true,
+                                     width: Math.max(300, box.clientWidth - 26),
+                                     height: Math.max(240, box.clientHeight - 18)});
   if (!r.ok) { toast(r.error, true); return; }
   // A number the job no longer carries isolates nothing; the engine says so and
   // the pill catches up rather than naming a cabinet that has been deleted.
-  if (r.isolate !== S.isolate) { S.isolate = r.isolate; renderLayers(); }
+  if (!DRAW && r.isolate !== S.isolate) { S.isolate = r.isolate; renderLayers(); }
   const un = (S.res && S.res.room && S.res.room.unplaced) || [];
-  $("plan").innerHTML = r.svg
-    + `<div id="dragreadout"></div>`
-    + (un.length ? `<div class="note" style="padding:6px 2px">
-        Not placed, so not drawn: ${un.join(", ")}</div>` : "");
+  box.innerHTML = r.svg + `<div id="dragreadout"></div>`;
+  $("plannote").innerHTML = un.length ? `<div class="note" style="padding:4px 14px 8px">
+        Not placed, so not drawn: ${un.join(", ")}</div>` : "";
+  box.classList.toggle("drawing", !!DRAW);
   applyZoom("plan");
   markSelected();
+  if (DRAW) drawPaint();
 }
 
-/* ---------- Draw walls (29 September 2026) ----------------------------------
-   Sketching a room with the mouse. The canvas is an SVG whose viewBox IS world
-   plan millimetres, so a click is read straight into mm through the drawing's
-   own transform. Each click sets a corner; the rubber band shows the length
-   and the corner it would make. Direction snaps to Standard.draw_angle_step
-   (Shift for a free angle), length to draw_length_step. Clicking the first
-   corner closes the room; a double-click or Enter finishes an open run; Esc
-   cancels; Backspace takes the last corner off. The corners go to
-   /api/room-draw, which names the walls, measures them, works out every
-   corner angle and puts the chain clockwise: the browser does none of it.
-   The live readout is a sketch aid, and nothing reads it.                   */
+// The plan's own mapping between world millimetres and its SVG units, written
+// on the drawing by the engine (`data-mmx` …). The page converts a pointer with
+// it and works out no geometry: every corner, length and angle is the server's.
+function planMap() {
+  const svg = document.querySelector("#plan svg");
+  if (!svg || svg.dataset.scale === undefined) return null;
+  return {svg: svg, x0: +svg.dataset.mmx, y0: +svg.dataset.mmy, pad: +svg.dataset.pad,
+          k: +svg.dataset.scale};
+}
+function mmToSvg(m, x, y) { return [m.pad + (x - m.x0) * m.k, m.pad + (y - m.y0) * m.k]; }
+function svgToMm(m, sx, sy) { return [(sx - m.pad) / m.k + m.x0, (sy - m.pad) / m.k + m.y0]; }
+// how many mm one screen pixel is, at the zoom on screen
+function mmPerPx(m) {
+  const r = m.svg.getBoundingClientRect();
+  return (m.svg.viewBox.baseVal.width / r.width) / m.k;
+}
+function pointerMm(e) {
+  const m = planMap();
+  if (!m) return null;
+  const p = svgPoint(e);
+  return svgToMm(m, p.x, p.y);
+}
+// where a world point is on screen — for the checks, and the length boxes
+function mmToScreen(x, y) {
+  const m = planMap();
+  if (!m) return null;
+  const [sx, sy] = mmToSvg(m, x, y);
+  const r = m.svg.getBoundingClientRect(), vb = m.svg.viewBox.baseVal;
+  return [r.left + (sx - vb.x) * r.width / vb.width, r.top + (sy - vb.y) * r.height / vb.height];
+}
+
+/* ---------- Draw walls, ON THE PLAN (room redo Phase 2, ruling 10) ----------
+   Sketching walls with the mouse is a MODE of the plan itself (3 October 2026;
+   it used to swap the plan for a canvas of its own): the same drawing, zoom
+   and scroll, the walls solid, the room tint shown, the cabinets ghosted while
+   drawing, a grid laid over the plan only while the mode is on, and the new
+   walls drawn live on top in a layer of their own (`#drawlayer`). Leaving the
+   mode changes nothing on screen but the cursor and the grid.
+
+   Each click sets a corner, read into world mm through the plan's own mapping
+   (`planMap`). Direction snaps to Standard.draw_angle_step (Shift for a free
+   angle), length to draw_length_step. Clicking the first corner closes the
+   room; a double-click or Enter finishes an open run; Esc cancels; Backspace
+   takes the last corner off. The corners go to /api/room-draw, which names
+   the walls, measures them, works out every corner angle and puts the chain
+   the right way round: the browser does none of it. The live readout is a
+   sketch aid, and nothing reads it.                                        */
 
 let DRAW = null;
 
@@ -6124,30 +6222,21 @@ function nextLetters(used, n) {
 
 function startDraw() {
   if (S.tab !== "room" || S.roomSub !== "plan") return;
-  // the walls the room already has, faint under the new ones, and their
-  // corners, which a first click near one starts from
+  // the corners the room already has, which a first click near one starts from
   const info = roomInfo();
-  const old = info ? info.walls.map((w) => [[w.x0, w.y0], [w.x1, w.y1]]) : [];
-  const ends = old.flat();
-  const xs = ends.map((q) => q[0]).concat([0]), ys = ends.map((q) => q[1]).concat([0]);
-  const pad = 1500;
-  const w = Math.max(Math.max(...xs) - Math.min(...xs) + 2 * pad, 12000);
-  const h = Math.max(Math.max(...ys) - Math.min(...ys) + 2 * pad, 8000);
-  DRAW = {pts: [], at: null, closing: false, joined: false, old: old, ends: ends,
-          letters: nextLetters(info ? info.walls.map((x) => x.id) : [], 40),
-          box: [Math.round(Math.min(...xs) - pad), Math.round(Math.min(...ys) - pad),
-                Math.round(w), Math.round(h)]};
+  const ends = info ? info.walls.flatMap((w) => [[w.x0, w.y0], [w.x1, w.y1]]) : [];
+  DRAW = {pts: [], at: null, closing: false, joined: false, ends: ends,
+          letters: nextLetters(info ? info.walls.map((x) => x.id) : [], 40)};
   toolState();
   $("drawhint").hidden = false;
-  $("drawhint").innerHTML = `Click to set each corner${old.length ? " — on an existing corner to start from it" : ""}.
+  $("drawhint").innerHTML = `Click to set each corner${ends.length ? " — on an existing corner to start from it" : ""}.
     Direction snaps to ${drawStd("draw_angle_step", 15)}° — hold <b>Shift</b> for a free angle; length snaps
     to ${drawStd("draw_length_step", 10)} mm. Click the first corner to close the room;
     double-click or <b>Enter</b> finishes an open run. <b>Backspace</b> takes the last
-    corner off, <b>Esc</b> cancels. The walls are added to the room; drawn lengths are a
+    corner off, <b>Esc</b> goes back to Select. The walls are added to the room; drawn lengths are a
     sketch — measure each wall after.`;
-  $("layers").innerHTML = "";
-  drawPaint();
   window.addEventListener("keydown", drawKey);
+  renderPlan();
 }
 
 function endDraw() {
@@ -6158,60 +6247,72 @@ function endDraw() {
   renderPlan();
 }
 
-// The canvas, painted whole on every move: a few lines, and nothing to keep.
+// The draw layer over the plan, painted whole on every move: the grid, the
+// corners the room has, the walls drawn so far and the rubber band. A few
+// lines, and nothing to keep.
 function drawPaint() {
-  const box = $("plan");
-  if (!DRAW || !box) return;
-  const [x0, y0, w, h] = DRAW.box;
-  const pxW = Math.max(box.clientWidth - 28, 400);
-  const pxH = Math.round(pxW * h / w);
-  const mm = w / pxW;                       // mm per screen pixel, for line widths
+  const m = planMap();
+  if (!DRAW || !m) return;
+  let g = m.svg.querySelector("#drawlayer");
+  if (!g) {
+    g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.id = "drawlayer";
+    g.setAttribute("pointer-events", "none");
+    m.svg.appendChild(g);
+  }
+  // the grid covers the whole box on screen, past the drawing's edge when zoomed out
+  const vb = m.svg.viewBox.baseVal, sr = m.svg.getBoundingClientRect(), br = $("plan").getBoundingClientRect();
+  const toVb = (cx, cy) => [vb.x + (cx - sr.left) * vb.width / sr.width, vb.y + (cy - sr.top) * vb.height / sr.height];
+  const c0 = toVb(Math.min(br.left, sr.left), Math.min(br.top, sr.top));
+  const c1 = toVb(Math.max(br.right, sr.right), Math.max(br.bottom, sr.bottom));
+  const [ax, ay] = svgToMm(m, c0[0], c0[1]), [bx, by] = svgToMm(m, c1[0], c1[1]);
+  const P = (x, y) => mmToSvg(m, x, y).map((v) => v.toFixed(1));
   const L = [];
-  for (let gx = Math.ceil(x0 / 500) * 500; gx <= x0 + w; gx += 500) {
-    L.push(`<line x1="${gx}" y1="${y0}" x2="${gx}" y2="${y0 + h}"
-      stroke="var(--rule)" stroke-width="${(gx % 1000 ? 0.4 : 0.8) * mm}"/>`);
+  for (let gx = Math.ceil(ax / 500) * 500; gx <= bx; gx += 500) {
+    const [x1, y1] = P(gx, ay), [, y2] = P(gx, by);
+    L.push(`<line class="drawgrid" x1="${x1}" y1="${y1}" x2="${x1}" y2="${y2}" stroke="var(--rule)"
+      stroke-opacity="${gx % 1000 ? 0.35 : 0.7}" stroke-width="0.6"/>`);
   }
-  for (let gy = Math.ceil(y0 / 500) * 500; gy <= y0 + h; gy += 500) {
-    L.push(`<line x1="${x0}" y1="${gy}" x2="${x0 + w}" y2="${gy}"
-      stroke="var(--rule)" stroke-width="${(gy % 1000 ? 0.4 : 0.8) * mm}"/>`);
-  }
-  for (const [[ax, ay], [bx, by]] of DRAW.old) {
-    L.push(`<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="var(--muted)"
-      stroke-width="${1.5 * mm}" stroke-dasharray="${6 * mm} ${4 * mm}"/>`);
+  for (let gy = Math.ceil(ay / 500) * 500; gy <= by; gy += 500) {
+    const [x1, y1] = P(ax, gy), [x2] = P(bx, gy);
+    L.push(`<line class="drawgrid" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y1}" stroke="var(--rule)"
+      stroke-opacity="${gy % 1000 ? 0.35 : 0.7}" stroke-width="0.6"/>`);
   }
   for (const [ex, ey] of DRAW.ends) {
-    L.push(`<circle cx="${ex}" cy="${ey}" r="${4 * mm}" fill="none" stroke="var(--muted)"
-      stroke-width="${1 * mm}"/>`);
+    const [cx, cy] = P(ex, ey);
+    L.push(`<circle class="drawend" cx="${cx}" cy="${cy}" r="4" fill="none" stroke="var(--muted)" stroke-width="1"/>`);
   }
   const pts = DRAW.pts;
   const chain = pts.concat(DRAW.at && pts.length ? [DRAW.at] : []);
   if (chain.length > 1) {
-    L.push(`<polyline class="drawn" points="${chain.map((q) => q.join(",")).join(" ")}"
-      fill="none" stroke="var(--ink)" stroke-width="${2.5 * mm}"/>`);
-    // each wall so far, lettered in the order it was drawn
+    L.push(`<polyline class="drawn" points="${chain.map((q) => P(q[0], q[1]).join(",")).join(" ")}"
+      fill="none" stroke="var(--accent)" stroke-width="2.5"/>`);
+    // each wall so far, lettered in the order it was drawn, beside the line
     for (let k = 0; k + 1 < chain.length; k++) {
-      const [ax, ay] = chain[k], [bx, by] = chain[k + 1];
-      const len = Math.round(Math.hypot(bx - ax, by - ay));
+      const [x0, y0] = chain[k], [x1, y1] = chain[k + 1];
+      const len = Math.round(Math.hypot(x1 - x0, y1 - y0));
       if (!len) continue;
-      // beside the line, not on it: off to one side, anchored away from it
-      const nx = -(by - ay) / len, ny = (bx - ax) / len;
+      const nx = -(y1 - y0) / len, ny = (x1 - x0) / len;
+      const [tx, ty] = mmToSvg(m, (x0 + x1) / 2, (y0 + y1) / 2);
       const anchor = Math.abs(nx) > 0.5 ? (nx < 0 ? "end" : "start") : "middle";
-      L.push(`<text x="${(ax + bx) / 2 + nx * 10 * mm}" y="${(ay + by) / 2 + ny * 10 * mm + 4 * mm}"
-        font-size="${11 * mm}" text-anchor="${anchor}" fill="var(--ink)">${
-        DRAW.letters[k] || "?"} · ${len}</text>`);
+      L.push(`<text x="${(tx + nx * 10).toFixed(1)}" y="${(ty + ny * 10 + 4).toFixed(1)}"
+        font-size="11" text-anchor="${anchor}" fill="var(--accent)">${DRAW.letters[k] || "?"} · ${len}</text>`);
     }
   }
-  pts.forEach((q, k) => L.push(`<circle cx="${q[0]}" cy="${q[1]}" r="${(k ? 3 : 6) * mm}"
-    fill="${k ? "var(--ink)" : (DRAW.closing ? "var(--accent)" : "var(--surface)")}"
-    stroke="var(--ink)" stroke-width="${1.2 * mm}"/>`));
+  pts.forEach((q, k) => {
+    const [cx, cy] = P(q[0], q[1]);
+    L.push(`<circle cx="${cx}" cy="${cy}" r="${k ? 3 : 6}"
+      fill="${k ? "var(--accent)" : (DRAW.closing ? "var(--accent)" : "var(--surface)")}"
+      stroke="var(--accent)" stroke-width="1.2"/>`);
+  });
   if (DRAW.at) {
-    L.push(`<circle cx="${DRAW.at[0]}" cy="${DRAW.at[1]}" r="${3 * mm}" fill="var(--accent)"/>`);
+    const [cx, cy] = mmToSvg(m, DRAW.at[0], DRAW.at[1]);
+    L.push(`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3" fill="var(--accent)"/>`);
     const r = drawReadout();
-    if (r) L.push(`<text id="drawreadout" x="${DRAW.at[0] + 12 * mm}" y="${DRAW.at[1] - 12 * mm}"
-      font-size="${12 * mm}" fill="var(--accent)">${esc(r)}</text>`);
+    if (r) L.push(`<text id="drawreadout" x="${(cx + 12).toFixed(1)}" y="${(cy - 12).toFixed(1)}"
+      font-size="12" fill="var(--accent)">${esc(r)}</text>`);
   }
-  box.innerHTML = `<svg class="drw drawing" id="drawsvg" width="${pxW}" height="${pxH}"
-    viewBox="${x0} ${y0} ${w} ${h}" xmlns="http://www.w3.org/2000/svg">${L.join("")}</svg>`;
+  g.innerHTML = L.join("");
 }
 
 // The signed turn at b, from a->b to b->c, in degrees (-180, 180]: positive
@@ -6245,11 +6346,10 @@ function drawReadout() {
 
 // The existing corner within 12 px of the pointer, or null — what a first
 // click starts from.
-function drawCornerNear(p, svg) {
-  const perPx = DRAW.box[2] / svg.getBoundingClientRect().width;
-  let best = null, near = 12 * perPx;
+function drawCornerNear(p, m) {
+  let best = null, near = 12 * mmPerPx(m);
   for (const [ex, ey] of DRAW.ends) {
-    const d = Math.hypot(p.x - ex, p.y - ey);
+    const d = Math.hypot(p[0] - ex, p[1] - ey);
     if (d <= near) { near = d; best = [ex, ey]; }
   }
   return best;
@@ -6259,46 +6359,45 @@ function drawCornerNear(p, svg) {
 // step, each next one along a snapped direction (free with Shift) at a length
 // in whole steps. Within 12 px of the first corner, the first corner.
 function drawPointer(e) {
-  const svg = $("drawsvg");
-  const m = svg && svg.getScreenCTM();
-  if (!m) return null;
-  const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+  const m = planMap();
+  const p = m && pointerMm(e);
+  if (!p) return null;
   const step = drawStd("draw_length_step", 10);
   const pts = DRAW.pts;
   DRAW.closing = false;
   if (pts.length >= 3) {
     const [fx, fy] = pts[0];
-    const perPx = DRAW.box[2] / svg.getBoundingClientRect().width;
-    if (Math.hypot(p.x - fx, p.y - fy) <= 12 * perPx) {
+    if (Math.hypot(p[0] - fx, p[1] - fy) <= 12 * mmPerPx(m)) {
       DRAW.closing = true;
       return [fx, fy];
     }
   }
   if (!pts.length) {
-    const corner = drawCornerNear(p, svg);
+    const corner = drawCornerNear(p, m);
     DRAW.joined = !!corner;
-    return corner || [Math.round(p.x / step) * step, Math.round(p.y / step) * step];
+    return corner || [Math.round(p[0] / step) * step, Math.round(p[1] / step) * step];
   }
   const [lx, ly] = pts[pts.length - 1];
-  let ang = Math.atan2(p.y - ly, p.x - lx);
+  let ang = Math.atan2(p[1] - ly, p[0] - lx);
   if (!e.shiftKey) {
     const a = drawStd("draw_angle_step", 15) * Math.PI / 180;
     ang = Math.round(ang / a) * a;
   }
-  const len = Math.round(Math.hypot(p.x - lx, p.y - ly) / step) * step;
+  const len = Math.round(Math.hypot(p[0] - lx, p[1] - ly) / step) * step;
   return [lx + len * Math.cos(ang), ly + len * Math.sin(ang)];
 }
 
+// The whole plan box takes the pointer while drawing, not only the drawing: a
+// zoom out leaves room round the plan, and a wall can be drawn into it — the
+// plan's mapping reaches past its edge, and the grid is laid over all of it.
 $("plan").addEventListener("pointermove", (e) => {
-  if (!DRAW || !e.target.closest("#drawsvg")) return;
+  if (!DRAW || !e.target.closest("#plan")) return;
   DRAW.at = drawPointer(e);
   drawPaint();
 });
-// the pointer's own readout says when the first click would start on a corner
-
 
 $("plan").addEventListener("click", (e) => {
-  if (!DRAW || !e.target.closest("#drawsvg")) return;
+  if (!DRAW || !e.target.closest("#plan")) return;
   const q = drawPointer(e);
   if (!q) return;
   if (DRAW.closing) { finishDraw(true); return; }
@@ -6306,16 +6405,15 @@ $("plan").addEventListener("click", (e) => {
   // The second click of a double-click lands on (or a pixel off) the corner
   // just set: no wall, and no repaint — a repaint between the two clicks is
   // what stops the browser seeing them as one double-click.
-  const svg = $("drawsvg");
-  const perPx = svg ? DRAW.box[2] / svg.getBoundingClientRect().width : 1;
-  if (last && Math.hypot(q[0] - last[0], q[1] - last[1]) <= 12 * perPx) return;
+  const m = planMap();
+  if (last && m && Math.hypot(q[0] - last[0], q[1] - last[1]) <= 12 * mmPerPx(m)) return;
   DRAW.pts.push(q);
   DRAW.at = q;
   drawPaint();
 });
 
 $("plan").addEventListener("dblclick", (e) => {
-  if (!DRAW || !e.target.closest("#drawsvg")) return;
+  if (!DRAW || !e.target.closest("#plan")) return;
   e.preventDefault();
   finishDraw(false);
 });
@@ -6408,7 +6506,7 @@ function svgPoint(evt) {
 }
 
 $("plan").addEventListener("pointerdown", async (e) => {
-  if (DRAW) return;                        // the drawing canvas takes its own clicks
+  if (DRAW) return;                        // the drawing mode takes its own clicks
   const poly = e.target.closest(".cab");
   if (!poly) {
     // A wall's hit line selects the wall; empty canvas — a gap, the paper —
@@ -6890,20 +6988,6 @@ function renderPlaces(force) {
     <table class="rows"><thead><tr>
       <th class="n">Item</th><th>Wall</th><th>X</th><th>Z</th><th>Y</th><th>Layer</th>
     </tr></thead><tbody>${rows}</tbody></table>
-    <p class="note" style="margin-top:10px">
-      X is from the wall's start corner to the item's left edge, facing the
-      wall. Z is 0 for anything standing on the floor — it stands on its legs,
-      which the engine allows for, plinth board or not. Set Z only for a hung
-      unit, to its underside; a panel stands on no legs, so its Z is its
-      underside exactly as typed. Layer is read from the cabinet's kind and its
-      Z. Pick a wall to place an item, or “—” to take it out; it lands clear of
-      whatever is already on that wall.</p>
-    <p class="note">
-      Y is out from the wall face to the back of an independent PANEL — 0 is
-      flush against the wall, and it is what puts a bulkhead underside out over
-      the units below it. A cabinet is against its wall, so it has no Y.
-      A panel attached to a cabinet stands where the cabinet puts it: its
-      offsets are typed in Panel design, and it moves with the cabinet.</p>
   </div>`;
 }
 
@@ -7175,17 +7259,12 @@ function renderGaps(force) {
     <div class="matline" style="border-bottom:1px solid var(--line)">
       ${undecided ? `<span class="pill crit">${undecided} undecided</span>`
                   : `<span class="pill ok">every gap ruled on</span>`}
-      <span class="note">The app suggests; it never fits a filler on its own.</span>
     </div>
-    <div class="scroll"><table><thead><tr>
+    <table><thead><tr>
       <th>Wall</th><th>Layer</th><th>Between</th><th class="n">Widest</th>
       <th class="n">Back→front</th><th></th><th>Suggestion</th>
       <th>Treatment</th><th class="n">Panel</th>
-    </tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="note" style="padding:8px 12px 12px">
-      A filler ships as a rectangle at the gap's widest point plus a
-      ${(S.def.standard || {}).scribe_allowance} mm scribe allowance, trimmed on
-      site — the beam saw cuts edge to edge and cannot make a taper.</p>`;
+    </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 $("gaps").addEventListener("input", (e) => {
@@ -7242,15 +7321,31 @@ function renderPlinth(force) {
       <th>Wall</th><th>Cabinets</th><th class="n">Run</th><th>Plinth</th>
       <th class="n">Boards</th>
     </tr></thead><tbody>${rows}</tbody></table>
-    <p class="note" style="margin-top:10px">
-      A ${std.leg_height} mm board to cover the legs, set back
-      ${std.plinth_setback} mm behind the door face. Every standing carcass is on
-      legs (${std.leg_min}–${std.leg_max} mm) whether or not a board is fitted —
-      the board is the operator's choice per run, and it moves no height. Carcass
-      board, banded both long edges to seal it at floor level. A run over
-      ${std.sheet_l} mm splits at a cabinet division, and internal corners butt.</p>
   </div>`;
 }
+
+// The notes behind each card's "?" (ruling 11): the Standard's own figures.
+function renderRoomHelp() {
+  const std = S.def.standard || {};
+  const gh = `<p>The app suggests; it never fits a filler on its own. A filler ships as a
+    rectangle at the gap's widest point plus a ${std.scribe_allowance} mm scribe
+    allowance, trimmed on site — the beam saw cuts edge to edge and cannot make a taper.</p>`;
+  const ph = `<p>A ${std.leg_height} mm board to cover the legs, set back
+    ${std.plinth_setback} mm behind the door face. Every standing carcass is on
+    legs (${std.leg_min}–${std.leg_max} mm) whether or not a board is fitted —
+    the board is the operator's choice per run, and it moves no height. Carcass
+    board, banded both long edges to seal it at floor level. A run over
+    ${std.sheet_l} mm splits at a cabinet division, and internal corners butt.</p>`;
+  if ($("gapshelp").innerHTML !== gh) $("gapshelp").innerHTML = gh;
+  if ($("plinthhelp").innerHTML !== ph) $("plinthhelp").innerHTML = ph;
+}
+
+document.addEventListener("click", (e) => {
+  const q = e.target.closest(".qhelp");
+  if (!q) return;
+  const box = $(q.dataset.help);
+  if (box) { box.hidden = !box.hidden; q.classList.toggle("on", !box.hidden); }
+});
 
 $("plinth").addEventListener("change", (e) => {
   const key = e.target.dataset.run;
@@ -7508,6 +7603,7 @@ function renderTab() {
     guarded("places", renderPlaces, () => { placesSig = null; });
     guarded("gaps", renderGaps, () => { gapsSig = null; });
     guarded("plinth", renderPlinth, () => { plinthSig = null; });
+    guarded("gapshelp", renderRoomHelp, () => {});
     guarded("plan", renderPlan, () => {});
     guarded("roomdock", renderRoomDock, () => {});
   }

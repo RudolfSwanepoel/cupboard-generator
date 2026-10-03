@@ -1095,8 +1095,16 @@ def _finish_faces(job: Job, faces, on_wall, on_panels, X, Y, scale, fills):
             [e for f in over for e in _face_svg(job, f, X, Y, scale, fills)] + labels)
 
 
+# Room -> Plan is also the canvas walls are DRAWN on (room redo Phase 2, ruling
+# 10, 3 October 2026): the plan the Room tab asks for carries this much room
+# beyond the walls to draw into, and a room with no walls yet is an empty sheet
+# of EMPTY_PLAN_MM from the origin. Drawing only; an export's plan has neither.
+PLAN_MARGIN_MM = 800
+EMPTY_PLAN_MM = (6000, 4000)
+
+
 def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
-             max_height: int = 620, isolate=None) -> str:
+             max_height: int = 620, isolate=None, margin: int = 0) -> str:
     """Plan of the room, looking down. Read-only.
 
     `show` is the layers drawn solid; `ghost` those drawn faint. A layer in
@@ -1122,7 +1130,7 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     rm = job.room
     if rm is None:
         return _note_svg("This job has no room")
-    if not rm.walls:
+    if not rm.walls and not margin:
         return _note_svg("Add walls to see the plan")
 
     std = job.std
@@ -1148,13 +1156,16 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
             c.number == isolate for c, _p in pans):
         isolate = None
 
-    pts = list(corners)
+    pts = list(corners) or [(0.0, 0.0), (float(EMPTY_PLAN_MM[0]), float(EMPTY_PLAN_MM[1]))]
     for cab, p, _ in items:
         pts += cabinet_footprint(rm, p, cab)
     for cab, p in pans:
         pts += cabinet_footprint(rm, p, cab, std, job.materials)
     xs = [q[0] for q in pts]
     ys = [q[1] for q in pts]
+    if margin:
+        xs += [min(xs) - margin, max(xs) + margin]
+        ys += [min(ys) - margin, max(ys) + margin]
     pad = 66          # room for the thickness band and the length label outside the walls
     span_x = max(max(xs) - min(xs), 1)
     span_y = max(max(ys) - min(ys), 1)
@@ -1164,13 +1175,24 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
                                     [c.panel_spec.board for c, _p in pans]),
                         W - pad * 2)
     leg = _legend_height(rows)
+    if margin and int(span_y * scale) + pad * 2 + leg > max_height:
+        # the Room tab's plan fits its card WITH its legend (ruling 11)
+        scale = min(scale, max(max_height - pad * 2 - leg, 40) / span_y)
+        W = int(span_x * scale) + pad * 2
+        rows = _legend_rows(job, _dedup([c.exterior_board for c, _p, _l in items] +
+                                        [c.panel_spec.board for c, _p in pans]),
+                            W - pad * 2)
+        leg = _legend_height(rows)
     H = int(span_y * scale) + pad * 2 + leg
 
     def T(q):
         return (pad + (q[0] - min(xs)) * scale, pad + (q[1] - min(ys)) * scale)
 
+    # The page reads world mm off a pointer through these (and works out no
+    # geometry with them): mm = (svg - pad) / scale + the origin.
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" class="drw" width="{W}" height="{H}" '
-           f'viewBox="0 0 {W} {H}" font-family="system-ui,sans-serif">',
+           f'viewBox="0 0 {W} {H}" font-family="system-ui,sans-serif" '
+           f'data-mmx="{min(xs):.3f}" data-mmy="{min(ys):.3f}" data-pad="{pad}" data-scale="{scale:.6f}">',
            STROKE_STYLE + '<defs><pattern id="hatch" width="6" height="6" '
            'patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
            f'<line x1="0" y1="0" x2="0" y2="6" stroke="{MUTED}" stroke-width="1.4"/>'
