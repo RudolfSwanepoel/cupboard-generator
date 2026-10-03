@@ -711,6 +711,7 @@
   #importdlg td.act-renamed{color:var(--warn)}
   #importdlg td.act-broken{color:var(--crit)}
   #importdlg td.act-identical{color:var(--muted)}
+  #importdlg td.act-shipped{color:var(--muted)}
   #importdlg textarea{width:100%;min-height:120px;font:12.5px/1.45 var(--font)}
   #importdlg .row{display:flex;gap:8px;align-items:center}
   #importdlg .row input{flex:1}
@@ -9294,7 +9295,8 @@ async function runExport(walls) {
    the native folder picker (/api/pick-folder); with no desktop window there is
    none, and the dialog asks for the path typed instead. /api/import-scan lists
    what is in the old folder and what will happen to each item — new,
-   identical (skipped), renamed "(imported)", or a job that will not load —
+   identical (skipped), renamed "(imported)", a job that will not load, or
+   one the demo shipped with (left out: jobs\shipped-jobs.json) —
    and writes nothing. Import writes (/api/import-run, which refuses if the
    folder changed since the preview) and the report can be copied. Every
    decision is cabinetgen/importer.py's; the old folder is only ever read.   */
@@ -9308,6 +9310,7 @@ function impWhat(i) {
   if (i.action === "identical") return i.to && i.to !== i.name
     ? `identical to ${esc(i.to)} here — skipped` : "identical — skipped";
   if (i.action === "renamed") return `name taken here — comes in as <b>${esc(i.to)}</b>`;
+  if (i.action === "shipped") return "shipped with the demo — left out";
   return "will not load — not imported";
 }
 
@@ -9332,7 +9335,7 @@ function impDraw(step, extra) {
     box.innerHTML = `<b>Import from</b> <span class="note">${esc(sc.source)}</span>
       <p class="note" style="margin:6px 0 0">Nothing is written until you press Import, and the
         old folder is only read. ${coming} item${coming === 1 ? "" : "s"} will come in;
-        ${c.identical || 0} identical skipped${c.broken ? `; ${c.broken} will not load` : ""}.</p>
+        ${c.identical || 0} identical skipped${c.shipped ? `; ${c.shipped} shipped with the demo left out` : ""}${c.broken ? `; ${c.broken} will not load` : ""}.</p>
       <div class="imptable"><table><thead><tr><th>Kind</th><th>Name</th><th>What happens</th><th>Note</th></tr></thead>
       <tbody>${sc.items.map((i) => `<tr data-impitem="${esc(i.kind)}:${esc(i.name)}">
         <td>${IMP_KIND[i.kind] || esc(i.kind)}</td><td>${esc(i.name)}</td>

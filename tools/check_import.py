@@ -37,9 +37,27 @@ What is pinned (the brief's Checks section):
   * importing the same folder twice brings nothing the second time;
   * a preview the folder no longer matches is refused;
   * the raw-JSON re-pointing (a newer job's) agrees with `rename_board_in_job`.
+
+The follow-up brief (3 October 2026), on folders of their own:
+
+  * a board differing from this library's only in price is identical, and this
+    library's price is kept; price AND colour is renamed as before; the same
+    pair for a runner (price only; price and setback); an imported job's own
+    captured price untouched;
+  * a demo folder whose `jobs/shipped-jobs.json` names two jobs, one of them
+    edited by the friend: both left out, listed `shipped`, the friend's own new
+    job imported, the list never a job; the same folder without the list:
+    today's behaviour and the report's one line; a list that cannot be read is
+    no list, and said so;
+  * `tools/build_demo.py`'s `assemble()` writes that list, naming exactly the
+    jobs it copied, the zip listing names it, the importer reads it, and the
+    demo's Load list does not offer it.
 """
+import contextlib
 import copy
+import datetime
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -263,7 +281,7 @@ def preview(here, outer, app):
     grey = next(i for i in r["items"] if i["name"] == "STORMGREY")
     check("Test's note names the board it is re-pointed to",
           f"GREY → {grey['to_id']}" in test["note"], True)
-    check("the counts", r["counts"], {"new": 6, "identical": 5, "renamed": 5, "broken": 1})
+    check("the counts", r["counts"], {"new": 6, "identical": 5, "renamed": 5, "broken": 1, "shipped": 0})
     return r
 
 
@@ -287,6 +305,8 @@ def importing(here, outer, app, scan):
     check("the broken job is named with its reason",
           any(n == "Broken.json" and "JSONDecodeError" in why for n, why in rep["failed"]), True)
     check("the newer job is named as newer", rep["newer"], ["Newer.json"])
+    check("no list of shipped jobs in this folder: the report says so in one line",
+          IMP.NO_SHIPPED_LIST in rep["text"].split("\n"), True)
     check("the old folder is byte-identical afterwards", tree(os.path.dirname(app)), old_tree)
 
     after = tree(here)
@@ -502,6 +522,169 @@ def renames(top):
     check("  a free name saves, the id stays", (r["ok"], r["id"]), (True, "GELMAR45"))
 
 
+def prices(top):
+    """Follow-up ruling 1: a price-only difference is not a conflict."""
+    print("\n-- a price is not an identity (follow-up ruling 1)")
+    here = make_here(os.path.join(top, "prices"))
+    hw_here = read(os.path.join(here, "hardware.json"))
+    hw_here["runners"].append(dict(hw_here["runners"][0], id="SOFT45", name="Soft-close 45",
+                                   price=150.0))
+    write(os.path.join(here, "hardware.json"), hw_here)
+    old = os.path.join(top, "prices-old")
+    kitchen = read(job_file("Test_export.json"))
+    kitchen["name"] = "Kitchen"
+    kitchen["materials"]["GREY"]["price"] = 1234.0          # the price it was quoted at
+    write(os.path.join(old, "jobs", "Kitchen.json"), kitchen)
+    lib = read(os.path.join(ROOT, "boards.json"))
+    for b in lib["boards"]:
+        if b["id"] == "GREY":
+            b["price"] = 1250.0                              # price only
+        if b["id"] == "CASCADE":
+            b["price"] = 1111.0                              # price AND colour
+            b["colour"] = "#a0a4a8"
+    write(os.path.join(old, "boards.json"), lib)
+    hw = read(os.path.join(here, "hardware.json"))
+    hw["runners"][0]["price"] = 99.0                         # GELMAR45: price only
+    hw["runners"][1]["price"] = 175.0                        # SOFT45: price AND setback
+    hw["runners"][1]["setback"] = 7
+    write(os.path.join(old, "hardware.json"), hw)
+
+    point_api(here)
+    lib_before = {b.id: b for b in B.load(os.path.join(here, "boards.json"))}
+    r = api.import_scan({"path": old})
+    got = {(i["kind"], i["id"]): (i["action"], i["to"]) for i in r["items"]
+           if i["kind"] in ("board", "runner") and i["id"] in ("GREY", "CASCADE", "GELMAR45", "SOFT45")}
+    check("a board differing only in price is identical; price and colour is renamed; "
+          "the same pair for a runner", got,
+          {("board", "GREY"): ("identical", "STORMGREY"),
+           ("board", "CASCADE"): ("renamed", "Cascade Grey (imported)"),
+           ("runner", "GELMAR45"): ("identical", "Gelmar 45 mm full-extension ball-bearing"),
+           ("runner", "SOFT45"): ("renamed", "Soft-close 45 (imported)")})
+    run = api.import_run({"path": old, "signature": r["signature"]})
+    check("Import answers", run["ok"], True)
+    lib_after = B.load(os.path.join(here, "boards.json"))
+    check("this library's price is kept for the price-only board",
+          B.find(lib_after, "GREY").price, lib_before["GREY"].price)
+    check("... and the board is otherwise untouched",
+          asdict_board(B.find(lib_after, "GREY")), asdict_board(lib_before["GREY"]))
+    casc = next(b for b in lib_after if b.name == "Cascade Grey (imported)")
+    check("the price-and-colour board comes in renamed, with its own price and colour",
+          (casc.price, casc.colour, B.find(lib_after, "CASCADE").price),
+          (1111.0, "#a0a4a8", lib_before["CASCADE"].price))
+    rl = H.load(os.path.join(here, "hardware.json"))
+    check("this library's price is kept for the price-only runner, and no runner is added for it",
+          (H.find(rl, "GELMAR45").price, sum(1 for x in rl if x.name.startswith("Gelmar"))),
+          (hw_here["runners"][0]["price"], 1))
+    soft = next(x for x in rl if x.name == "Soft-close 45 (imported)")
+    check("the price-and-setback runner comes in renamed with its own record",
+          (soft.price, soft.setback, H.find(rl, "SOFT45").price, H.find(rl, "SOFT45").setback),
+          (175.0, 7, 150.0, hw_here["runners"][0]["setback"]))
+    job = read(os.path.join(here, "jobs", "Kitchen.json"))
+    check("an imported job's own captured price is untouched, and it still names GREY",
+          job["materials"].get("GREY", {}).get("price"), 1234.0)
+
+
+def make_demo(top, name, shipped_list):
+    """A demo folder that shipped with Test.json and Demo Kitchen.json — the
+    friend edited Test — and holds the friend's own Mine.json. `shipped_list`
+    is what goes into jobs/shipped-jobs.json: a list, raw text, or None for no
+    file at all."""
+    outer = os.path.join(top, name)
+    app = os.path.join(outer, IMP.DEMO_FOLDER)
+    write(os.path.join(app, IMP.DEMO_EXE), b"MZ not really an exe")
+    write(os.path.join(app, "jobs", "Test.json"), read(job_file("Test_3d.json")))   # edited
+    kitchen = read(job_file("Test_export.json"))
+    kitchen["name"] = "Demo Kitchen"
+    write(os.path.join(app, "jobs", "Demo Kitchen.json"), kitchen)
+    mine = read(job_file("Test_export.json"))
+    mine["name"] = "Mine"
+    mine["cabinets"][0]["width"] += 50
+    write(os.path.join(app, "jobs", "Mine.json"), mine)
+    if shipped_list is not None:
+        write(os.path.join(app, "jobs", IMP.SHIPPED_FILE),
+              shipped_list if isinstance(shipped_list, str) else json.dumps(shipped_list))
+    return outer, app
+
+
+def shipped(top):
+    """Follow-up ruling 2: the jobs a demo shipped with are left out."""
+    print("\n-- the jobs a demo shipped with are left out (follow-up ruling 2)")
+    here = make_here(os.path.join(top, "shipped"))
+    outer, app = make_demo(top, "Demo with list", ["Test.json", "Demo Kitchen.json"])
+    point_api(here)
+    before = tree(here)
+    r = api.import_scan({"path": outer})
+    jobs = {i["name"]: (i["action"], i["note"]) for i in r["items"] if i["kind"] == "job"}
+    check("both shipped jobs listed shipped (the friend's edit or not), his own job new", jobs,
+          {"Test": ("shipped", ""), "Demo Kitchen": ("shipped", ""),
+           "Mine": ("new", "")})
+    check("the list itself is not offered", any("shipped-jobs" in i["name"] for i in r["items"]), False)
+    check("the counts", (r["counts"]["shipped"], r["counts"]["new"]), (2, 1))
+    check("no 'no list' note when there is a list", IMP.NO_SHIPPED_LIST in r["notes"], False)
+    check("the preview wrote nothing", tree(here), before)
+    run = api.import_run({"path": outer, "signature": r["signature"]})
+    rep = run["report"]
+    check("only the friend's own job is imported", rep["imported"]["job"], 1)
+    after = tree(here)
+    check("exactly jobs/Mine.json is written, nothing else",
+          (sorted(set(after) - set(before)), sorted(k for k in before if before[k] != after.get(k))),
+          (["jobs/Mine.json"], []))
+    check("the report counts them", rep["shipped"], ["Demo Kitchen.json", "Test.json"])
+    check("... and says so",
+          "Left out 2 projects shipped with the demo: Demo Kitchen.json, Test.json." in rep["text"], True)
+
+    print("\n-- the same folder without the list")
+    here2 = make_here(os.path.join(top, "shipped-nolist"))
+    outer2, _ = make_demo(top, "Demo without list", None)
+    point_api(here2)
+    r2 = api.import_scan({"path": outer2})
+    jobs2 = {i["name"]: (i["action"], i["to"]) for i in r2["items"] if i["kind"] == "job"}
+    check("today's behaviour: every job considered", jobs2,
+          {"Test": ("renamed", "Test (imported)"), "Demo Kitchen": ("new", ""), "Mine": ("new", "")})
+    check("the preview says why", r2["notes"], [IMP.NO_SHIPPED_LIST])
+    rep2 = api.import_run({"path": outer2, "signature": r2["signature"]})["report"]
+    check("the report says so, once", rep2["text"].count(IMP.NO_SHIPPED_LIST), 1)
+
+    here3 = make_here(os.path.join(top, "shipped-bad"))
+    outer3, _ = make_demo(top, "Demo with a bad list", "{ not a list")
+    point_api(here3)
+    r3 = api.import_scan({"path": outer3})
+    check("a list that cannot be read is no list: every job considered, and said so",
+          (sorted(i["action"] for i in r3["items"] if i["kind"] == "job"),
+           any(IMP.SHIPPED_FILE in n and "could not be read" in n for n in r3["notes"])),
+          (["new", "new", "renamed"], True))
+
+
+def demo_list(top):
+    """build_demo.assemble writes the list; the zip listing names it; the
+    importer reads it; the demo's own Load list does not offer it."""
+    print("\n-- the demo build writes the list")
+    import build_demo as BD
+    dist = os.path.join(top, "fake-dist")
+    write(os.path.join(dist, BD.EXE), b"MZ")
+    stage = os.path.join(top, "fake-stage")
+    BD.assemble(dist, stage, datetime.date(2026, 12, 2))
+    app = os.path.join(stage, BD.APP_FOLDER)
+    copied = sorted(n for n in os.listdir(os.path.join(ROOT, "jobs")) if n.endswith(".json"))
+    check("assemble writes jobs/shipped-jobs.json naming exactly the jobs it copied",
+          (read(os.path.join(app, "jobs", IMP.SHIPPED_FILE)),
+           sorted(n for n in os.listdir(os.path.join(app, "jobs")) if n != IMP.SHIPPED_FILE)),
+          (copied, copied))
+    zpath = os.path.join(top, "fake.zip")
+    BD.make_zip(stage, zpath)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        BD.inspect(zpath)
+    check("the zip listing names it", f"({IMP.SHIPPED_FILE}): {', '.join(copied)}" in out.getvalue(), True)
+    here = make_here(os.path.join(top, "demo-here"))
+    point_api(here)
+    r = api.import_scan({"path": stage})
+    check("the importer reads it: the jobs the build copied are listed shipped",
+          sorted(i["name"] + ".json" for i in r["items"] if i["action"] == "shipped"), copied)
+    point_api(app)
+    check("the demo's Load list does not offer the list", api.job_list({})["jobs"], copied)
+
+
 def asdict_board(b):
     from dataclasses import asdict
     return asdict(b)
@@ -534,6 +717,9 @@ def main():
         importing(here, outer, app, scan)
         raw_repoint()
         renames(top)
+        prices(top)
+        shipped(top)
+        demo_list(top)
     finally:
         (api.ROOT, api.JOBS_DIR, api.PICTURES_DIR, api.OUT_DIR, api.DELETED_DIR,
          B.LIBRARY, H.LIBRARY) = saved

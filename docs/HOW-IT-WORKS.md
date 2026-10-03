@@ -31,6 +31,8 @@ Python needed on their machine. It stops working 60 days after the build.
    `jobs/*.json` (**not `jobs/_deleted/`**, ruled 30 Sept 2026), `Pictures/`,
    `app/index.html`, `app/view3d.js`, `app/vendor/`, `app/cupboard.ico`.
    `READ ME FIRST.txt` sits beside the `Cupboard App Demo` folder in the zip.
+   `jobs/shipped-jobs.json` lists the job files it copied (the zip listing names
+   it): Import leaves those out, Load does not offer the list (3 Oct 2026).
 
 **Demo mode is `app/demo.py`**, off unless `_demo_build.py` exists, so a normal
 run behaves exactly as before. On: start-up past `EXPIRES` shows "This demo of

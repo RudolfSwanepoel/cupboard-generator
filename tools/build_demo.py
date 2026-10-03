@@ -14,11 +14,14 @@
    with no console, the icon, `Cupboard App Demo.exe`.
 4. Deletes `app/_demo_build.py` again, whatever happened, so a normal
    `python run_app.py` is never in demo mode.
-5. Copies in the data the app reads (ruling 3: nothing held back) and zips it
-   to `demo/Cupboard App Demo <build date>.zip`, `READ ME FIRST.txt` beside the
+5. Copies in the data the app reads (ruling 3: nothing held back), writes
+   `jobs/shipped-jobs.json` — the job file names it copied, so a later Import
+   leaves them out (import follow-up brief, 3 October 2026) — and zips it to
+   `demo/Cupboard App Demo <build date>.zip`, `READ ME FIRST.txt` beside the
    app folder.
 6. Lists the zip: no `.py` / `.pyc` of this repo may be in it, and nothing the
-   brief keeps out. Then says where the zip is, its size and the expiry date.
+   brief keeps out; names the shipped-jobs list. Then says where the zip is,
+   its size and the expiry date.
 
 The data is copied by name, never by exclusion, so nothing new in the repo can
 reach the zip by accident. `jobs/_deleted/` (the app's bin) stays out — ruled by
@@ -27,6 +30,7 @@ Rudolf, 30 September 2026.
 import argparse
 import datetime
 import glob
+import json
 import os
 import shutil
 import subprocess
@@ -37,6 +41,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 from app.demo import say  # noqa: E402
+from cabinetgen.importer import SHIPPED_FILE  # noqa: E402
 
 DAYS = 60
 EXE = "Cupboard App Demo.exe"
@@ -149,8 +154,13 @@ def assemble(dist: str, stage: str, expires: datetime.date):
                         ignore=shutil.ignore_patterns("__pycache__", "*.py", "*.pyc"))
     jobs = os.path.join(app_dir, "jobs")
     os.makedirs(jobs, exist_ok=True)
+    shipped = []
     for path in sorted(glob.glob(os.path.join(REPO, "jobs", JOBS_GLOB))):
         shutil.copy2(path, jobs)
+        shipped.append(os.path.basename(path))
+    # The jobs it shipped with, by file name: Import leaves these out (data, not code).
+    with open(os.path.join(jobs, SHIPPED_FILE), "w", encoding="utf-8") as fh:
+        json.dump(shipped, fh, indent=2)
     with open(os.path.join(stage, "READ ME FIRST.txt"), "w", encoding="utf-8-sig",
               newline="\r\n") as fh:
         fh.write(README.format(expiry=say(expires)))
@@ -172,6 +182,8 @@ def inspect(zpath: str) -> bool:
     """List the zip. False if any of this repo's code, or anything kept out, is in it."""
     with zipfile.ZipFile(zpath) as z:
         names = [n.replace("\\", "/") for n in z.namelist()]
+        listed = [n for n in z.namelist() if n.replace("\\", "/").endswith("jobs/" + SHIPPED_FILE)]
+        shipped = json.loads(z.read(listed[0]).decode("utf-8")) if listed else None
     inner = [n.split("/", 1)[1] if n.startswith(APP_FOLDER + "/") else n for n in names]
     source = [n for n in names if n.lower().endswith((".py", ".pyc", ".pyo", ".pyw"))]
     repo_code = [n for n, i in zip(names, inner) if n in source and i.startswith(REPO_CODE)]
@@ -185,6 +197,8 @@ def inspect(zpath: str) -> bool:
     print(f"  of them this repo's own code: {len(repo_code)}")
     print(f"  things the brief keeps out: {len(kept_out)}"
           + ("" if not kept_out else "\n    " + "\n    ".join(kept_out)))
+    print(f"  the jobs it shipped with ({SHIPPED_FILE}): "
+          + (", ".join(shipped) or "none" if shipped is not None else "NO LIST — Import would take them"))
     print(f"  compiled runtime pieces (.exe / .dll / .pyd): {len(runtime)}")
     for r in runtime:
         print(f"    {r}")

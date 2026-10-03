@@ -54,6 +54,18 @@ in a quieter form (the job's copy was what it was cut from there, and opening
 it here would refresh it from this library's record of that id). Such a copy
 comes in as a board of its own, "(imported)", and that job is re-pointed.
 
+**A price is not an identity** (follow-up brief, ruling 1, 3 October 2026).
+A board or runner whose record differs from this library's only in its price
+(`Board.price`, `Runner.price`) is identical: skipped, and this library's price
+kept. Any other difference is a conflict as above.
+
+**The jobs a demo shipped with are left out** (follow-up brief, ruling 2). A
+demo carries `jobs/shipped-jobs.json`, the job file names `tools/build_demo.py`
+put there; those jobs are listed `shipped` and never imported, whether or not
+the friend changed them, and the list itself is never a job. A folder without
+the list (the 30 September demo, another laptop) has every job considered, and
+the report says so in one line.
+
 **Old jobs come in through the normal migration** (ruling 9): `store`'s
 `job_from_dict`, exactly as Load reads them, saved in the current format. A job
 from a NEWER version — one carrying a field this app does not know — is brought
@@ -80,6 +92,8 @@ DEMO_FOLDER = "Cupboard App Demo"      # tools/build_demo.py's APP_FOLDER
 JOBS = "jobs"
 BOARDS_FILE = "boards.json"
 HARDWARE_FILE = "hardware.json"
+SHIPPED_FILE = "shipped-jobs.json"     # tools/build_demo.py writes it into the demo's jobs/
+NO_SHIPPED_LIST = "No list of shipped jobs in this folder: every job was considered."
 KINDS = ("job", "board", "runner", "picture")
 KIND_PLURAL = {"job": ("project", "projects"), "board": ("board", "boards"),
                "runner": ("runner", "runners"), "picture": ("picture", "pictures")}
@@ -125,11 +139,30 @@ class Target:
 
 
 def _job_files(jobs_dir: str) -> List[str]:
-    """The `*.json` file names directly in `jobs/` — never `_deleted/`."""
+    """The `*.json` file names directly in `jobs/` — never `_deleted/`, and
+    never a demo's list of the jobs it shipped with, which is not a job."""
     if not os.path.isdir(jobs_dir):
         return []
     return sorted(n for n in os.listdir(jobs_dir)
-                  if n.lower().endswith(".json") and os.path.isfile(os.path.join(jobs_dir, n)))
+                  if n.lower().endswith(".json") and not same_name(n, SHIPPED_FILE)
+                  and os.path.isfile(os.path.join(jobs_dir, n)))
+
+
+def shipped_jobs(jobs_dir: str):
+    """The job file names a demo shipped with, from its `jobs/shipped-jobs.json`
+    (a JSON list of names): a set of casefolded names, None when there is no
+    such file, or the reason it cannot be read as a str."""
+    path = os.path.join(jobs_dir, SHIPPED_FILE)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            names = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return f"{type(exc).__name__}: {exc}"
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        return "it is not a list of job file names"
+    return {n.casefold() for n in names}
 
 
 def _readable_job(path: str) -> bool:
@@ -253,7 +286,7 @@ class Item:
     """One line of the preview: an item, and what will happen to it."""
     kind: str                  # job | board | runner | picture
     name: str                  # its name in the old folder
-    action: str                # new | identical | renamed | broken
+    action: str                # new | identical | renamed | broken | shipped
     to: str = ""               # the name it comes in under (renamed), or matched (identical)
     note: str = ""             # why, or what else to know
     id: str = ""               # board / runner: its id in the old folder
@@ -284,7 +317,7 @@ class Plan:
                 "counts": self.counts()}
 
     def counts(self) -> dict:
-        c = {a: 0 for a in ("new", "identical", "renamed", "broken")}
+        c = {a: 0 for a in ("new", "identical", "renamed", "broken", "shipped")}
         for i in self.items:
             c[i.action] = c.get(i.action, 0) + 1
         return c
@@ -298,19 +331,35 @@ def _read_bytes(path: str) -> Optional[bytes]:
         return None
 
 
+def _board_record(b: B.Board) -> dict:
+    """A board as it is compared under its own id and name: everything but the
+    price (follow-up ruling 1 — a price-only difference is not a conflict)."""
+    d = asdict(b)
+    d.pop("price", None)
+    return d
+
+
 def _board_body(b: B.Board) -> dict:
     """A board with its id and name set aside: what makes two boards the same
     board under two names. The edging is compared by its TOKEN, which is what
-    a renamed board keeps (see the module docstring)."""
-    d = asdict(b)
+    a renamed board keeps (see the module docstring). Not the price."""
+    d = _board_record(b)
     for k in ("id", "name", "tape"):
         d.pop(k, None)
     d["token"] = b.token
     return d
 
 
-def _runner_body(r: H.Runner) -> dict:
+def _runner_record(r: H.Runner) -> dict:
+    """A runner as it is compared under its own id and name: its record, all
+    but the price (per pair) — follow-up ruling 1."""
     d = H.to_record(r)
+    d.pop("price", None)
+    return d
+
+
+def _runner_body(r: H.Runner) -> dict:
+    d = _runner_record(r)
     d.pop("id", None)
     d.pop("name", None)
     return d
@@ -401,7 +450,7 @@ class _Scanner:
             if k == 0:
                 same_id = B.find(self.lib, b.id)
                 same_nm = next((x for x in self.lib if same_name(x.name, b.name)), None)
-                if same_id is not None and asdict(same_id) == asdict(b):
+                if same_id is not None and _board_record(same_id) == _board_record(b):
                     if item:
                         self.plan.items.append(Item("board", b.name, "identical", to=b.name,
                                                     id=b.id, to_id=b.id))
@@ -474,7 +523,7 @@ class _Scanner:
             if k == 0:
                 same_id = H.find(self.rlib, r.id)
                 same_nm = next((x for x in self.rlib if same_name(x.name, r.name)), None)
-                if same_id is not None and H.to_record(same_id) == H.to_record(r):
+                if same_id is not None and _runner_record(same_id) == _runner_record(r):
                     self.plan.items.append(Item("runner", r.name, "identical", to=r.name,
                                                 id=r.id, to_id=r.id))
                     self.runner_names[r.id] = r.name
@@ -604,7 +653,18 @@ class _Scanner:
         First, so the ids they name are known before any new id is given out."""
         src_jobs = os.path.join(self.src, JOBS)
         self.parsed = []
+        shipped = shipped_jobs(src_jobs)
+        if shipped is None:
+            self.plan.notes.append(NO_SHIPPED_LIST)
+        elif isinstance(shipped, str):
+            self.plan.notes.append(f"jobs\\{SHIPPED_FILE} could not be read ({shipped}) — "
+                                   f"every job was considered.")
+            shipped = None
         for fname in _job_files(src_jobs):
+            if shipped is not None and fname.casefold() in shipped:
+                # Ruling 2: never read, never imported — its board ids reserve nothing.
+                self.plan.items.append(Item("job", fname[:-5], "shipped"))
+                continue
             path = os.path.join(src_jobs, fname)
             try:
                 with open(path, encoding="utf-8") as fh:
@@ -694,6 +754,9 @@ def report_text(rep: dict) -> str:
         lines.append("Nothing new to import.")
     if rep["identical"]:
         lines.append(f"Skipped {rep['identical']} identical.")
+    if rep.get("shipped"):
+        lines.append(f"Left out {_plural(len(rep['shipped']), 'job')} shipped with the demo: "
+                     + ", ".join(rep["shipped"]) + ".")
     if rep["renamed"]:
         lines.append("Renamed: " + ", ".join(f"{a} → {b}" for a, b in rep["renamed"]) + ".")
     for name, why in rep["failed"]:
@@ -725,7 +788,7 @@ def run(path: str, target: Target, signature: str = "",
                                       "project again to see what it holds now. Nothing "
                                       "was imported."}
     done = {k: 0 for k in KINDS}
-    renamed, failed, newer = [], [], []
+    renamed, failed, newer, shipped = [], [], [], []
     if plan.pictures:
         os.makedirs(target.pictures_dir, exist_ok=True)
     for src, name in plan.pictures:
@@ -760,6 +823,8 @@ def run(path: str, target: Target, signature: str = "",
     for i in plan.items:
         if i.action == "identical":
             identical += 1
+        elif i.action == "shipped":
+            shipped.append(i.name + ".json")
         elif i.action == "broken":
             failed.append((i.name + ".json" if i.kind == "job" else i.name, i.note))
         elif i.action == "renamed":
@@ -767,7 +832,7 @@ def run(path: str, target: Target, signature: str = "",
                 renamed.append((i.name, i.to))
         if i.kind == "job" and i.action in ("new", "renamed") and "newer version" in i.note:
             newer.append((i.to or i.name) + ".json")
-    rep = {"imported": done, "identical": identical, "renamed": renamed,
+    rep = {"imported": done, "identical": identical, "shipped": shipped, "renamed": renamed,
            "failed": failed, "newer": newer, "notes": list(plan.notes),
            "jobs": sorted(written)}
     rep["text"] = report_text(rep)

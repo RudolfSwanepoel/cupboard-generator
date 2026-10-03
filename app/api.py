@@ -1809,7 +1809,10 @@ def accept(payload):
 
 def job_list(payload):
     os.makedirs(JOBS_DIR, exist_ok=True)
-    names = sorted(os.path.basename(p) for p in glob.glob(os.path.join(JOBS_DIR, "*.json")))
+    # A demo's jobs/ also holds shipped-jobs.json, the list of the jobs it was
+    # built with (Import reads it): not a job, so not offered to Load.
+    names = sorted(os.path.basename(p) for p in glob.glob(os.path.join(JOBS_DIR, "*.json"))
+                   if not IMP.same_name(os.path.basename(p), IMP.SHIPPED_FILE))
     return {"ok": True, "jobs": names}
 
 

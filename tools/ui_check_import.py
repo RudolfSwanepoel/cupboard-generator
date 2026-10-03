@@ -1,7 +1,7 @@
 """Import project and the project Rename in the running app (brief of 3 October
 2026), with a real mouse (Playwright, optional).
 
-    python tools/ui_check_import.py [--port N] [--stage import|rename]
+    python tools/ui_check_import.py [--port N] [--stage import|rename|shipped]
 
 Unlike the other ui_check scripts this one STARTS ITS OWN APP: Import writes
 jobs, boards, runners and pictures, and a check never writes live workshop
@@ -22,6 +22,9 @@ Stages:
           refused under the field and nothing written; a free name moves the
           file and the output folder, and the job on screen follows; Save onto
           another job's name refused.
+  shipped A demo whose jobs\\shipped-jobs.json lists the jobs it shipped with:
+          the preview shows each as a `shipped` row, left out, and the
+          friend's own job as new (follow-up brief, 3 October 2026).
 
 Screenshots into output/_checks/ui_check_import/.
 Playwright is the only third-party package anywhere near this app and only the
@@ -52,7 +55,7 @@ import check_import as CI                                      # noqa: E402  (th
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--port", type=int, default=0, help="default: a free one")
-ap.add_argument("--stage", default="", help="import | rename (default: both)")
+ap.add_argument("--stage", default="", help="import | rename | shipped (default: all)")
 ap.add_argument("--headed", action="store_true")
 args = ap.parse_args()
 if not args.port:
@@ -196,6 +199,29 @@ def stage_import(page, here, top, outer, app):
     shot(page, "import_boards")
 
 
+def stage_shipped(page, top):
+    """Follow-up ruling 2: a demo that lists the jobs it shipped with previews
+    them as `shipped` — left out — and its owner's own job as new."""
+    print("\nImport project: a demo's shipped jobs are left out")
+    souter, _ = CI.make_demo(top, "Demo with list", ["Test.json", "Demo Kitchen.json"])
+    page.click("#importproj")
+    page.wait_for_selector("#importdlg[open] #importpath", timeout=5000)
+    page.fill("#importpath", souter)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#importdlg #importgo", timeout=10000)
+    shot(page, "import_shipped")
+    rows = dict(page.evaluate("() => [...document.querySelectorAll('#importdlg [data-impitem]')]"
+                              ".map((r) => [r.dataset.impitem, [r.children[2].className, "
+                              "r.children[2].textContent.trim()]])"))
+    check("a demo's shipped jobs: a shipped row each in the preview",
+          [rows.get("job:Test"), rows.get("job:Demo Kitchen")],
+          [["act-shipped", "shipped with the demo — left out"]] * 2)
+    check("  the friend's own job comes in", rows.get("job:Mine"), ["act-new", "new — comes in"])
+    check("  the summary counts them",
+          "2 shipped with the demo left out" in page.inner_text("#importbody"), True)
+    page.click("#importdlg [data-imp='cancel']")
+
+
 def stage_rename(page, here):
     print("\nRename: the project, Save onto another's name, a picture, a board")
     if not page.evaluate("() => S.file"):
@@ -302,6 +328,8 @@ def main() -> int:
                 stage_import(page, here, top, outer, app)
             if args.stage in ("", "rename"):
                 stage_rename(page, here)
+            if args.stage in ("", "shipped"):
+                stage_shipped(page, top)
             check("no script errors in the page", errors, [])
             browser.close()
     finally:
