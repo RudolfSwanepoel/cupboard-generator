@@ -112,6 +112,61 @@ gitignored; never commit an .exe or a zip.
 
 ## Status
 
+**Room redo, Phase 2 of 4 — drawing and editing walls on the plan (3 October
+2026, brief `Claude outputs/room-redo-phase2-brief-2026-10-03.md`, ruled by
+Rudolf; Phases 3-4 — openings, free cabinets — NOT built).** Six commits, one
+per ruling group (1-2, 10-11, 3-4, 5, 6, 7-9); `check_all` 23 of 23 at each;
+benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50);
+`snapshot.py --compare` against the tree before: every panel, issue and total
+identical on every job, only Test.json's plan SVG moved (its `<svg>` carries
+the mm mapping, its labels their wall). `ui_check_walls` passes every stage
+(old and new); `ui_check_restructure`, `ui_check_attached`, `ui_check_drawers`
+pass; `ui_check_3d` fails f3's zoom-to-cursor drift (6.4 px) every run and f4's
+"within a second of the keystroke" (1.7-2 s) in one run of two — both the
+same on the tree before this work (6e87fcf, run in a worktree): this
+machine's SwiftShader, not this brief. Full write-up in `docs/ROOM-LAYOUT-SPEC.md`, **Ruled — 3 Oct
+2026**. The short form:
+
+1. **Open / closed has one source, `room.closure`** (`{closed, miss, at,
+   level, text}`). A typed figure leaves a loop open by the miss, said
+   everywhere as "Loop opens by n mm at D→A — type the other walls or drag a
+   corner" — the Room card pill, the table's open corner, the Wall card, the
+   toast (now off the COMPUTE, `closureToast`, not the edit's reply), the
+   plan's tint, the 3D note, Validation's `room-closure` — and it closes by
+   itself within `join_tolerance`. `Standard.loop_miss_max` 1000 (NEW,
+   display only) tells a loop that opened from an open run on purpose.
+2. **Draw walls is a mode of the plan** (the `#drawsvg` canvas is gone): the
+   plan carries its mm mapping (`data-mmx`, `data-mmy`, `data-pad`,
+   `data-scale`; `planMap` / `mmToSvg` / `svgToMm` / `mmToScreen`) and, on the
+   Room tab, `render.PLAN_MARGIN_MM` 800 to draw into; cabinets ghost while
+   drawing; a grid over it (`gridSvg`); an empty room is a 6 x 4 m sheet. The
+   plan is asked for at its card's size, so 100% fits (the 100% button re-fits); Gaps full
+   width, Plinth | Placements side by side, notes behind "?".
+3. **Drags**: a corner's handle (`.cornerhandle`, on hover) → `room.corner_move`;
+   a wall's body → `room.wall_move` (neighbours keep their direction, a 90
+   stays 90); what stands on a changed wall keeps its x, clamped and reported
+   (`room.keep_on_walls`). **Snaps** off `room.room_snaps` (`/api/room-snaps`,
+   one call per press): corner, point on a wall (Draw), alignment through
+   every other corner, angle (90/180 to the neighbour, plan axes, 45, 15),
+   length step; named beside the cursor; Shift frees; Esc restores.
+4. **Lengths typed on the plan**: each label a text box (`planLengths`),
+   Enter → `/api/wall-set`, Esc, Tab to the next wall in walk order.
+5. **Drawing finished**: start on a wall to split it (`room.split_wall`,
+   `/api/wall-split`) — a T-wall; a digit opens a length box (Tab: the
+   corner's angle; Backspace in an empty box: the last corner off); end on
+   any corner.
+6. **Wall nook** (`room.wall_nook`, `/api/wall-nook`, a toolbar mode), **Add
+   back face** (`room.add_back_face`, the Wall card), **Flip room**
+   (`room.flip_room`, `/api/room-flip-all`, asked when Flip face is pressed
+   on a wall of a closed room — `in_loop` on each wall in `_room_info`).
+
+**For Rudolf:** (a) `loop_miss_max` 1000 is Claude's figure — a closed room's
+loop opened by more than a metre by a typed figure reads as an open run;
+(b) a corner unit in a corner is not re-run into the corner when a wall is
+dragged (its x is kept, as ruled), so Validation's out-of-corner warning is
+what tells you; (c) Test.json's own room is an open L, so the `closure` stage
+closes it with walls C and D in the page (never saved).
+
 **Room redo, Phase 1 of 4 — walls become positioned segments (2 October 2026,
 brief `Claude outputs/room-redo-phase1-brief-2026-10-02.md`, ruled by Rudolf;
 Phases 2-4 — the draw mode, openings and obstructions, free cabinets — NOT
@@ -1291,6 +1346,16 @@ dirty. Nothing else about either changed.
 | Draw walls | a button in the plan's header; REPLACED the room, re-oriented to +X | the **toolbar**'s Draw walls (Select is the default, Esc returns to it) and the Room card's button; ADDS to the room, starts on an existing corner clicked near, the points kept as drawn |
 | Which side the room is | not shown | **shown**: a closed room's floor tinted; an open run's or a free wall's face side a fading band; the thickness hatched on the back |
 | Wall height | — | the Room card's **Height (mm)** column and the Wall card (blank = the ceiling); the elevation and 3D draw the wall to it |
+| Open / closed, the loop's miss | the Room card's own pill, the toast off `/api/wall-set` | **one answer, `room.closure`** — the pill, the table's open corner, the Wall card, the toast (off the compute), the plan, the 3D note, Validation — room redo Phase 2, 3 Oct 2026 |
+| Draw walls' canvas | a grid canvas of its own (`#drawsvg`) swapped in for the plan | **the plan itself** (a mode: grid over it, cabinets ghosted, `#drawlayer`) |
+| A wall's length | typed in the Room card or the Wall card | also **on the plan**: its length label is a text box (Enter, Esc, Tab to the next wall) |
+| Reshaping the room | typed lengths and angles only | also **drag a corner** (its handle, on hover) or **drag a wall** by its body, with snaps (corner, alignment, angle, length), Shift free, Esc restores |
+| Typed lengths while drawing | — | a digit opens a length box at the cursor; Tab the corner angle |
+| A T-wall | — | Draw walls starting on a point of a wall: it is split there |
+| A recess / nib | — | the toolbar's **Wall nook**: click a wall, width, depth, distance |
+| A partition (two faces) | — | the Wall card's **Add back face** |
+| Flip face on a closed room | flipped the one wall | asks: **Flip room** / Flip just B / Cancel |
+| Gaps, Placements, Plinth cards | three cards side by side under the plan, notes in the cards | **Gaps** full width; **Plinth** and **Placements** side by side under it; notes behind a **?** |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**
@@ -2300,8 +2365,10 @@ cabinetgen/scene.py        the 3D scene, built here from room.solid_parts and on
 cabinetgen/room.py         walls as positioned segments (2 Oct 2026): connections, the walk,
                            corner angles, closure derived; set_length / set_corner / add_wall /
                            flip_face / renumber_walls / delete_wall; walls_from_points (Draw
-                           walls, adds); _legacy_frames (migration only); to_world. The only
-                           trigonometry.
+                           walls, adds); _legacy_frames (migration only); to_world. Phase 2
+                           (3 Oct): closure (THE open/closed answer), corner_move, wall_move,
+                           keep_on_walls, room_snaps, split_wall, wall_nook, add_back_face,
+                           flip_room. The only trigonometry.
 cabinetgen/store.py        job files: JSON save / load
 cabinetgen/export_plaza.py Plazaboard CSV + costing off the real rate card
 run_app.py                 starts the local server, opens the window (maximised); under
@@ -2348,7 +2415,8 @@ tools/check_room.py        room geometry on points: migration (every legacy room
                            flip_face, height, single_wall, touching, delete; closure, to_world,
                            the plan, isolate, the job file; the angled-room pins (L / hexagon /
                            splay / bay, crossing walls, drawn walls, ruling 4, plinth butt,
-                           gaps, elevations, 3D floor, swing, tip-up)
+                           gaps, elevations, 3D floor, swing, tip-up); Phase 2: closure_text,
+                           corner_move, wall_move, snaps, split, nook, backface, flip_all
 tools/check_fillers.py     gap detection, taper, scribe, filler panels
 tools/check_plinth.py      runs, butt joints, long-run splits, plinth panels
 tools/check_drag.py        overlaps, snap targets both axes, swings, pull-outs;
@@ -2386,9 +2454,11 @@ tools/ui_shots_3d.py       the four 3D screenshots the realism brief compares, b
                            (Playwright), into Claude outputs/3d-realism-screenshots/
 tools/ui_check_attached.py attached panels in the running app (Playwright)
 tools/ui_check_walls.py    the Room tab on positioned walls (Playwright): the toolbar, the Room
-                           and Wall cards, Draw walls adding and starting on a corner, a one-wall
-                           room, Flip face, Renumber, wall height, refused inputs, a drag onto a
-                           45-degree wall, 3D; screenshots into output/_checks/ui_check_walls/
+                           and Wall cards, Draw walls ON the plan, a one-wall room, Flip face,
+                           Renumber, wall height, refused inputs, a drag onto a 45-degree wall,
+                           3D; Phase 2: closure (every display), layout, cornerdrag, walldrag,
+                           align, angle, label, typedraw, split, nook, flipall; screenshots
+                           into output/_checks/ui_check_walls/
 tools/ui_check_restructure.py  the UI restructure in the running app (Playwright),
                            with screenshots into output/_checks/ui_check_restructure/
 tools/fixtures/            frozen job files the checks read. Never reachable from the app.
@@ -3796,8 +3866,10 @@ wall elevations are in Room -> Elevation. See the Status entry and **The
 Cabinets tab's 3D**.
 
 **Room -> Plan since the room redo (2 October 2026)**: a slim toolbar on the
-left (Select, the default; Draw walls; Esc returns to Select — Phase 2 adds
-Nook, Phase 3 the openings palette), the plan in the middle (zoom and layer
+left (Select, the default; Draw walls; Wall nook (Phase 2); Esc returns to
+Select — Phase 3 adds the openings palette). Since Phase 2 (3 Oct) the plan is
+also where walls are drawn, dragged by a corner or the body, and their
+lengths typed — see the Status entry; the plan in the middle (zoom and layer
 chips in its header; click a wall's line to select it, a cabinet to select it,
 empty canvas to select the room), and the dock on the right showing what is
 selected: the **Room card** (name, ceiling mm, offset depth mm, Draw walls,
@@ -3985,8 +4057,10 @@ the left, the back. Everything a room used to store is derived in `room.py`:
   from its head (for a loop, its lowest letter); chains come in the order of
   their lowest letter, free walls last; the room is the first closed chain,
   else the first chain. `corner_points` is the main chain; `closure_error`
-  is a near miss within `closure_block` only — a bigger miss is simply an
-  open run and nothing is said.
+  is now `room.closure`'s miss (Phase 2, ruling 1): a main chain of three or
+  more walls missing by up to `loop_miss_max` is a LOOP THAT OPENED, said as
+  "Loop opens by n mm at D→A — …" by every display; a bigger miss is an open
+  run and nothing is said.
 - `corner_angle(rm, wall)` is the interior angle AFTER that wall, to 0.1°
   (`corner_angle_exact` for geometry — a gap's taper); `corner_before` the
   one before it; `out_of_square` the mm a site would read at
@@ -4000,7 +4074,10 @@ the left, the back. Everything a room used to store is derived in `room.py`:
   can be typed and the loop opens where the walk came back), `set_out_of_square`,
   `add_wall(after= | before=)` at 90 off a free end, `walls_from_points` adds,
   `flip_face` swaps the ends and re-measures what is on the wall from the
-  other end, `renumber_walls` re-letters along the walk, `delete_wall`.
+  other end, `renumber_walls` re-letters along the walk, `delete_wall`;
+  since Phase 2 `corner_move`, `wall_move` (what stands on a changed wall
+  keeps its x, `keep_on_walls`), `split_wall`, `wall_nook`, `add_back_face`,
+  `flip_room`, and `room_snaps` for every drag and drawing on the plan.
 - **Letters are for life**: nothing re-letters a wall but Renumber. A new
   wall takes the first unused letter, AA after Z (`next_wall_id`).
 - **Migration, once**: `store.room_from_dict` reads the old keys (`length`,
@@ -4010,7 +4087,8 @@ the left, the back. Everything a room used to store is derived in `room.py`:
   with offsets at every corner is now a migration case in `check_room.py`.
 
 Thresholds live in `Standard` like every other dimension: `closure_warn`,
-`closure_block`, `join_tolerance`, `wall_thickness`, `square_within`.
+`closure_block`, `loop_miss_max`, `join_tolerance`, `wall_thickness`,
+`square_within`.
 
 **Layers** come from `room.layer_of`: kind `tall` is tall, kind `upper` is wall,
 anything else off the floor (`Placement.z > 0`) is wall, everything else is

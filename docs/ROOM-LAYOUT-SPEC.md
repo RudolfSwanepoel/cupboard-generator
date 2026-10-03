@@ -1031,7 +1031,7 @@ had no position of its own. Four phases; this is the first.
 2. **Drawing** — the integrated draw mode: typed lengths while drawing, join
    on an existing corner, a wall drawn onto a wall splits it (T-walls,
    nooks), drag a corner to reshape, drag a wall to move it parallel, a Nook
-   tool. Not built.
+   tool. **Built 3 October 2026** — see **Ruled — 3 Oct 2026** below.
 3. **Openings and obstructions** — a palette (Door, Window, Arch,
    Obstruction) dragged onto a wall, edited in the dock and by drag in plan
    and elevation, a room door's swing into a cabinet as a WARNING. Not built.
@@ -1114,4 +1114,120 @@ point within `snap_tolerance` of an existing corner joins it) are the API;
 `/api/room-extend` and `/api/room-flip` are gone. The room side is SHOWN in
 the plan: a closed room's floor tinted, an open run's or a free wall's face
 side a 300 mm band fading out (`render.ROOM_TINT`, `ROOM_BAND_MM`).
+
+
+## Ruled — 3 Oct 2026 (room redo, Phase 2: drawing and editing walls on the plan)
+
+Brief `Claude outputs/room-redo-phase2-brief-2026-10-03.md`, agreed with
+Rudolf the same day (rulings 10 and 11 added after he tested Phase 1).
+Nothing from Phase 3 (openings) or Phase 4 (free cabinets) is built. One
+commit per ruling group: 1-2, 10-11, 3-4, 5, 6, 7-9; `check_all` green at
+each, the benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6,
+R28,363.50), `snapshot.py --compare` against the tree before: every panel,
+issue and total identical on every job — only Test.json's plan SVG moved
+(the plan now carries its mm mapping and its labels' wall ids).
+
+**The eleven rulings** (build to these; don't reopen them):
+
+1. **A typed length or angle on a closed room leaves the loop OPEN by the
+   miss.** It is the closure check: a measuring mistake is never absorbed
+   into a wall. Said everywhere as **"Loop opens by n mm at D→A — type the
+   other walls or drag a corner"**, and it closes by itself once the miss is
+   within `join_tolerance`. A main chain of three or more walls whose ends
+   miss by up to `Standard.loop_miss_max` (1000, NEW, display only, for
+   Rudolf to confirm) is a loop that opened; beyond it the walls are an open
+   run on purpose (a U's open side) and nothing is said. Validation: over
+   `closure_block` a CRITICAL, over `closure_warn` a WARNING, in the same
+   words (`room-closure`).
+2. **Open / closed has ONE source: `room.closure(rm)`** — `{closed, miss,
+   at, level, text}`. Every display reads it off the same compute:
+
+   | Display | Reads |
+   |---|---|
+   | Room card pill | `_room_info.closure` (text and level) |
+   | Toast when the loop opens / closes | the compute's `closure` against the previous compute's (`closureToast`), not the edit's reply |
+   | Room card table, the open corner | `closure.at` — "— opens n mm" |
+   | Wall card, corner before / after | `closure.at` — the full text |
+   | Plan: floor tint vs face bands | `render._plan_room_side` → `closure` |
+   | 3D: the note over the view | the scene's `room.closure` (the same function) |
+   | Validation `room-closure` | `closure` |
+   | `_room_info.closed` / `closure_error` | `closure`'s `closed` / `miss` |
+   | Gaps (corner taper), Plinth (butt, `plinth-corner`), the elevation's neighbours, corner shadows | `room.connections`, which `closure` is derived from |
+
+   Pinned in `check_room.py` `closure_text()` and `ui_check_walls.py --stage
+   closure` (Test.json as frozen in `Test_3d.json`, its L closed into a
+   rectangle in the page — Test.json's own room is an open L, which a typed
+   length cannot open).
+3. **Dragging edits walls directly, in Select mode.** A corner's round
+   handle (shown on hover) drags it: every wall end on it moves
+   (`room.corner_move`, `/api/corner-move`); dropped on another corner it
+   joins it. A wall's body drags it parallel (`room.wall_move`,
+   `/api/wall-move`, offset along its normal, + into the room): each wall
+   joined at its ends keeps its other end and its direction and the joint
+   slides along it, so a 90 stays 90; only a neighbour in line with it turns.
+   What stands on a wall that changed keeps its x, clamped so it stays on the
+   wall and reported, never moved off (`room.keep_on_walls`: placements,
+   openings, obstructions). Esc restores; one compute per drop.
+4. **Snaps while dragging and drawing**, in priority: a corner (join); a
+   point on a wall (Draw only — the split); ALIGNMENT, a line through every
+   other corner along the plan's axes and along every wall direction not on
+   them, a dashed guide drawn while it holds; the ANGLE of the wall being
+   stretched or drawn — 90 / 180 to the wall it meets (rank 0), the plan's
+   axes (1), 45s (2), the `draw_angle_step` (3); the length step. An angle
+   and an alignment holding together land where they cross. Shift: no snap.
+   The snap applied is named beside the cursor. Candidates from
+   `room.room_snaps` (`/api/room-snaps`, one call per press, per corner set
+   while drawing); the browser projects the pointer and picks (`pickSnap`).
+   Tolerance: `snap_tolerance`, or 8 screen px where that is more.
+5. **Length labels on the plan are editable in place**: a text box over each
+   wall's label (a foreignObject, so it zooms with the drawing), styled as
+   the label until hovered; Enter → `/api/wall-set` as the Wall card; Esc
+   cancels; Tab commits and moves to the next wall in walk order. Units shown.
+6. **Drawing finished.** Starting on a point of a wall splits it there
+   (`room.split_wall`, `/api/wall-split`, and `/api/room-draw`'s `split`):
+   the first part keeps its letter, the second takes the next; placements,
+   openings, obstructions, gap and plinth decisions follow by x; one spanning
+   the split stays on the first part and is reported. A T-wall is free at
+   its far end. A digit while drawing opens a length box (direction frozen);
+   Enter sets the corner; Tab moves to an angle box (the corner made with the
+   previous wall; for the first wall, degrees on the plan from +X);
+   Backspace in an empty box takes the last corner off. Clicking the start
+   closes; clicking any other existing corner ends there; double-click or
+   Enter ends free; Esc out.
+7. **Wall nook** (toolbar): click a wall, type width, depth and distance from
+   its start; `room.wall_nook` (`/api/wall-nook`) splits the wall at both
+   sides of the mouth, the middle part becomes the back (`depth` behind,
+   keeping what stood there by x) and two new returns join it at 270 / 90; a
+   closed room stays closed. Negative depth = a nib. A mode of the plan, as
+   Draw walls is.
+8. **Add back face** (Wall card): `room.add_back_face` (`/api/wall-backface`)
+   — the same line, the other way, the wall's thickness behind, joined to
+   nothing.
+9. **Flip face on a wall of a closed room asks** "Flip the whole room? (the
+   room side goes to the outside of every wall)": Flip room
+   (`room.flip_room`, `/api/room-flip-all`, every wall of the chain; twice is
+   identity) / Flip just B / Cancel. `_room_info` walls carry `in_loop`.
+10. **Draw walls happens ON THE PLAN.** The separate canvas (`#drawsvg`) is
+    retired: the plan is the same drawing, zoom and scroll; cabinets ghosted
+    while drawing; a grid laid over it only while the mode is on; new walls
+    live on top (`#drawlayer`). The Room tab's plan carries
+    `render.PLAN_MARGIN_MM` (800) to draw into, an empty room is a 6 x 4 m
+    sheet (`EMPTY_PLAN_MM`), and the plan's own mm mapping is on its `<svg>`
+    (`data-mmx`, `data-mmy`, `data-pad`, `data-scale`). Zoomed out, the box
+    round the plan takes clicks too. The same for the Nook tool.
+11. **The Room tab's cards fit**: the plan asked for at its card's size (100%
+    fits; the 100% button re-fits), Gaps the full width with every column, Plinth
+    and Placements side by side under it at their natural widths, each
+    card's notes behind a "?". Screenshots before and after at 1360 x 900 and
+    1920 x 1080 in `output/_checks/ui_check_walls/layout_*`.
+
+**What a drag does that the brief did not foresee:** a corner unit standing
+in a corner keeps its x along its wall like anything else, so a corner
+dragged away from it leaves it standing where it was along the wall — out of
+the corner, which Validation already warns about; nothing re-runs it into
+the corner. A cabinet on the wall that is moved parallel moves with the wall
+(its x is measured from the wall's start, which slides along the
+neighbour); the cabinets on a stretched neighbour keep their x from its start, so on a
+neighbour whose START is the moved joint they shift in the room by the
+stretch.
 
