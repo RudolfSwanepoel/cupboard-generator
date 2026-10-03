@@ -228,9 +228,12 @@ def stage_plan(pw):
     check("Plan is the default sub-tab, the elevation card hidden",
           (page.locator("#plancard").is_visible(), page.locator("#elevcard").is_visible()), (True, False))
     # the Room redo (2 October 2026): the Walls card is the Room card in the
-    # dock, shown while nothing is selected; Placements, Gaps and Plinth stay under
-    check_true("the placements, gaps and plinth cards are under it",
-               all(page.locator(f"#{i}").is_visible() for i in ("places", "gaps", "plinth")))
+    # dock, shown while nothing is selected; Gaps and Plinth under the plan, and
+    # Placements beside it, a strip until opened (touch-ups, 3 October 2026)
+    check_true("the gaps and plinth cards are under it, Placements a strip beside it",
+               all(page.locator(f"#{i}").is_visible() for i in ("gaps", "plinth", "placesopen")))
+    page.click("#placesopen")
+    check_true("  and the strip opens on the placements table", page.locator("#places").is_visible())
     check_true("and the Room card is in the dock with nothing selected",
                page.locator("#roomdock #room").is_visible() and page.locator("#room #walltable").count() == 1)
     check("the one editor is docked beside it",
