@@ -645,14 +645,18 @@ def ui_restructure():
         three.name = "exp"
         r = api.export({"job": job_to_dict(three), "walls": [ids[0], ids[2]]})
         check("the export goes ahead", (r["ok"], r.get("error", "")), (True, ""))
-        svgs = sorted(f for f in r.get("files", []) if f.endswith(".svg") and not f.startswith("nest_"))
+        # the room drawings alone: every cupboard's own drawing is written too
+        # (ruling 7 of the cabinet round, 3 October 2026), checked in
+        # check_cabinet_drawing.py
+        svgs = sorted(f for f in r.get("files", []) if f.endswith(".svg") and not f.startswith("nest_")
+                      and "_cabinet_" not in f)
         check("two of three walls ticked: exactly those two, and the plan",
               svgs, sorted([f"exp_elevation_{ids[0]}.svg", f"exp_elevation_{ids[2]}.svg",
                             "exp_plan.svg"]))
         jobdir = os.path.join(out, "exp")
         check("and on disk, in drawings/: no Run drawing, no unticked wall",
               sorted(f for f in os.listdir(os.path.join(jobdir, "drawings"))
-                     if f.endswith(".svg")), svgs)
+                     if f.endswith(".svg") and "_cabinet_" not in f), svgs)
 
         # The folders (output-folders brief, 28 September 2026).
         check("the export writes cutlist/, nesting/ and drawings/, nothing else",
@@ -703,8 +707,15 @@ def ui_restructure():
         plain = kitchen()
         plain.room, plain.placements, plain.name = None, [], "noroom"
         r = api.export({"job": job_to_dict(plain)})
-        check("a job with no room writes no drawing at all",
-              [f for f in r["files"] if f.endswith(".svg") and not f.startswith("nest_")], [])
+        # "no room, no drawing" is about ROOM drawings: a cupboard's own drawing
+        # is written with or without a room (ruling 7 of the cabinet round, 3
+        # October 2026), one per cupboard
+        check("a job with no room writes no room drawing at all",
+              [f for f in r["files"] if f.endswith(".svg") and not f.startswith("nest_")
+               and "_cabinet_" not in f], [])
+        check("  but every cupboard's own drawing",
+              sorted(f for f in r["files"] if "_cabinet_" in f),
+              sorted(f"noroom_cabinet_{c.number}.svg" for c in plain.cabinets))
     finally:
         api.OUT_DIR = was
         shutil.rmtree(out, ignore_errors=True)

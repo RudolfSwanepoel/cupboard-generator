@@ -2910,7 +2910,10 @@ def interior_parts(cab, std: Standard = STANDARD, materials: dict = None) -> Lis
                 tapes.append(Tape(flip.get(side, side), board, kind))
         out.append((part, tapes))
     for sh in shelves:
-        part = _box("shelf", cab.carcass_board, t, t + sh["width"], D - sh["depth"], D,
+        # against whatever is at the back, the clearance at the FACE (ruling 5,
+        # 3 October 2026): its front edge `clearance` short of the carcass front
+        front = D - sh["clearance"]
+        part = _box("shelf", cab.carcass_board, t, t + sh["width"], front - sh["depth"], front,
                     sh["z0"], sh["z1"], "x", "fixed" if sh["fixed"] else "")
         # the row's own edging (3 October 2026): its kind in its colour board on
         # the edges its counts mean — front, then rear; left end, then right

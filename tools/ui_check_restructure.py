@@ -710,9 +710,15 @@ def stage_export(pw):
     page.wait_for_function("() => S.lastExport && S.lastExport.dir && S.lastExport.dir.endsWith(%s)" % json.dumps(name),
                            timeout=30000)
     files = page.evaluate("() => S.lastExport.files")
-    svgs = sorted(f for f in files if f.endswith(".svg") and not f.startswith("nest_"))
+    svgs = sorted(f for f in files if f.endswith(".svg") and not f.startswith("nest_") and "_cabinet_" not in f)
     check("exactly the two ticked walls' elevations, and the plan",
           svgs, [f"{name}_elevation_A.svg", f"{name}_elevation_C.svg", f"{name}_plan.svg"])
+    # and one drawing per cupboard (ruling 7, 3 October 2026), all ticked by default; no Panel
+    cups = page.evaluate("() => S.job.cabinets.filter((c) => c.kind !== 'panel').map((c) => c.number)")
+    cabsvgs = sorted(f for f in files if "_cabinet_" in f)
+    check("one drawing per cupboard, every cupboard ticked by default", cabsvgs,
+          sorted(f"{name}_cabinet_{n}.svg" for n in cups))
+    svgs = sorted(svgs + cabsvgs)
     on_disk = sorted(f for f in os.listdir(os.path.join(ROOT, "output", name, "drawings"))
                      if f.endswith(".svg"))
     check("and on disk, in drawings/: no Run drawing, no wall B", on_disk, svgs)
@@ -727,8 +733,45 @@ def stage_export(pw):
     browser.close()
 
 
+def stage_drawing(pw):
+    """Ruling 7 of the cabinet round (3 October 2026): the Cabinets tab's 3D |
+    Drawing toggle shows the cupboard's own drawing — a front elevation beside
+    a dimensioned side section — for the cupboard the 3D shows; and the export
+    dialog lists the cupboards to tick."""
+    print("\ndrawing — the 3D | Drawing toggle over the cupboard view")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    load_job(page, "Test")
+    tab(page, "cabinets")
+    select(page, 1)
+    page.wait_for_function("() => typeof V3C === 'object' && V3C !== null && S.cab3dShown === 1", timeout=30000)
+    check("the toggle is there, 3D on", page.evaluate("() => [...document.querySelectorAll('#cabviews [data-cabview]')].map((b) => [b.dataset.cabview, b.classList.contains('on')])"),
+          [["3d", True], ["drawing", False]])
+    page.click('#cabviews [data-cabview="drawing"]')
+    page.wait_for_selector("#c3ddrawing svg.cabdrw", timeout=15000)
+    check("the drawing shows and the 3D is hidden (really: display none)",
+          page.evaluate("() => [document.getElementById('c3ddrawing').hidden, getComputedStyle(document.getElementById('c3ddrawing')).display !== 'none', getComputedStyle(document.getElementById('cab3d')).display]"),
+          [False, True, "none"])
+    dims = page.evaluate("() => [...document.querySelectorAll('#c3ddrawing svg text.dim')].map((t) => t.textContent)")
+    size = page.evaluate("() => { const c = S.job.cabinets.find((c) => c.number === 1); return [String(c.width), String(c.height), String(c.depth)]; }")
+    check_true("it is dimensioned: W, H and D are among the figures", all(v in dims for v in size), f"{size} in {dims[:12]}…")
+    check("the front and the section are both drawn", page.evaluate("() => [!!document.querySelector('#c3ddrawing .cabfront'), !!document.querySelector('#c3ddrawing .cabsection')]"), [True, True])
+    shot(page, "cabinet_drawing", "#cab3dcard")
+    # another cupboard: the drawing follows the selection
+    select(page, 4)
+    page.wait_for_function("() => document.querySelector('#c3ddrawing svg.cabdrw') && document.querySelector('#c3ddrawing svg.cabdrw').dataset.cab === '4'", timeout=15000)
+    check("selecting cabinet 4: its drawing", page.evaluate("() => document.querySelector('#c3ddrawing svg.cabdrw').dataset.cab"), "4")
+    page.click('#cabviews [data-cabview="3d"]')
+    page.wait_for_function("() => !document.getElementById('cab3d').hidden", timeout=5000)
+    check("back to 3D", page.evaluate("() => [getComputedStyle(document.getElementById('c3ddrawing')).display, getComputedStyle(document.getElementById('cab3d')).display !== 'none']"), ["none", True])
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 STAGES = {"tabs": stage_tabs, "plan": stage_plan, "elev": stage_elev, "cab3d": stage_cab3d,
-          "attach": stage_attach, "place": stage_place, "export": stage_export}
+          "attach": stage_attach, "place": stage_place, "export": stage_export, "drawing": stage_drawing}
 
 with sync_playwright() as pw:
     for key, fn in STAGES.items():

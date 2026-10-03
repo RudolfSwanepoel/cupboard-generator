@@ -2150,3 +2150,265 @@ def _edge_band(x, y, w, h, colour):
     return [f'<rect class="eband" x="{x + 1:.1f}" y="{y + 1:.1f}" '
             f'width="{w - 2:.1f}" height="{h - 2:.1f}" fill="none" '
             f'stroke="{colour}" stroke-width="1.3"/>']
+
+
+# --- a drawing per cupboard (ruling 7 of the cabinet round, 3 October 2026) ---
+
+def cabinet_section_dims(job: Job, number: int) -> dict:
+    """The numbers behind one cupboard's drawing, kept apart from the SVG so
+    they can be checked (the `wall_elevation_dims` discipline). Every chain is
+    a list of breakpoints from a datum, so its segments add up to the whole:
+
+    * `height_chain` — up the side, from the carcass underside: the bottom
+      panel's top face, each shelf's top face, each Back support's two edges,
+      the top's underside where there is a top, and H;
+    * `depth_chain` — from the wall face (the sides' back edges) to the
+      carcass front: the back (the backing in its slot, or the solid back),
+      each flat support's two edges, each shelf's front edge, and D;
+    * `width_chain` — across the front: the two sides and W.
+
+    `shelves` says where each shelf is drawn and how deep it is (height from
+    the top face of the bottom panel to the top face of the shelf, exactly as
+    the Shelves section measures it), `supports` where each rail is, `back`
+    what is at the back, and `legs` the leg height — a note, since where each
+    leg stands is not in Standard and none is drawn. Geometry comes off the
+    panel set (`room.geometry`) and the same `room` placements the 3D draws,
+    never the declared figures (hard rule 1).
+    """
+    from .room import back_part, interior_parts, shelf_layout, support_layout, solid_parts
+    std, mats = job.std, job.materials
+    cab = next((c for c in job.cabinets if c.number == number), None)
+    if cab is None or cab.is_panel:
+        return {}
+    g = geometry(cab, std, mats)
+    W, H, D, t = g.width, g.height, g.depth, std.board_t
+    parts = solid_parts(cab, std, mats)
+    has_top = any(q.role == "top" for q in parts)
+    footprint_only = any(q.role == "carcass" for q in parts) or not parts
+    heights, depths = {0, H}, {0, D}
+    if not footprint_only:
+        heights.add(t)
+        if has_top:
+            heights.add(H - t)
+    shelves = []
+    for sh in shelf_layout(cab, std, mats):
+        front = D - sh["clearance"]
+        shelves.append({"height": sh["height"], "z0": sh["z0"], "z1": sh["z1"],
+                        "depth": sh["depth"], "clearance": sh["clearance"],
+                        "y0": front - sh["depth"], "y1": front, "typed": sh["typed"],
+                        "fixed": sh["fixed"]})
+        heights.add(sh["z1"])
+        depths.add(front)
+    supports = []
+    for u in support_layout(cab, std, mats):
+        # the spec frame's y runs from the front; the drawing's from the wall
+        entry = {"type": u["type"], "n": u["n"], "y0": D - u["y1"], "y1": D - u["y0"],
+                 "z0": u["z0"], "z1": u["z1"], "upright": u["upright"]}
+        supports.append(entry)
+        if u["upright"]:
+            heights.update((u["z0"], u["z1"]))
+        else:
+            depths.update((entry["y0"], entry["y1"]))
+    bp = back_part(cab, std, mats)
+    back = None
+    if bp is not None:
+        ys = [y for _, y in bp.outline]
+        back = {"kind": "solid" if bp.role == "solid_back" else "backing", "board": bp.board,
+                "y0": min(ys), "y1": max(ys), "z0": bp.z0, "z1": bp.z1,
+                "cavity": std.back_cavity if bp.role == "back" else 0}
+        depths.update((back["y0"], back["y1"]))
+
+    def chain(points, end):
+        return sorted({0, end} | {round(min(max(v, 0), end), 1) for v in points})
+
+    return {
+        "number": number, "width": W, "height": H, "depth": D, "has_top": has_top,
+        "footprint_only": footprint_only, "source": g.source,
+        "height_chain": chain(heights, H),
+        "depth_chain": chain(depths, D),
+        "width_chain": chain({0, t, W - t, W} if not footprint_only else {0, W}, W),
+        "shelves": shelves, "supports": supports, "back": back,
+        "legs": std.leg_height if (not cab.is_panel and cab.kind != "upper") else 0,
+        "note": ("construction not ruled — an ell is drawn as its footprint" if cab.corner_kind == "ell"
+                 else "hand-built — its parts are not modelled; the front and the outline only"
+                 if cab.template == "none" else ""),
+    }
+
+
+def cabinet_svg(job: Job, number: int, max_width: int = 1100,
+                pictures: str = PIC.ROUTE) -> str:
+    """One cupboard on one sheet: its front elevation beside a side section,
+    dimensioned (ruling 7 of the cabinet round, 3 October 2026).
+
+    The FRONT is what the wall elevation draws for this cabinet — doors, drawer
+    faces, hinges, board colours and pictures, the edging bands — through the
+    same `_interior` (a corner unit through `_corner_interior`), so the two
+    drawings cannot disagree. The SECTION is through the middle of the width,
+    looking at the inside of the LEFT side: the front is on the right, the
+    wall on the left. Every solid is where the 3D draws it (`room.solid_parts`,
+    `back_part`, `interior_parts`): the side's profile, the top and bottom,
+    the back — the backing in its slot with the 16 mm cavity behind it
+    hatched, or the solid back — the supports, the shelves at their heights
+    and depths with their face clearance, the drawer boxes and their runners,
+    the fronts standing proud. Dimensioned off `cabinet_section_dims`:
+    overall W, H and D, the shelves' heights from the bottom panel and their
+    depths, the supports' positions. Legs are not drawn (where each stands is
+    not ruled); the leg height is a note. A mitre and a blind corner draw
+    their own construction (their parts, projected); an ell and a hand-built
+    cabinet say so.
+    """
+    from .room import back_part, interior_parts, solid_parts
+    std, mats = job.std, job.materials
+    cab = next((c for c in job.cabinets if c.number == number), None)
+    if cab is None:
+        return _note_svg(f"no cabinet {number}")
+    if cab.is_panel:
+        return _note_svg("a Panel has no cupboard drawing — see Panel design", 360)
+    d = cabinet_section_dims(job, number)
+    W, H, D = d["width"], d["height"], d["depth"]
+    fw = run_widths(job, [cab])[cab.number]           # a corner unit's width along its wall
+    t = std.board_t
+    pad, gutter, gap, under = 48, 34, 60, 70
+    gw = fw + gap + D
+    scale = min((max_width - pad * 2 - gutter * 2) / max(gw, 1), 520 / max(H, 1))
+    fx = pad + gutter                                   # the front's left edge
+    sx = fx + fw * scale + gap * scale                  # the section's left edge (the wall)
+    floor = pad + H * scale
+    nsh = len(d["shelves"])
+    stagger = 12                                        # one running dimension per shelf
+    right = sx + D * scale + 14 + stagger * nsh + 30    # the overall H dim stands past them
+    Wpx = int(right + pad)
+    rows = _legend_rows(job, _boards_drawn(job, [cab]), Wpx - pad * 2)
+    leg = _legend_height(rows)
+    Hpx = int(floor + under + leg + 24)
+    fills = Fills(base=pictures)
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" class="drw cabdrw" width="{Wpx}" height="{Hpx}" '
+           f'viewBox="0 0 {Wpx} {Hpx}" font-family="system-ui,sans-serif" data-cab="{number}">',
+           "",
+           f'<rect width="{Wpx}" height="{Hpx}" fill="{PAPER}"/>']
+    defs_at = 1
+
+    def X(y_mm):                     # section: depth from the wall → right
+        return sx + y_mm * scale
+
+    def Y(z_mm):                     # both views: up from the carcass underside
+        return floor - z_mm * scale
+
+    def rect(x0, x1, z0, z1, fill, stroke=INK, sw=WEIGHT["internal"], cls="", extra=""):
+        return (f'<rect class="{cls}" x="{min(x0, x1):.1f}" y="{Y(max(z0, z1)):.1f}" '
+                f'width="{abs(x1 - x0):.1f}" height="{abs(z1 - z0) * scale:.1f}" '
+                f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"{extra}/>')
+
+    # ---- the front elevation ---------------------------------------------
+    look = board_look(job, cab.carcass_board)
+    out.append(f'<g class="cabfront" data-cab="{number}">')
+    out.append(f'<text x="{pad:.1f}" y="{pad - 30:.1f}" font-size="10" fill="{INK}">'
+               f'Cabinet {number} · {escape(_size_label(job, cab))} · '
+               f'{escape(cab.kind)}{" · " + escape(cab.corner_kind) if cab.corner_on else ""}</text>')
+    out.append(f'<text x="{pad:.1f}" y="{pad - 16:.1f}" font-size="8.5" fill="{MUTED}">'
+               f'FRONT on the left · SECTION on the right: mid-width, looking at the inside of the '
+               f'left side (wall left, front right)</text>')
+    out.append(f'<rect class="ecab" x="{fx:.1f}" y="{Y(H):.1f}" width="{fw * scale:.1f}" '
+               f'height="{H * scale:.1f}" fill="{fills.of(look, True)}" stroke="{INK}" '
+               f'stroke-width="{WEIGHT["carcass"]}"/>')
+    out += _interior(cab, fx, Y(H), fw * scale, H * scale, scale, std, flip=False,
+                     materials=mats, fills=fills)
+    out.append("</g>")
+    # width: the two sides and the overall
+    wc = d["width_chain"]
+    for a, b in zip(wc, wc[1:]):
+        out += _dim_h(fx + a * scale, fx + b * scale, floor + 14, int(round(b - a)))
+    out += _dim_h(fx, fx + fw * scale, floor + 30, int(round(fw)))
+    # height: the chain on the left of the front, the overall outside it
+    hc = d["height_chain"]
+    for a, b in zip(hc, hc[1:]):
+        out += _dim_v(Y(b), Y(a), fx - 10, int(round(b - a)))
+    out += _dim_v(Y(H), Y(0), fx - 26, H)
+
+    # ---- the side section -------------------------------------------------
+    out.append(f'<g class="cabsection" data-cab="{number}">')
+    parts = solid_parts(cab, std, mats)
+    if d["footprint_only"]:
+        out.append(rect(X(0), X(D), 0, H, fills.of(look, True), INK, WEIGHT["carcass"], "side"))
+        out.append(f'<text x="{X(D / 2):.1f}" y="{Y(H / 2):.1f}" font-size="9" text-anchor="middle" '
+                   f'fill="{MUTED}">{escape(d["note"])}</text>')
+    else:
+        # the left side's inside face, as the background
+        out.append(rect(X(0), X(D), 0, H, fills.of(look, True), INK, WEIGHT["carcass"], "side"))
+        if not fills.textured(look):
+            out += _grain_lines(X(0), Y(H), D * scale, H * scale, True, look["ink"])
+
+        def proj(q):
+            ys = [y for _, y in q.outline]
+            return min(ys), max(ys)
+
+        # the cavity behind a backing board: hatched, so the 16 mm reads
+        back = d["back"]
+        if back and back["cavity"]:
+            out.append(rect(X(0), X(back["y0"]), t, H - t if d["has_top"] else H, "none", FAINT,
+                            WEIGHT["internal"], "cavity"))
+            out += _oblique_hatch(X(0), Y(H - t if d["has_top"] else H), back["y0"] * scale,
+                                  ((H - t if d["has_top"] else H) - t) * scale, FAINT)
+        for q in parts:
+            if q.role in ("side", "carcass"):
+                continue
+            y0, y1 = proj(q)
+            fill = fills.of(board_look(job, q.board), q.role in ("door", "drawer", "blind"))
+            cls = {"top": "top", "bottom": "bottom", "door": "front", "drawer": "front",
+                   "blind": "front"}.get(q.role, q.role)
+            out.append(rect(X(y0), X(y1), q.z0, q.z1, fill, INK, WEIGHT["internal"], cls))
+        bp = back_part(cab, std, mats)
+        if bp is not None:
+            y0, y1 = proj(bp)
+            out.append(rect(X(y0), X(y1), bp.z0, bp.z1, fills.of(board_look(job, bp.board), True),
+                            INK, WEIGHT["internal"], "back"))
+        for q, _tapes in interior_parts(cab, std, mats):
+            y0, y1 = proj(q)
+            if q.role in ("runner_outer", "runner_inner"):
+                out.append(rect(X(y0), X(y1), q.z0, q.z1, FAINT, MUTED, WEIGHT["internal"], q.role))
+                continue
+            if q.role == "drawer" and q.label == "inner":
+                continue                       # an inner face sits inside its box's profile
+            fill = fills.of(board_look(job, q.board), False)
+            out.append(rect(X(y0), X(y1), q.z0, q.z1, fill, INK, WEIGHT["internal"], q.role))
+            if q.role == "support" and q.label:
+                out.append(f'<text x="{X((y0 + y1) / 2):.1f}" y="{Y(q.z1) - 2:.1f}" font-size="7" '
+                           f'text-anchor="middle" fill="{MUTED}">{escape(q.label)}</text>')
+        for sh in d["shelves"]:
+            # the shelf's depth on the shelf, and its face clearance at the front
+            out.append(f'<text class="shelfdepth" x="{X((sh["y0"] + sh["y1"]) / 2):.1f}" '
+                       f'y="{Y(sh["z1"]) - 2:.1f}" font-size="7.5" text-anchor="middle" '
+                       f'fill="{INK}">{sh["depth"]}</text>')
+            if sh["clearance"]:
+                out.append(f'<text class="shelfclear" x="{X(D) + 2:.1f}" y="{Y(sh["z0"]) + 2:.1f}" '
+                           f'font-size="6.5" fill="{MUTED}">{sh["clearance"]}</text>')
+    out.append("</g>")
+    # depth: the chain under the section, the overall under it
+    dc = d["depth_chain"]
+    for a, b in zip(dc, dc[1:]):
+        out += _dim_h(X(a), X(b), floor + 14, int(round(b - a)))
+    out += _dim_h(X(0), X(D), floor + 30, D)
+    # the shelves' heights, from the top face of the bottom panel to each top
+    # face, on the right of the section — read the way the Shelves section
+    # measures them
+    for i, sh in enumerate(d["shelves"]):
+        out += _dim_v(Y(sh["z1"]), Y(t), X(D) + 14 + stagger * i, int(round(sh["height"])))
+    out += _dim_v(Y(H), Y(0), right, H)
+
+    # ---- notes, tapes, legend ---------------------------------------------
+    note = (f"legs {d['legs']} mm, not drawn — the carcass stands on them" if d["legs"]
+            else "hung: no legs")
+    if d["note"]:
+        note += " · " + d["note"]
+    if d["back"]:
+        note += (" · solid back" if d["back"]["kind"] == "solid"
+                 else f" · backing board in its slot, {d['back']['cavity']} mm cavity behind it")
+    elif not d["footprint_only"]:
+        note += " · no back"
+    out.append(f'<text x="{pad:.1f}" y="{floor + 50:.1f}" font-size="8.5" fill="{MUTED}">'
+               f'{escape(note)}</text>')
+    out += _tape_note(job, pad, Hpx - 8 - leg, Wpx - pad * 2)
+    out += _legend_svg(rows, pad, Hpx - leg + 2, fills)
+    out[defs_at] = f"{STROKE_STYLE}<defs>{fills.defs()}</defs>"
+    out.append("</svg>")
+    return "\n".join(out)

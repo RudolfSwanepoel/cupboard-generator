@@ -416,6 +416,8 @@
   .sec.s-corner{background:var(--sec-corner);border-color:var(--sec-corner-line)}
   .sec.s-supports{background:var(--sec-supports);border-color:var(--sec-supports-line)}
   .sec.s-shelves{background:var(--sec-shelves);border-color:var(--sec-shelves-line)}
+  #cab3d[hidden],#c3ddrawing[hidden]{display:none !important}   /* the 3D | Drawing toggle */
+  #c3ddrawing svg{max-width:100%;height:auto;display:block}
   #shelfbox table.rows select{width:auto;font-size:11px;padding:1px 2px}
   #shelfbox table.rows td{vertical-align:middle}
   #shelfbox .shclr{display:flex;align-items:center;gap:2px}
@@ -808,7 +810,13 @@ folder is only read, never changed. You see what will come in before anything is
              its shelves, supports and attached panels, and no room. The wall
              elevations moved to Room -> Elevation. -->
         <div class="card" id="cab3dcard">
-          <h2>3D <span id="c3dtitle" style="text-transform:none;letter-spacing:0"></span></h2>
+          <h2><span class="subtabs" id="cabviews" style="margin:0 10px 0 0;vertical-align:middle"><button
+              data-cabview="3d" class="on">3D</button><button data-cabview="drawing">Drawing</button></span>
+            <span id="c3dtitle" style="text-transform:none;letter-spacing:0"></span></h2>
+          <!-- The cupboard's drawing (ruling 7 of the cabinet round, 3 October 2026):
+               front elevation beside a side section, dimensioned, off
+               /api/cabinet-drawing — the same cupboard the 3D shows. -->
+          <div id="c3ddrawing" class="scroll" hidden style="max-height:calc(100vh - 230px);overflow:auto"></div>
           <div id="cab3d">
             <div id="c3dbar" class="v3dbar"></div>
             <div id="c3dview" class="v3dview"></div>
@@ -967,8 +975,10 @@ folder is only read, never changed. You see what will come in before anything is
   <form method="dialog">
     <b>Export cut list</b>
     <p class="note" style="margin:6px 0 8px">The Plazaboard CSVs, the sheet layouts and the
-      plan are always written. Tick the walls whose elevations go with them.</p>
+      plan (with a room) are always written. Tick the walls whose elevations go with them, and
+      the cupboards whose own drawings do.</p>
     <div id="exportwalls" style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px"></div>
+    <div id="exportcabs" style="display:flex;flex-wrap:wrap;gap:4px 14px;margin-bottom:12px;max-height:40vh;overflow:auto"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button value="cancel">Cancel</button>
       <button value="go" class="primary" id="exportgo">Export</button>
@@ -9290,6 +9300,7 @@ async function renderCab3D() {
     await v3cLoading;
   }
   if (S.tab !== "cabinets") return;
+  if (S.cabView === "drawing") { V3C.setVisible(false); refreshCabDrawing(); return; }
   V3C.setVisible(true);
   V3C.resize();
   if (S.cabSceneStale || cabShown() !== S.cab3dShown || S.cab3dJob !== S.job) {
@@ -9301,9 +9312,60 @@ async function renderCab3D() {
 // only while its tab is showing — hidden, it catches up when next shown.
 function refreshCabScene() {
   S.cabSceneStale = true;
-  if (S.tab !== "cabinets" || !V3C) return;
+  S.cabDrawingStale = true;
+  if (S.tab !== "cabinets") return;
+  if (S.cabView === "drawing") { refreshCabDrawing(); return; }
+  if (!V3C) return;
   clearTimeout(cabTimer);
   cabTimer = setTimeout(() => { cabTimer = null; fetchCabScene(); }, 40);
+}
+
+// 3D | Drawing over the cupboard view (ruling 7, 3 October 2026). The drawing
+// is the engine's SVG (/api/cabinet-drawing) for the cupboard the 3D shows,
+// fetched on the same debounce; the 3D view is told it is hidden meanwhile so
+// it does not draw frames nobody sees.
+S.cabView = "3d";
+S.cabDrawingStale = true;
+let cabDrawTimer = null, cabDrawSeq = 0;
+document.querySelectorAll("#cabviews [data-cabview]").forEach((b) => b.addEventListener("click", () => {
+  S.cabView = b.dataset.cabview;
+  document.querySelectorAll("#cabviews [data-cabview]").forEach((x) => x.classList.toggle("on", x === b));
+  showCabView();
+}));
+function showCabView() {
+  const drawing = S.cabView === "drawing";
+  $("cab3d").hidden = drawing;
+  $("c3ddrawing").hidden = !drawing;
+  if (drawing) {
+    if (V3C) V3C.setVisible(false);
+    refreshCabDrawing();
+  } else {
+    renderCab3D();
+  }
+}
+function refreshCabDrawing() {
+  if (S.tab !== "cabinets" || S.cabView !== "drawing") return;
+  clearTimeout(cabDrawTimer);
+  cabDrawTimer = setTimeout(() => { cabDrawTimer = null; fetchCabDrawing(); }, 40);
+}
+async function fetchCabDrawing() {
+  const n = cabShown();
+  const box = $("c3ddrawing");
+  const seq = ++cabDrawSeq;
+  if (n === null) {
+    box.innerHTML = `<p class="note">No cabinets yet. <b>Add cabinet</b> below to start.</p>`;
+    S.cabDrawingStale = false;
+    return;
+  }
+  const r = await post("/api/cabinet-drawing", {job: S.job, number: n});
+  if (seq !== cabDrawSeq) return;
+  if (!r.ok) { box.innerHTML = `<p class="note">${esc(r.error)}</p>`; return; }
+  box.innerHTML = r.svg;
+  const svg = box.querySelector("svg");
+  if (svg) { svg.style.maxWidth = "100%"; svg.style.height = "auto"; }
+  S.cabDrawingStale = false;
+  S.cabDrawingShown = n;
+  $("c3dtitle").textContent = `— ${n} · drawing`;
 }
 
 async function fetchCabScene() {
@@ -9570,10 +9632,16 @@ $("fixture").addEventListener("click", async () => {
 // ticked in a short list — all by default — and the plan. No Run drawing.
 $("export").addEventListener("click", () => {
   const rm = S.job.room;
-  if (!rm || !rm.walls.length) { runExport(null); return; }
-  $("exportwalls").innerHTML = rm.walls.map((w) =>
+  const walls = rm && rm.walls.length ? rm.walls : [];
+  const cups = S.job.cabinets.filter((c) => c.kind !== "panel");
+  if (!walls.length && !cups.length) { runExport(null, null); return; }
+  $("exportwalls").innerHTML = walls.map((w) =>
     `<label style="display:flex;gap:6px;align-items:center"><input type="checkbox"
       style="width:auto" data-exwall="${esc(w.id)}" checked> Wall ${esc(w.id)} elevation</label>`).join("");
+  // one drawing per cupboard (ruling 7, 3 October 2026), all ticked; a Panel has none
+  $("exportcabs").innerHTML = cups.map((c) =>
+    `<label style="display:flex;gap:6px;align-items:center"><input type="checkbox"
+      style="width:auto" data-excab="${c.number}" checked> Cabinet ${c.number} drawing</label>`).join("");
   const dlg = $("exportdlg");
   dlg.returnValue = "";
   dlg.showModal();
@@ -9581,12 +9649,18 @@ $("export").addEventListener("click", () => {
 
 $("exportdlg").addEventListener("close", () => {
   if ($("exportdlg").returnValue !== "go") return;
-  runExport([...document.querySelectorAll("#exportwalls [data-exwall]")]
-    .filter((x) => x.checked).map((x) => x.dataset.exwall));
+  const rm = S.job.room;
+  runExport(rm && rm.walls.length
+              ? [...document.querySelectorAll("#exportwalls [data-exwall]")].filter((x) => x.checked).map((x) => x.dataset.exwall)
+              : null,
+            [...document.querySelectorAll("#exportcabs [data-excab]")].filter((x) => x.checked).map((x) => +x.dataset.excab));
 });
 
-async function runExport(walls) {
-  const r = await post("/api/export", walls === null ? {job: S.job} : {job: S.job, walls: walls});
+async function runExport(walls, cabinets) {
+  const body = {job: S.job};
+  if (walls !== null) body.walls = walls;
+  if (cabinets !== null && cabinets !== undefined) body.cabinets = cabinets;
+  const r = await post("/api/export", body);
   if (!r.ok) {
     toast(r.error + "\n" + (r.issues || []).map((i) =>
       `${i.where}: ${i.message}`).join("\n"), true);

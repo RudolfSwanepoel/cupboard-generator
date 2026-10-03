@@ -43,7 +43,8 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES, D
                               material_offers, material_price,
                               material_record, material_thickness, material_token,
                               edging_label, tape_for)
-from cabinetgen.render import PLAN_MARGIN_MM, pictures_drawn, plan_svg, wall_elevation_svg
+from cabinetgen.render import (PLAN_MARGIN_MM, cabinet_section_dims, cabinet_svg, pictures_drawn,
+                               plan_svg, wall_elevation_svg)
 from cabinetgen import scene as SCENE
 from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, drawer_rise,
                              drawer_layout, inner_drawer_z,
@@ -1741,6 +1742,11 @@ def export(payload):
                       wall_elevation_svg(job, w.id, pictures=""))
                      for w in job.room.walls if w.id in export_walls(job, payload)]
         drawings.append((f"{job.name}_plan.svg", plan_svg(job)))
+    # One drawing per TICKED cupboard (ruling 7 of the cabinet round, 3 October
+    # 2026) — front elevation beside a side section — written with or without
+    # a room: the "no room, no drawing" ruling is about room drawings.
+    drawings += [(f"{job.name}_cabinet_{n}.svg", cabinet_svg(job, n, pictures=""))
+                 for n in export_cabinets(job, payload)]
     if drawings:
         os.makedirs(drawdir, exist_ok=True)
     for name, svg in drawings:
@@ -1749,8 +1755,8 @@ def export(payload):
             fh.write(svg)
         written.append(path)
     # the pictures go only beside a drawing that asks for them: a wall's
-    # elevation does, the plan (flat colour) does not
-    if any(name.startswith(f"{job.name}_elevation_") for name, _svg in drawings):
+    # elevation and a cupboard's drawing do, the plan (flat colour) does not
+    if any(name.startswith((f"{job.name}_elevation_", f"{job.name}_cabinet_")) for name, _svg in drawings):
         written += _export_pictures(job, drawdir)
     if accepted:
         path = os.path.join(cutdir, f"{job.name}_accepted.txt")
@@ -1792,6 +1798,21 @@ def _retire_export(outdir: str) -> bool:
     for d in present:
         shutil.move(os.path.join(outdir, d), os.path.join(prev, d))
     return True
+
+
+def export_cabinets(job, payload) -> list:
+    """The cupboards an export draws: those the payload's `cabinets` names that
+    the job has, in the job's order; every cupboard when `cabinets` is absent
+    (None). A Panel is never one — it has no cupboard drawing."""
+    cups = [c.number for c in job.cabinets if not c.is_panel]
+    want = payload.get("cabinets")
+    if want is None:
+        return cups
+    try:
+        want = {int(n) for n in want}
+    except (TypeError, ValueError):
+        return []
+    return [n for n in cups if n in want]
 
 
 def export_walls(job, payload) -> list:
@@ -2218,6 +2239,22 @@ def plan(payload):
             "svg": plan_svg(job, show=show, ghost=keep(payload.get("ghost")),
                             isolate=iso, margin=PLAN_MARGIN_MM if payload.get("margin") else 0,
                             **size)}
+
+
+def cabinet_drawing(payload):
+    """One cupboard's drawing: its front elevation beside a side section,
+    dimensioned (`render.cabinet_svg`, ruling 7 of the cabinet round, 3 October
+    2026), and the numbers behind it. The Cabinets tab's 3D | Drawing toggle
+    asks here; the export writes the same drawing to a file. Read-only."""
+    job = _job(payload)
+    try:
+        number = int(payload.get("number"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "no cabinet named"}
+    if not any(c.number == number for c in job.cabinets):
+        return {"ok": False, "error": f"no cabinet {number}"}
+    return {"ok": True, "svg": cabinet_svg(job, number),
+            "dims": cabinet_section_dims(job, number)}
 
 
 def elevation(payload):
@@ -3029,6 +3066,7 @@ ROUTES = {
     "/api/plan": plan,
     "/api/drag": drag,
     "/api/elevation": elevation,
+    "/api/cabinet-drawing": cabinet_drawing,
     "/api/scene": scene,
     "/api/scene-cabinet": scene_cabinet,
     "/api/attach-snaps": attach_snaps,
