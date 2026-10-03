@@ -591,6 +591,11 @@
      grabbed — and a panel's number sits beside it, over the next cabinet. Text
      that took the press left dead spots where a drag did nothing (22 Sept 2026). */
   #plan svg text{pointer-events:none}
+  /* a corner's handle (ruling 3): shown on hover, dragged to move the corner */
+  #plan .cornerhandle{fill:var(--accent);fill-opacity:0;stroke:var(--accent);stroke-opacity:0;
+                      stroke-width:1.5;cursor:move;pointer-events:all}
+  #plan .cornerhandle:hover,#plan .cornerhandle.dragging{fill-opacity:.25;stroke-opacity:1}
+  #plan.drawing .cornerhandle{pointer-events:none}
   #plan.drawing,#plan.drawing svg{cursor:crosshair}
   #plan.drawing svg{overflow:visible}
   /* the hint floats over the plan's foot, so drawing moves nothing on screen */
@@ -6236,6 +6241,7 @@ function startDraw() {
     corner off, <b>Esc</b> goes back to Select. The walls are added to the room; drawn lengths are a
     sketch — measure each wall after.`;
   window.addEventListener("keydown", drawKey);
+  drawSnaps();
   renderPlan();
 }
 
@@ -6311,6 +6317,9 @@ function drawPaint() {
     const r = drawReadout();
     if (r) L.push(`<text id="drawreadout" x="${(cx + 12).toFixed(1)}" y="${(cy - 12).toFixed(1)}"
       font-size="12" fill="var(--accent)">${esc(r)}</text>`);
+    if (DRAW.why) L.push(`<text id="drawwhy" x="${(cx + 12).toFixed(1)}" y="${(cy + 20).toFixed(1)}"
+      font-size="11" fill="var(--accent)">${esc(DRAW.why)}</text>`);
+    L.push(guideSvg(m, DRAW.guides));
   }
   g.innerHTML = L.join("");
 }
@@ -6344,20 +6353,24 @@ function drawReadout() {
   return text;
 }
 
-// The existing corner within 12 px of the pointer, or null — what a first
-// click starts from.
-function drawCornerNear(p, m) {
-  let best = null, near = 12 * mmPerPx(m);
-  for (const [ex, ey] of DRAW.ends) {
-    const d = Math.hypot(p[0] - ex, p[1] - ey);
-    if (d <= near) { near = d; best = [ex, ey]; }
-  }
-  return best;
+// What the drawing may snap to, from the server (ruling 4): asked again on each
+// corner set — the press of a drawing — so the angle references start from the
+// last corner. The browser projects the pointer and picks; it names nothing.
+function drawSnaps() {
+  const d = DRAW;
+  if (!d) return;
+  const seq = d.snapSeq = (d.snapSeq || 0) + 1;
+  const job = S.job.room ? S.job : Object.assign({}, S.job, {room: {name: S.job.name || "room", walls: []}});
+  post("/api/room-snaps", {job: job, mode: "draw", points: d.pts}).then((r) => {
+    if (DRAW !== d || seq !== d.snapSeq || !r.ok) return;
+    d.snaps = r;
+  });
 }
 
-// The point under the pointer in mm, snapped: the first corner to the length
-// step, each next one along a snapped direction (free with Shift) at a length
-// in whole steps. Within 12 px of the first corner, the first corner.
+// The point under the pointer in mm, snapped (ruling 4): within 12 px of the
+// first corner, the first corner (to close); else the nearest candidate the
+// server named — a corner, alignment with a corner, an angle off the last wall
+// or the plan's axes — and the length step. Shift: free.
 function drawPointer(e) {
   const m = planMap();
   const p = m && pointerMm(e);
@@ -6365,6 +6378,8 @@ function drawPointer(e) {
   const step = drawStd("draw_length_step", 10);
   const pts = DRAW.pts;
   DRAW.closing = false;
+  DRAW.why = "";
+  DRAW.guides = [];
   if (pts.length >= 3) {
     const [fx, fy] = pts[0];
     if (Math.hypot(p[0] - fx, p[1] - fy) <= 12 * mmPerPx(m)) {
@@ -6372,24 +6387,18 @@ function drawPointer(e) {
       return [fx, fy];
     }
   }
+  // a point on a wall (the split) is ruling 6's, not this one's
+  const model = DRAW.snaps ? Object.assign({}, DRAW.snaps, {segments: []}) : null;
+  const sn = pickSnap(model, p, m, e.shiftKey, pts.length ? pts[pts.length - 1] : null);
+  DRAW.why = sn.why;
+  DRAW.guides = sn.guides;
   if (!pts.length) {
-    const corner = drawCornerNear(p, m);
-    DRAW.joined = !!corner;
-    return corner || [Math.round(p[0] / step) * step, Math.round(p[1] / step) * step];
+    DRAW.joined = !!sn.corner;
+    if (!sn.why && !e.shiftKey) return [Math.round(p[0] / step) * step, Math.round(p[1] / step) * step];
   }
-  const [lx, ly] = pts[pts.length - 1];
-  let ang = Math.atan2(p[1] - ly, p[0] - lx);
-  if (!e.shiftKey) {
-    const a = drawStd("draw_angle_step", 15) * Math.PI / 180;
-    ang = Math.round(ang / a) * a;
-  }
-  const len = Math.round(Math.hypot(p[0] - lx, p[1] - ly) / step) * step;
-  return [lx + len * Math.cos(ang), ly + len * Math.sin(ang)];
+  return sn.p;
 }
 
-// The whole plan box takes the pointer while drawing, not only the drawing: a
-// zoom out leaves room round the plan, and a wall can be drawn into it — the
-// plan's mapping reaches past its edge, and the grid is laid over all of it.
 $("plan").addEventListener("pointermove", (e) => {
   if (!DRAW || !e.target.closest("#plan")) return;
   DRAW.at = drawPointer(e);
@@ -6409,6 +6418,7 @@ $("plan").addEventListener("click", (e) => {
   if (last && m && Math.hypot(q[0] - last[0], q[1] - last[1]) <= 12 * mmPerPx(m)) return;
   DRAW.pts.push(q);
   DRAW.at = q;
+  drawSnaps();
   drawPaint();
 });
 
@@ -6426,6 +6436,7 @@ function drawKey(e) {
   else if (e.key === "Backspace") {
     e.preventDefault();
     DRAW.pts.pop();
+    drawSnaps();
     drawPaint();
   }
 }
@@ -6452,6 +6463,290 @@ async function finishDraw(closed) {
   const added = r.added || [];
   toast(`Wall${added.length === 1 ? "" : "s"} ${added.join(", ")} drawn and added — ` +
         `measure each one and type its length.`);
+}
+
+/* ---------- dragging corners and walls (room redo Phase 2, rulings 3-4) -------
+   In Select mode a corner's round handle (shown on hover) drags that corner:
+   every wall ending there follows. A wall's body drags it parallel to itself;
+   the walls at its ends stretch. The candidates it may snap to come from the
+   server once, on the press (`/api/room-snaps`, listened for before it lands,
+   as `/api/drag` is); the browser projects the pointer and picks the nearest
+   (`pickSnap`), names the snap beside the cursor and draws a thin guide while
+   an alignment holds. Shift turns every snap off. Esc restores. The drop is
+   one server call (`/api/corner-move` / `/api/wall-move`) and one compute;
+   the preview is a sketch and nothing reads it.                            */
+
+let WEDIT = null;
+
+// The snap tolerance in mm: the Standard's, or 8 px at the zoom on screen,
+// whichever is the larger — a 20 mm target is a pixel or two on a whole room.
+function snapTol(model, m) { return Math.max(model.tolerance || 20, 8 * mmPerPx(m)); }
+
+function projLine(l, q) {
+  const t = (q[0] - l.p[0]) * l.d[0] + (q[1] - l.p[1]) * l.d[1];
+  const f = [l.p[0] + t * l.d[0], l.p[1] + t * l.d[1]];
+  return {t: t, f: f, dist: Math.hypot(q[0] - f[0], q[1] - f[1])};
+}
+function meetLines(a, b) {
+  const den = a.d[0] * b.d[1] - a.d[1] * b.d[0];
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((b.p[0] - a.p[0]) * b.d[1] - (b.p[1] - a.p[1]) * b.d[0]) / den;
+  return [a.p[0] + t * a.d[0], a.p[1] + t * a.d[1]];
+}
+
+// The nearest candidate the server named, in the ruled priority: a corner,
+// then (drawing) a point on a wall, then alignment and an angle (both at once
+// where both hold), then the length step. `anchor` is where a stretched or
+// drawn wall starts, for the length step when no angle holds.
+function pickSnap(model, q, m, shift, anchor) {
+  if (!model || shift) return {p: [Math.round(q[0]), Math.round(q[1])], why: "", guides: []};
+  const tol = snapTol(model, m);
+  let best = null;
+  for (const c of model.corners || []) {
+    const d = Math.hypot(q[0] - c.p[0], q[1] - c.p[1]);
+    if (d <= tol && (!best || d < best.d)) best = {d: d, c: c};
+  }
+  if (best) return {p: best.c.p.slice(), why: best.c.why, guides: [], corner: true};
+  for (const sg of model.segments || []) {
+    const len = Math.hypot(sg.b[0] - sg.a[0], sg.b[1] - sg.a[1]);
+    if (!len) continue;
+    const l = {p: sg.a, d: [(sg.b[0] - sg.a[0]) / len, (sg.b[1] - sg.a[1]) / len]};
+    const pr = projLine(l, q);
+    if (pr.t > tol && pr.t < len - tol && pr.dist <= tol && (!best || pr.dist < best.d)) {
+      best = {d: pr.dist, sg: sg, at: Math.round(pr.t), f: pr.f};
+    }
+  }
+  if (best) return {p: [Math.round(best.f[0]), Math.round(best.f[1])], why: `${best.sg.why} at ${best.at} mm`,
+                    guides: [], split: {wall: best.sg.wall, at: best.at}};
+  let line = null, line2 = null, ray = null;
+  for (const l of model.lines || []) {
+    const pr = projLine(l, q);
+    if (pr.dist <= tol && (!line || pr.dist < line.dist)) line = Object.assign({l: l}, pr);
+  }
+  if (line) {
+    for (const l of model.lines || []) {
+      if (Math.abs(l.d[0] * line.l.d[1] - l.d[1] * line.l.d[0]) < 1e-6) continue;
+      const pr = projLine(l, q);
+      if (pr.dist <= tol && (!line2 || pr.dist < line2.dist)) line2 = Object.assign({l: l}, pr);
+    }
+  }
+  for (const r of model.rays || []) {
+    const pr = projLine(r, q);
+    if (pr.t <= 0 || pr.dist > tol) continue;
+    if (!ray || r.rank < ray.r.rank || (r.rank === ray.r.rank && pr.dist < ray.dist)) ray = Object.assign({r: r}, pr);
+  }
+  const step = model.step || 10;
+  // an angle and an alignment both holding: where they cross (an alignment
+  // running along the ray itself only adds its name)
+  const par = (l) => Math.abs(l.l.d[0] * ray.r.d[1] - l.l.d[1] * ray.r.d[0]) < 1e-6;
+  if (ray) {
+    for (const l of [line, line2]) {
+      if (!l || par(l)) continue;
+      const x = meetLines(l.l, ray.r);
+      if (x && Math.hypot(x[0] - q[0], x[1] - q[1]) <= 2 * tol) {
+        return {p: [Math.round(x[0]), Math.round(x[1])], why: `${l.l.why} · ${ray.r.why}`,
+                guides: [[l.l.p, x]]};
+      }
+    }
+    if (line && par(line) && Math.abs(line.dist - ray.dist) < 1) {
+      const t = Math.max(step, Math.round(ray.t / step) * step);
+      return {p: [Math.round(ray.r.p[0] + t * ray.r.d[0]), Math.round(ray.r.p[1] + t * ray.r.d[1])],
+              why: `${ray.r.why} · ${line.l.why}`, guides: [[line.l.p, ray.f]], ray: ray.r};
+    }
+  }
+  if (line && line2) {
+    const x = meetLines(line.l, line2.l);
+    if (x) return {p: [Math.round(x[0]), Math.round(x[1])], why: `${line.l.why} · ${line2.l.why}`,
+                   guides: [[line.l.p, x], [line2.l.p, x]]};
+  }
+  if (line) return {p: [Math.round(line.f[0]), Math.round(line.f[1])], why: line.l.why, guides: [[line.l.p, line.f]]};
+  if (ray) {
+    const t = Math.max(step, Math.round(ray.t / step) * step);
+    return {p: [Math.round(ray.r.p[0] + t * ray.r.d[0]), Math.round(ray.r.p[1] + t * ray.r.d[1])],
+            why: ray.r.why, guides: [], ray: ray.r};
+  }
+  if (anchor) {
+    const len = Math.hypot(q[0] - anchor[0], q[1] - anchor[1]);
+    if (len > 0) {
+      const k = Math.round(len / step) * step / len;
+      return {p: [Math.round(anchor[0] + (q[0] - anchor[0]) * k), Math.round(anchor[1] + (q[1] - anchor[1]) * k)],
+              why: "", guides: []};
+    }
+  }
+  return {p: [Math.round(q[0]), Math.round(q[1])], why: "", guides: []};
+}
+
+// The overlay a wall edit draws over the plan: the walls as they would be, a
+// guide for an alignment, the corner. A sketch; nothing reads it.
+function editLayer(m) {
+  let g = m.svg.querySelector("#editlayer");
+  if (!g) {
+    g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.id = "editlayer";
+    g.setAttribute("pointer-events", "none");
+    m.svg.appendChild(g);
+  }
+  return g;
+}
+
+function guideSvg(m, guides) {
+  return (guides || []).map(([a, b]) => {
+    const [x1, y1] = mmToSvg(m, a[0], a[1]), [x2, y2] = mmToSvg(m, b[0], b[1]);
+    return `<line class="snapguide" x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}"
+      y2="${y2.toFixed(1)}" stroke="var(--accent)" stroke-width="0.8" stroke-dasharray="4 3"/>`;
+  }).join("");
+}
+
+function startWallEdit(e, d) {
+  const m = planMap();
+  if (!m || !S.job.room) return;
+  e.preventDefault();
+  const info = roomInfo();
+  Object.assign(d, {model: null, moved: false, last: null, released: false, at: null,
+                    press: [e.clientX, e.clientY], pressMm: pointerMm(e), m: m, info: info});
+  WEDIT = d;
+  window.addEventListener("pointermove", onWallEditMove);
+  window.addEventListener("pointerup", onWallEditUp);
+  window.addEventListener("keydown", onWallEditKey);
+  const ask = d.kind === "corner" ? {mode: "corner", point: d.from} : {mode: "wall", wall: d.wall};
+  post("/api/room-snaps", Object.assign({job: S.job}, ask)).then((model) => {
+    if (WEDIT !== d) return;
+    if (!model.ok) { toast(model.error, true); endWallEdit(d, true); return; }
+    d.model = model;
+    if (d.last) moveWallEdit(d, d.last);
+    if (d.released) dropWallEdit(d);
+  });
+}
+
+function onWallEditMove(e) {
+  const d = WEDIT;
+  if (!d) return;
+  if (!d.moved && Math.hypot(e.clientX - d.press[0], e.clientY - d.press[1]) < 4) return;
+  d.moved = true;
+  const ev = {clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey};
+  if (!d.model) { d.last = ev; return; }
+  moveWallEdit(d, ev);
+}
+
+function moveWallEdit(d, e) {
+  const m = planMap();
+  if (!m) return;
+  d.m = m;
+  const q = pointerMm(e);
+  if (!q) return;
+  const g = editLayer(m);
+  const P = (x, y) => mmToSvg(m, x, y).map((v) => v.toFixed(1));
+  const ws = (d.info && d.info.walls) || [];
+  let html = "", text = "";
+  if (d.kind === "corner") {
+    const s = pickSnap(d.model, q, m, e.shiftKey, null);
+    d.at = s.p;
+    if (d.el) d.el.classList.add("dragging");
+    for (const w of ws) {
+      const a = [w.x0, w.y0], b = [w.x1, w.y1];
+      const atA = Math.hypot(a[0] - d.from[0], a[1] - d.from[1]) <= 1;
+      const atB = Math.hypot(b[0] - d.from[0], b[1] - d.from[1]) <= 1;
+      if (!atA && !atB) continue;
+      const other = atA ? b : a;
+      const [x1, y1] = P(other[0], other[1]), [x2, y2] = P(s.p[0], s.p[1]);
+      html += `<line class="editwall" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--accent)" stroke-width="3"/>`;
+    }
+    const [cx, cy] = P(s.p[0], s.p[1]);
+    html += guideSvg(m, s.guides) + `<circle cx="${cx}" cy="${cy}" r="5" fill="var(--accent)"/>`;
+    text = `corner → ${s.p[0]}, ${s.p[1]}` + (s.why ? ` · ${s.why}` : "");
+    d.why = s.why;
+  } else {
+    const mdl = d.model, n = mdl.normal, o = mdl.origin;
+    // held where it was pressed: the offset is the pointer's travel along the normal
+    const along = (v) => (v[0] - o[0]) * n[0] + (v[1] - o[1]) * n[1];
+    let off = along(q) - along(d.pressMm || q);
+    let why = "";
+    if (!e.shiftKey) {
+      const tol = snapTol(mdl, m);
+      let best = null;
+      for (const c of mdl.offsets || []) {
+        const dd = Math.abs(c.d - off);
+        if (dd <= tol && (!best || dd < best.dd)) best = {dd: dd, c: c};
+      }
+      if (best) { off = best.c.d; why = best.c.why; }
+      else off = Math.round(off / (mdl.step || 10)) * (mdl.step || 10);
+    }
+    off = Math.round(off);
+    d.at = off;
+    const w = ws.find((x) => x.id === d.wall);
+    if (w) {
+      const a = [w.x0 + n[0] * off, w.y0 + n[1] * off], b = [w.x1 + n[0] * off, w.y1 + n[1] * off];
+      const [x1, y1] = P(a[0], a[1]), [x2, y2] = P(b[0], b[1]);
+      html += `<line class="editwall" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--accent)" stroke-width="3"/>`;
+      const c = why && (mdl.offsets || []).find((x) => x.why === why);
+      if (c) html += guideSvg(m, [[c.p, [c.p[0] - n[0] * 0, c.p[1]]], [c.p, projLine({p: a, d: [b[0] - a[0], b[1] - a[1]].map((v) => v / (Math.hypot(b[0] - a[0], b[1] - a[1]) || 1))}, c.p).f]]);
+    }
+    text = `wall ${d.wall} · ${off > 0 ? "+" : ""}${off} mm` + (why ? ` · ${why}` : "");
+    d.why = why;
+  }
+  g.innerHTML = html;
+  const out = $("dragreadout");
+  if (out) {
+    const r = $("plan").getBoundingClientRect();
+    out.style.display = "block";
+    out.style.left = (e.clientX - r.left + $("plan").scrollLeft + 14) + "px";
+    out.style.top = (e.clientY - r.top + $("plan").scrollTop + 14) + "px";
+    out.textContent = text;
+  }
+}
+
+function onWallEditUp(e) {
+  const d = WEDIT;
+  if (!d) return;
+  if (!d.moved) { endWallEdit(d, true); return; }           // a click: the selection stands
+  if (!d.model) { d.last = {clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey}; d.released = true; return; }
+  moveWallEdit(d, {clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey});
+  dropWallEdit(d);
+}
+
+function onWallEditKey(e) {
+  if (e.key === "Escape" && WEDIT) { e.preventDefault(); e.stopPropagation(); endWallEdit(WEDIT, true); }
+}
+
+function endWallEdit(d, cancelled) {
+  if (WEDIT === d) WEDIT = null;
+  window.removeEventListener("pointermove", onWallEditMove);
+  window.removeEventListener("pointerup", onWallEditUp);
+  window.removeEventListener("keydown", onWallEditKey);
+  if (d.el) d.el.classList.remove("dragging");
+  const m = planMap();
+  const g = m && m.svg.querySelector("#editlayer");
+  if (g) g.innerHTML = "";
+  const out = $("dragreadout");
+  if (out) out.style.display = "none";
+  d.cancelled = !!cancelled;
+}
+
+async function dropWallEdit(d) {
+  endWallEdit(d, false);
+  if (d.at === null || d.at === undefined) return;
+  let r;
+  if (d.kind === "corner") {
+    if (d.at[0] === d.from[0] && d.at[1] === d.from[1]) return;
+    r = await post("/api/corner-move", {job: S.job, point: d.from, to: d.at});
+  } else {
+    if (!d.at) return;
+    r = await post("/api/wall-move", {job: S.job, wall: d.wall, offset: d.at});
+  }
+  if (!r.ok) { toast(r.error, true); return; }
+  takeRoomReply(r);
+  const rep = r.report || {};
+  const said = [];
+  if (rep.clamped && rep.clamped.length) said.push(rep.clamped.map((c) =>
+    `${c[0]} on wall ${c[1]} kept to the wall: x ${c[2]} → ${c[3]}`).join("; "));
+  if (rep.too_long && rep.too_long.length) said.push(rep.too_long.map((c) =>
+    `${c[0]} no longer fits on wall ${c[1]}`).join("; "));
+  if (rep.openings && rep.openings.length) said.push(rep.openings.map((c) =>
+    `the ${c[1]} on wall ${c[0]} kept to the wall: ${c[2]} → ${c[3]}`).join("; "));
+  if (said.length) toast(said.join("\n"), !!(rep.too_long && rep.too_long.length));
+  renderRoomDock();
+  markDirty(true);
+  compute();
 }
 
 /* ---------- drag placement ------------------------------------------------
@@ -6507,14 +6802,21 @@ function svgPoint(evt) {
 
 $("plan").addEventListener("pointerdown", async (e) => {
   if (DRAW) return;                        // the drawing mode takes its own clicks
+  if (e.button !== 0) return;
+  const handle = e.target.closest(".cornerhandle");
+  if (handle) { startWallEdit(e, {kind: "corner", from: [+handle.dataset.cx, +handle.dataset.cy], el: handle}); return; }
   const poly = e.target.closest(".cab");
   if (!poly) {
-    // A wall's hit line selects the wall; empty canvas — a gap, the paper —
-    // selects the room (and ends an isolate). Either shows its card in the dock.
+    // A wall's hit line selects the wall — and a press that then MOVES drags it
+    // parallel to itself (ruling 3); empty canvas — a gap, the paper — selects
+    // the room (and ends an isolate). Either shows its card in the dock.
     const hit = e.target.closest(".wallhit");
     if (S.isolate !== null) { S.isolate = null; renderPlan(); }
     if (!S.job.room) return;
-    if (hit) selectWall(hit.dataset.wallhit); else selectRoom();
+    if (hit) {
+      selectWall(hit.dataset.wallhit);
+      startWallEdit(e, {kind: "wall", wall: hit.dataset.wallhit, el: hit});
+    } else selectRoom();
     return;
   }
   const number = +poly.dataset.cab;

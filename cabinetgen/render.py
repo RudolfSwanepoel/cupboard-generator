@@ -1261,6 +1261,8 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     out += _plan_plinths(job, show, T)
     out += _plan_obstructions(rm, T)
     out += _plan_tracks(rm, corners, T)
+    if margin:
+        out += _plan_corner_handles(rm, T, std)
     out += _legend_svg(rows, pad, H - leg + 2)
 
     out.append("</svg>")
@@ -1301,6 +1303,19 @@ def _plan_room_side(rm, T, std):
                    f'</linearGradient></defs>')
         out.append(f'<polygon class="roomside" data-wall="{escape(w.id)}" points="{pts}" '
                    f'fill="url(#{gid})" stroke="none" pointer-events="none"/>')
+    return out
+
+
+def _plan_corner_handles(rm, T, std):
+    """A small round handle on every corner and free end, shown on hover, to
+    drag it by (room redo Phase 2, ruling 3). The Room tab's plan only; it
+    carries the corner in world mm (`data-cx`, `data-cy`)."""
+    from .room import _corners
+    out = []
+    for x, y in _corners(rm, std):
+        sx, sy = T((x, y))
+        out.append(f'<circle class="cornerhandle" data-cx="{x}" data-cy="{y}" cx="{sx:.1f}" '
+                   f'cy="{sy:.1f}" r="6"/>')            # coloured by the page's stylesheet
     return out
 
 

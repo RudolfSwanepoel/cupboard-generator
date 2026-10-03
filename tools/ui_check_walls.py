@@ -787,9 +787,156 @@ def stage_layout(pw):
     browser.close()
 
 
+def drag_mm(page, a, b, shift=False, steps=10, release=True, readout=False):
+    """A real mouse drag on the plan from world point a to b (mm)."""
+    ax, ay = at_mm(page, *a)
+    bx, by = at_mm(page, *b)
+    page.mouse.move(ax, ay)
+    time.sleep(0.15)
+    if shift:
+        page.keyboard.down("Shift")
+    page.mouse.down()
+    for k in range(1, steps + 1):
+        page.mouse.move(ax + (bx - ax) * k / steps, ay + (by - ay) * k / steps)
+        time.sleep(0.03)
+    time.sleep(0.2)
+    page.mouse.move(bx, by)
+    time.sleep(0.1)
+    text = page.evaluate("() => { const r = $('dragreadout'); return r ? r.textContent : ''; }")
+    if release:
+        page.mouse.up()
+    if shift:
+        page.keyboard.up("Shift")
+    return text
+
+
+def settle(page):
+    time.sleep(0.4)
+    computed(page)
+
+
+def box_job(name):
+    job = Job(name=name, room=rectangular(4000, 3000, ceiling=2600),
+              cabinets=[Cabinet(number=1, width=600, height=720, depth=560, kind="base"),
+                        Cabinet(number=2, width=600, height=720, depth=560, kind="base")],
+              placements=[Placement(1, "B", 2200), Placement(2, "C", 500)])
+    return job
+
+
+def stage_cornerdrag(pw):
+    print("\nDrag a corner: the walls joined there follow; what stands on them keeps its x")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    adopt(page, box_job("cornerdrag"))
+    room_plan(page)
+    cx, cy = at_mm(page, 4000, 3000)
+    page.mouse.move(cx, cy)
+    time.sleep(0.2)
+    check("a round handle on the corner, shown on hover",
+          page.evaluate("([x, y]) => { const e = document.elementFromPoint(x, y); return e && e.classList.contains('cornerhandle') "
+                        "&& getComputedStyle(e).strokeOpacity; }", [cx, cy]), "1")
+    shot(page, "cornerdrag_hover", "#plancard")
+    txt = drag_mm(page, (4000, 3000), (4000, 2500), release=False)
+    check("while dragging the readout names where it goes", txt.startswith("corner → 4000, 2500"), True)
+    shot(page, "cornerdrag_drag", "#plancard")
+    page.keyboard.press("Escape")
+    page.mouse.up()
+    settle(page)
+    check("Esc during the drag restores: nothing moved", points(page)[1:3],
+          [["B", 4000, 0, 4000, 3000], ["C", 4000, 3000, 0, 3000]])
+    drag_mm(page, (4000, 3000), (4000, 2500))
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'B').y1 === 2500", timeout=10000)
+    settle(page)
+    check("dropped: B's end and C's start moved together", points(page)[1:3],
+          [["B", 4000, 0, 4000, 2500], ["C", 4000, 2500, 0, 3000]])
+    check("  the room still closed", page.evaluate("() => S.res.room.closure.text"), "closed room")
+    check("  cabinet 1 on B clamped to the shorter wall, cabinet 2 on C kept its x",
+          page.evaluate("() => S.job.placements.map((p) => [p.cabinet, p.wall, p.x])"), [[1, "B", 1900], [2, "C", 500]])
+    check("  and the clamp was said", "1 on wall B kept to the wall: x 2200 → 1900" in page.inner_text("#toast"), True)
+    shot(page, "cornerdrag_done", "#plancard")
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+def stage_walldrag(pw):
+    print("\nDrag a wall: it moves parallel; the walls at its ends stretch, a 90 stays 90")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    adopt(page, box_job("walldrag"))
+    room_plan(page)
+    txt = drag_mm(page, (4000, 1000), (3700, 1000), release=False)
+    check("the readout says the wall and the offset", txt, "wall B · +300 mm")
+    shot(page, "walldrag_drag", "#plancard")
+    page.mouse.up()
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'B').x0 === 3700", timeout=10000)
+    settle(page)
+    check("B moved 300 into the room; A and C shortened to it", points(page),
+          [["A", 0, 0, 3700, 0], ["B", 3700, 0, 3700, 3000], ["C", 3700, 3000, 0, 3000], ["D", 0, 3000, 0, 0]])
+    check("  every corner still 90", [w[2] for w in walls(page)], [90, 90, 90, 90])
+    check("  the wall is selected, its card in the dock", page.evaluate("() => S.selWall"), "B")
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+def u_job(name):
+    rm = Room(name=name, ceiling=2600, walls=chain_walls([("A", 3000), ("B", 4000), ("C", 2800)], closed=False))
+    return Job(name=name, room=rm, cabinets=[], placements=[])
+
+
+def stage_align(pw):
+    print("\nAlignment: a return wall's end lands exactly in line with the other corner")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    adopt(page, u_job("align"))
+    room_plan(page)
+    check("a U: C ends at x 200, short of A's start at x 0", points(page)[2], ["C", 3000, 4000, 200, 4000])
+    txt = drag_mm(page, (200, 4000), (18, 4012), release=False)
+    check("the readout names the alignment", "in line with the start of A" in txt, True)
+    check("  a guide line is drawn while it holds", page.locator("#plan #editlayer .snapguide").count() >= 1, True)
+    shot(page, "align_drag", "#plancard")
+    page.mouse.up()
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'C').x1 === 0", timeout=10000)
+    settle(page)
+    check("dropped exactly on A's X (and square to B)", points(page)[2], ["C", 3000, 4000, 0, 4000])
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+def stage_angle(pw):
+    print("\nAngle: a drag near 90 lands on 90; with Shift it does not")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    adopt(page, open_l_job("angle"))
+    room_plan(page)
+    txt = drag_mm(page, (3000, 2000), (3030, 2500), release=False)
+    check("the readout names the angle", "90° to A" in txt, True)
+    page.mouse.up()
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'B').y1 === 2500", timeout=10000)
+    settle(page)
+    check("dropped on 90: B straight on, 2500 long", (points(page)[1], walls(page)[0][2]),
+          (["B", 3000, 0, 3000, 2500], 90))
+    drag_mm(page, (3000, 2500), (3030, 2000), shift=True)
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'B').y1 !== 2500", timeout=10000)
+    settle(page)
+    b = points(page)[1]
+    check("with Shift nothing snaps: it lands where it was let go, off 90",
+          (b[3] != 3000, walls(page)[0][2] != 90), (True, True))
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 STAGES = {"draw": stage_draw, "one": stage_one, "flip": stage_flip, "renumber": stage_renumber,
           "height": stage_height, "input": stage_input, "drag": stage_drag, "3d": stage_3d,
-          "closure": stage_closure, "layout": stage_layout}
+          "closure": stage_closure, "layout": stage_layout, "cornerdrag": stage_cornerdrag,
+          "walldrag": stage_walldrag, "align": stage_align, "angle": stage_angle}
 
 
 def main() -> int:

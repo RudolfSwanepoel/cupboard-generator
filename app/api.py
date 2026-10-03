@@ -52,7 +52,8 @@ from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, 
                              blind_panel_height, blind_spans, carcass_z,
                              clashes as room_clashes,
                              closure_error, corner_angle, corner_points, crossing_walls,
-                             closure as room_closure,
+                             closure as room_closure, room_snaps as room_room_snaps,
+                             corner_move as room_corner_move, wall_move as room_wall_move,
                              free_x, gaps as room_gaps, geometry, walls_from_points,
                              is_closed, next_wall, prev_wall, walk_order, wall_height,
                              corner_before, out_of_square, flip_face, renumber_walls,
@@ -2334,6 +2335,61 @@ def room_renumber(payload):
     return dict(_room_reply(job), ok=True, mapping=mapping, applied=True)
 
 
+def _point(v, what):
+    try:
+        x, y = v
+        return (float(x), float(y))
+    except (TypeError, ValueError):
+        raise ValueError(f"{what} must be two numbers, x and y in mm")
+
+
+def room_snaps(payload):
+    """What a drag or a drawing on the plan may snap to (ruling 4, 3 October
+    2026): one call on the press; the browser projects the pointer and picks the
+    nearest of these (`room.room_snaps`). `mode` corner | wall | draw."""
+    job = _job(payload)
+    if job.room is None:
+        return {"ok": False, "error": "the job has no room"}
+    mode = str(payload.get("mode") or "corner")
+    try:
+        pt = _point(payload["point"], "the corner") if payload.get("point") is not None else None
+        pts = [_point(q, "a drawn corner") for q in (payload.get("points") or [])]
+        out = room_room_snaps(job, mode, point=pt, wall_id=payload.get("wall"), points=pts,
+                              std=job.std)
+    except (KeyError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return dict(out, ok=True)
+
+
+def corner_move(payload):
+    """Drag a corner (ruling 3): every wall end on `point` moves to `to`, whole
+    mm (`room.corner_move`); what stands on a wall that changed keeps its x,
+    clamped, and is reported. Hands back every record a wall edit can move."""
+    job = _job(payload)
+    if job.room is None:
+        return {"ok": False, "error": "the job has no room"}
+    try:
+        rep = room_corner_move(job, _point(payload.get("point"), "the corner"),
+                               _point(payload.get("to"), "where it goes"), job.std)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return dict(_room_reply(job), ok=True, report=rep)
+
+
+def wall_move(payload):
+    """Drag a wall by its body (ruling 3): `offset` mm along its normal, into
+    the room positive (`room.wall_move`); the walls at its ends stretch."""
+    job = _job(payload)
+    wid = str(payload.get("wall") or "")
+    if job.room is None or wid not in {w.id for w in job.room.walls}:
+        return {"ok": False, "error": f"the room has no wall {wid!r}"}
+    try:
+        rep = room_wall_move(job, wid, int(round(float(payload.get("offset") or 0))), job.std)
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return dict(_room_reply(job), ok=True, report=rep)
+
+
 def room_new(payload):
     """A fresh square room to start measuring from — the 4000 x 3000 pre-fill,
     four walls A-D as positioned segments. The browser does not invent wall
@@ -2630,6 +2686,9 @@ ROUTES = {
     "/api/wall-delete": wall_delete,
     "/api/wall-flip": wall_flip,
     "/api/room-renumber": room_renumber,
+    "/api/room-snaps": room_snaps,
+    "/api/corner-move": corner_move,
+    "/api/wall-move": wall_move,
 }
 
 

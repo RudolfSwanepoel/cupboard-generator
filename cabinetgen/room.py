@@ -758,6 +758,292 @@ def delete_wall(job, wall_id: str) -> dict:
     return {"unplaced": gone, "gaps": gaps_n, "plinths": plinths_n}
 
 
+# --- editing on the plan: drags move points (room redo Phase 2, 3 Oct 2026) -----
+
+def _ends_at(rm: Room, point, std: Standard = STANDARD) -> List[Tuple[str, int]]:
+    """Every wall end standing on `point` (within `join_tolerance`):
+    `(wall id, 0 for its start | 1 for its end)`."""
+    out = []
+    for w in rm.walls:
+        if math.dist((w.x0, w.y0), point) <= std.join_tolerance:
+            out.append((w.id, 0))
+        if math.dist((w.x1, w.y1), point) <= std.join_tolerance:
+            out.append((w.id, 1))
+    return out
+
+
+def keep_on_walls(job, lengths_before: Dict[str, int], std: Standard = STANDARD) -> dict:
+    """After walls change length, everything placed on them KEEPS ITS x along
+    the wall (ruling 3, 3 October 2026), clamped so it still stands on the
+    wall: a cabinet or placed panel to `length - its width`, an opening to
+    `length - its width`, an obstruction's centre to the length. Nothing is
+    moved off its wall. Says what had to move, and what no longer fits at all:
+    `{"clamped": [[number, wall, from, to]], "too_long": [[number, wall]],
+    "openings": [[wall, kind, from, to]]}`. Attached panels follow their
+    cabinet and are not touched here."""
+    rm = job.room
+    rep = {"clamped": [], "too_long": [], "openings": []}
+    by = {c.number: c for c in job.cabinets}
+    walls = {w.id: w for w in rm.walls}
+    for p in job.placements:
+        w = walls.get(p.wall)
+        cab = by.get(p.cabinet)
+        if w is None or cab is None or cab.is_attached:
+            continue
+        if lengths_before.get(w.id) == w.length:
+            continue
+        width = geometry(cab, std, job.materials).width
+        hi = max(w.length - width, 0)
+        if width > w.length:
+            rep["too_long"].append([p.cabinet, w.id])
+        if p.x > hi:
+            rep["clamped"].append([p.cabinet, w.id, p.x, hi])
+            p.x = hi
+    for w in rm.walls:
+        if lengths_before.get(w.id) == w.length:
+            continue
+        for o in w.openings:
+            hi = max(w.length - o.width, 0)
+            if o.x > hi:
+                rep["openings"].append([w.id, o.kind, o.x, hi])
+                o.x = hi
+        for ob in w.obstructions:
+            if ob.x > w.length:
+                rep["openings"].append([w.id, ob.kind, ob.x, w.length])
+                ob.x = w.length
+    return rep
+
+
+def corner_move(job, point, to, std: Standard = STANDARD) -> dict:
+    """Drag a corner (ruling 3): every wall end standing on `point` moves to
+    `to`, whole mm, so the walls joined there follow it; a free end moves
+    alone. Everything on a wall that changed keeps its x (`keep_on_walls`).
+    Dropped on another corner, the ends join it — which is how a loop that
+    opened is closed again by hand. Refused where no wall ends at `point`."""
+    rm = job.room
+    ends = _ends_at(rm, point, std)
+    if not ends:
+        raise ValueError("no wall ends there")
+    before = {w.id: w.length for w in rm.walls}
+    tx, ty = int(round(to[0])), int(round(to[1]))
+    for wid, k in ends:
+        w = _wall(rm, wid)
+        if k == 0:
+            w.x0, w.y0 = tx, ty
+        else:
+            w.x1, w.y1 = tx, ty
+    rep = keep_on_walls(job, before, std)
+    rep["moved"] = [wid for wid, _k in ends]
+    return rep
+
+
+def _line_meet(p, d, q, e) -> Optional[Point]:
+    """Where the line p + t d meets the line q + s e; None if parallel."""
+    den = d[0] * e[1] - d[1] * e[0]
+    if abs(den) < 1e-9:
+        return None
+    t = ((q[0] - p[0]) * e[1] - (q[1] - p[1]) * e[0]) / den
+    return (p[0] + t * d[0], p[1] + t * d[1])
+
+
+def wall_move(job, wall_id: str, offset: int, std: Standard = STANDARD) -> dict:
+    """Drag a wall by its body (ruling 3): it moves parallel to itself by
+    `offset` mm along its normal (positive into the room). The walls joined at
+    its ends STRETCH: each keeps its other end and its direction, and the
+    joint slides along it to the moved wall's new line — so a 90 neighbour
+    stays 90. Only a neighbour in line with it (parallel) has to turn, its
+    joint carried straight across. Everything on a wall that changed length
+    keeps its x (`keep_on_walls`)."""
+    rm = job.room
+    w = _wall(rm, wall_id)
+    con = connections(rm, std)
+    before = {v.id: v.length for v in rm.walls}
+    nx, ny = wall_normal(w)
+    d = wall_dir(w)
+    a0 = (w.x0 + nx * offset, w.y0 + ny * offset)
+    a1 = (w.x1 + nx * offset, w.y1 + ny * offset)
+    new0, new1 = a0, a1
+    prv, nxt = con["prev"].get(wall_id), con["next"].get(wall_id)
+    if prv is not None and prv != wall_id:
+        v = _wall(rm, prv)
+        m = _line_meet((v.x0, v.y0), wall_dir(v), a0, d)
+        if m is not None:
+            new0 = m
+    if nxt is not None and nxt != wall_id:
+        v = _wall(rm, nxt)
+        m = _line_meet((v.x1, v.y1), wall_dir(v), a0, d)
+        if m is not None:
+            new1 = m
+    p0 = (int(round(new0[0])), int(round(new0[1])))
+    p1 = (int(round(new1[0])), int(round(new1[1])))
+    if prv is not None and prv != wall_id:
+        v = _wall(rm, prv)
+        v.x1, v.y1 = p0
+    if nxt is not None and nxt != wall_id:
+        v = _wall(rm, nxt)
+        v.x0, v.y0 = p1
+    w.x0, w.y0 = p0
+    w.x1, w.y1 = p1
+    rep = keep_on_walls(job, before, std)
+    rep["moved"] = [i for i in (prv, wall_id, nxt) if i is not None]
+    return rep
+
+
+def corner_name(rm: Room, point, std: Standard = STANDARD) -> str:
+    """How a corner is said: "D→E" where wall D ends and E starts on it,
+    else "the end of C" / "the start of C"."""
+    ends = _ends_at(rm, point, std)
+    finish = sorted((w for w, k in ends if k == 1), key=letter_key)
+    start = sorted((w for w, k in ends if k == 0), key=letter_key)
+    if finish and start:
+        return f"{finish[0]}\u2192{start[0]}"
+    if finish:
+        return f"the end of {finish[0]}"
+    if start:
+        return f"the start of {start[0]}"
+    return "a corner"
+
+
+def _corners(rm: Room, std: Standard = STANDARD) -> List[Tuple[int, int]]:
+    out = []
+    for w in sorted(rm.walls, key=lambda v: letter_key(v.id)):
+        for q in ((w.x0, w.y0), (w.x1, w.y1)):
+            if not any(math.dist(q, r) <= std.join_tolerance for r in out):
+                out.append(q)
+    return out
+
+
+def _unit(dx, dy):
+    n = math.hypot(dx, dy)
+    return (dx / n, dy / n) if n > 1e-9 else (1.0, 0.0)
+
+
+def _angle_rays(rm: Room, anchor, ref_dir, ref_name, std: Standard) -> List[dict]:
+    """Directions a wall from `anchor` may snap to (ruling 4): relative to the
+    wall it meets there (`ref_dir`, the direction of travel INTO the anchor)
+    and absolute, on the plan's axes, every `draw_angle_step`. Each carries a
+    rank — 0 the neighbour at 90 or 180, 1 the plan's axes, 2 any 45, 3 the
+    step — and the reason said beside the cursor."""
+    step = std.draw_angle_step or 15
+    out = []
+    seen = []
+
+    def add(theta, rank, why):
+        d = (math.cos(theta), math.sin(theta))
+        for q in seen:
+            if abs(q[0] - d[0]) < 1e-9 and abs(q[1] - d[1]) < 1e-9:
+                return
+        seen.append(d)
+        out.append({"p": [anchor[0], anchor[1]], "d": [round(d[0], 9), round(d[1], 9)],
+                    "rank": rank, "why": why})
+
+    cands = []
+    if ref_dir is not None:
+        base = math.atan2(ref_dir[1], ref_dir[0])
+        for k in range(0, 360, step):
+            turn = k if k <= 180 else k - 360
+            interior = 180 - turn            # the corner it makes, read inside
+            a = abs(turn)
+            rank = 0 if a in (90, 0) else 2 if a % 45 == 0 else 3
+            if a == 180:
+                continue                      # straight back along the wall it meets
+            why = (f"in line with {ref_name}" if a == 0 else
+                   f"{abs(interior) if abs(interior) <= 180 else 360 - abs(interior)}\u00b0 to {ref_name}")
+            cands.append((rank, k, base + math.radians(turn), why))
+    for k in range(0, 360, step):
+        rank = 1 if k % 90 == 0 else 2 if k % 45 == 0 else 3
+        cands.append((rank + (0.5 if rank == 1 else 0), k, math.radians(k),
+                      "square to the plan" if k % 90 == 0 else f"{k}\u00b0 on the plan"))
+    for rank, _k, theta, why in sorted(cands, key=lambda c: (c[0], c[1])):
+        add(theta, int(rank), why)
+    return out
+
+
+def room_snaps(job, mode: str, point=None, wall_id: str = None, points=None,
+               std: Standard = STANDARD) -> dict:
+    """Everything a drag or a drawing on the plan may snap to (ruling 4, 3
+    October 2026), worked out once on the press; the browser only projects the
+    pointer and picks the nearest, in this priority: a corner (join) — a point
+    on a wall (Draw only) — ALIGNMENT, a line through another corner along the
+    plan's axes or along any wall's own direction — an ANGLE for the wall being
+    drawn or stretched — and the length step. Each candidate says why.
+
+    `mode` "corner": `point` is the corner dragged; "wall": `wall_id` is moved
+    parallel (candidates are `offsets` along its normal); "draw": `points` are
+    the corners clicked so far. Whole mm in, unit vectors out."""
+    rm = job.room
+    std = std or job.std
+    moving = []
+    if mode == "corner" and point is not None:
+        moving = [tuple(point)]
+    corners = [c for c in _corners(rm, std)
+               if not any(math.dist(c, m) <= std.join_tolerance for m in moving)]
+    drawn = [tuple(q) for q in (points or [])]
+    out = {"mode": mode, "tolerance": std.snap_tolerance, "step": std.draw_length_step,
+           "corners": [{"p": [c[0], c[1]], "why": f"on corner {corner_name(rm, c, std)}"}
+                       for c in corners],
+           "segments": [], "lines": [], "rays": [], "offsets": []}
+    if mode == "draw":
+        out["segments"] = [{"a": [w.x0, w.y0], "b": [w.x1, w.y1], "wall": w.id,
+                            "why": f"on wall {w.id}"} for w in sorted(rm.walls, key=lambda v: letter_key(v.id))]
+    # alignment: through every other corner (and a drawing's own corners but the
+    # last), along the plan's axes and along every wall direction not on them
+    dirs = [((0.0, 1.0), "x"), ((1.0, 0.0), "y")]
+    for w in rm.walls:
+        d = wall_dir(w)
+        for e in (d, (-d[1], d[0])):
+            if abs(e[0]) > 1e-6 and abs(e[1]) > 1e-6 and not any(
+                    abs(abs(e[0] * f[0] + e[1] * f[1]) - 1) < 1e-9 for f, _t in dirs):
+                dirs.append((e, "dir"))
+    throughs = [(c, corner_name(rm, c, std)) for c in corners]
+    throughs += [(q, f"drawn corner {k + 1}") for k, q in enumerate(drawn[:-1])]
+    for c, name in throughs:
+        for e, kind in dirs:
+            out["lines"].append({"p": [c[0], c[1]], "d": [round(e[0], 9), round(e[1], 9)],
+                                 "kind": kind, "why": f"in line with {name}"})
+    if mode == "corner" and point is not None:
+        # each wall ending at the corner stretches about its OTHER end: rays
+        # from there, relative to the wall that meets that far end
+        con = connections(rm, std)
+        for wid, k in _ends_at(rm, tuple(point), std):
+            w = _wall(rm, wid)
+            if k == 1:          # the dragged point is its end: anchored at its start
+                anchor, nb = (w.x0, w.y0), con["prev"].get(wid)
+                ref = wall_dir(_wall(rm, nb)) if nb else None
+            else:               # its start: anchored at its end, walked backwards
+                anchor, nb = (w.x1, w.y1), con["next"].get(wid)
+                ref = None
+                if nb:
+                    d = wall_dir(_wall(rm, nb))
+                    ref = (-d[0], -d[1])
+            out["rays"] += [dict(r, wall=wid) for r in _angle_rays(rm, anchor, ref, nb or "", std)]
+    elif mode == "draw" and drawn:
+        last = drawn[-1]
+        ref, name = None, ""
+        if len(drawn) >= 2:
+            ref = _unit(last[0] - drawn[-2][0], last[1] - drawn[-2][1])
+            name = "the last wall"
+        else:
+            for wid, k in _ends_at(rm, last, std):
+                w = _wall(rm, wid)
+                ref, name = (wall_dir(w) if k == 1 else tuple(-v for v in wall_dir(w))), wid
+                break
+        out["rays"] = _angle_rays(rm, last, ref, name, std)
+    elif mode == "wall" and wall_id is not None:
+        w = _wall(rm, wall_id)
+        nx, ny = wall_normal(w)
+        out["normal"] = [nx, ny]
+        out["origin"] = [w.x0, w.y0]
+        own = {(w.x0, w.y0), (w.x1, w.y1)}
+        for c in corners:
+            if any(math.dist(c, o) <= std.join_tolerance for o in own):
+                continue
+            off = (c[0] - w.x0) * nx + (c[1] - w.y0) * ny
+            out["offsets"].append({"d": round(off, 3), "p": [c[0], c[1]],
+                                   "why": f"in line with {corner_name(rm, c, std)}"})
+    return out
+
+
 # --- what a cabinet actually is: read off its panels, never off its labels -----
 
 CARCASS_ROLES = ("Side", "Top", "Bottom", "Shelve", "Divider")

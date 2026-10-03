@@ -57,6 +57,7 @@ from cabinetgen.room import (add_wall, cabinet_footprint, chain_walls,     # noq
 from cabinetgen.room import flip_face as room_flip_face                    # noqa: E402
 from cabinetgen.room import renumber_walls, delete_wall, wall_height       # noqa: E402
 from cabinetgen.room import closure                                       # noqa: E402
+from cabinetgen.room import corner_move as room_corner_move, wall_move as room_wall_move, room_snaps  # noqa: E402
 from cabinetgen.scene import build as scene_build                         # noqa: E402
 from cabinetgen.render import _plan_room_side                             # noqa: E402
 from cabinetgen.store import job_from_dict, job_to_dict, room_from_dict    # noqa: E402
@@ -327,6 +328,9 @@ def main() -> int:
     delete()
     angled()
     closure_text()
+    corner_move()
+    wall_move()
+    snaps()
 
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0
@@ -938,6 +942,109 @@ def closure_text():
           (closure(u)["text"], closure(u)["miss"]), ("open run", 0))
     ell = Room(name="L", walls=chain_walls([("A", 3000), ("B", 2000)], closed=False))
     check("two walls never make a loop", closure(ell)["text"], "open run")
+
+
+def _box_job(room):
+    cabs = [Cabinet(number=1, width=600, height=720, depth=560, kind="base"),
+            Cabinet(number=2, width=600, height=720, depth=560, kind="base")]
+    return Job(name="drag", room=room, cabinets=cabs,
+               placements=[Placement(1, "B", 2200), Placement(2, "C", 500)])
+
+
+def corner_move():
+    """Ruling 3: a corner dragged moves every wall end on it; what stands on a
+    wall that changed keeps its x, clamped to the wall, and is reported."""
+    print("\ncorner_move: the joined ends move together; placements keep x, clamped and reported")
+    job = _box_job(rectangular(4000, 3000))
+    job.room.walls[1].openings.append(Opening("window", 2000, 900, 900, 2100))
+    rep = room_corner_move(job, (4000, 3000), (4000, 2500))
+    check("B's end and C's start moved together, the loop still closed",
+          (pts(job.room)[1:3], closure(job.room)["closed"]),
+          ([("B", 4000, 0, 4000, 2500), ("C", 4000, 2500, 0, 3000)], True))
+    check("cabinet 1 on B (x 2200, 600 wide) clamped to 1900 and said; cabinet 2 on C keeps its x",
+          ([[p.cabinet, p.wall, p.x] for p in job.placements], rep["clamped"]),
+          ([[1, "B", 1900], [2, "C", 500]], [[1, "B", 2200, 1900]]))
+    check("the window on B kept to the wall too", (job.room.walls[1].openings[0].x, rep["openings"]),
+          (1600, [["B", "window", 2000, 1600]]))
+    short = _box_job(rectangular(4000, 3000))
+    rep = room_corner_move(short, (4000, 3000), (4000, 500))
+    check("a wall shorter than an item: it is never moved off, and said",
+          (short.placements[0].x, rep["too_long"]), (0, [[1, "B"]]))
+    free = Job(name="f", room=Room(name="f", walls=[Wall("A", 0, 0, 3000, 0)]))
+    room_corner_move(free, (3000, 0), (3500, 0))
+    check("a free end moves alone", pts(free.room), [("A", 0, 0, 3500, 0)])
+    opened = Job(name="o", room=rectangular(4000, 3000))
+    set_length(opened.room, "A", 4100)
+    check("a loop opened by a typed length...", closure(opened.room)["miss"], 100)
+    d = [w for w in opened.room.walls if w.id == "D"][0]
+    room_corner_move(opened, (d.x1, d.y1), (0, 0))
+    check("  ...closes when its open end is dragged onto the other corner", closure(opened.room)["text"], "closed room")
+    try:
+        room_corner_move(job, (1234, 5678), (0, 0))
+        check("no wall ends there: refused", False, True)
+    except ValueError:
+        check("no wall ends there: refused", True, True)
+
+
+def wall_move():
+    """Ruling 3: a wall dragged parallel; its neighbours keep their other end
+    and their direction, so a 90 stays 90."""
+    print("\nwall_move: the neighbours stretch, a 90 stays 90")
+    job = _box_job(rectangular(4000, 3000))
+    rep = room_wall_move(job, "B", 300)            # into the room: the room 300 shorter
+    check("B moved 300 into the room; A and C stretch (shorten) to it",
+          pts(job.room), [("A", 0, 0, 3700, 0), ("B", 3700, 0, 3700, 3000),
+                          ("C", 3700, 3000, 0, 3000), ("D", 0, 3000, 0, 0)])
+    check("every corner still 90, the room closed",
+          ([corner_angle(job.room, w) for w in "ABCD"], closure(job.room)["closed"]), ([90] * 4, True))
+    check("cabinet 2 on C keeps its x from C's start, which moved with B (x 500)",
+          [[p.cabinet, p.wall, p.x] for p in job.placements], [[1, "B", 2200], [2, "C", 500]])
+    check("  reported as moved: A, B, C", rep["moved"], ["A", "B", "C"])
+    sp = Job(name="splay", room=Room(name="s", walls=chain_walls(
+        [("A", 4000), ("B", 3000), ("C", 2000), ("E", 2828), ("D", 1000)], corners=[90, 90, 135, 135, 90])))
+    before = corner_angle(sp.room, "C")
+    room_wall_move(sp, "E", 100)
+    check("a splayed wall moved: its neighbours keep their directions, the 135s stay 135",
+          ([corner_angle(sp.room, "C"), corner_angle(sp.room, "E")], before), ([135, 135], 135))
+    check("  the room stays closed", closure(sp.room)["closed"], True)
+    line = Job(name="l", room=Room(name="l", walls=[Wall("A", 0, 0, 2000, 0), Wall("B", 2000, 0, 4000, 0)]))
+    room_wall_move(line, "B", 200)
+    check("a neighbour in line has to turn: its joint carried straight across",
+          pts(line.room), [("A", 0, 0, 2000, 200), ("B", 2000, 200, 4000, 200)])
+
+
+def snaps():
+    """Ruling 4: the candidates, each with its reason, in the ruled priority."""
+    print("\nsnaps: corners, alignment, angles, offsets — each with its reason")
+    ell = Job(name="L", room=Room(name="L", walls=chain_walls([("A", 4000), ("B", 3000)], closed=False)))
+    sn = room_snaps(ell, "corner", point=(4000, 3000))
+    check("an L's free end: the other corners are joins, named",
+          sorted(c["why"] for c in sn["corners"]), ["on corner A→B", "on corner the start of A"])
+    xs = sorted({(l["p"][0], l["why"]) for l in sn["lines"] if l["d"] == [0.0, 1.0]})
+    check("  alignment: a vertical line through each other corner (the X the return lines up with)",
+          xs, [(0, "in line with the start of A"), (4000, "in line with A→B")])
+    rays = [(r["d"], r["rank"], r["why"]) for r in sn["rays"] if r["rank"] == 0]
+    check("  angles: B stretches about its start; in line with A and 90 to A rank first",
+          rays, [([1.0, 0.0], 0, "in line with A"), ([0.0, 1.0], 0, "90° to A"), ([0.0, -1.0], 0, "90° to A")])
+    ranks = [r["rank"] for r in sn["rays"]]
+    check("  the priority order: the neighbour's 90 / 180, the plan's axes, 45s, the step",
+          ranks == sorted(ranks) and ranks[0] == 0 and 1 in ranks and 2 in ranks and 3 in ranks, True)
+    u = Job(name="U", room=Room(name="U", walls=chain_walls([("A", 3000), ("B", 4000), ("C", 2800)], closed=False)))
+    sn = room_snaps(u, "corner", point=(200, 4000))
+    al = [l["why"] for l in sn["lines"] if l["d"] == [0.0, 1.0] and l["p"][0] == 0]
+    check("a U: dragging C's free end, a vertical line through A's start lands it on A's X",
+          al, ["in line with the start of A"])
+    sn = room_snaps(u, "wall", wall_id="C")
+    check("a wall drag: the offsets that put its line through another corner",
+          sorted((o["d"], o["why"]) for o in sn["offsets"]),
+          [(4000.0, "in line with A→B"), (4000.0, "in line with the start of A")])
+    sq = Job(name="sq", room=rectangular(4000, 3000))
+    sn = room_snaps(sq, "draw", points=[(1000, 1000), (2000, 1000)])
+    check("drawing: corners, the walls as segments (for a split), and rays from the last corner",
+          (len(sn["corners"]), [g["wall"] for g in sn["segments"]], sn["rays"][0]["p"], sn["rays"][0]["why"]),
+          (4, ["A", "B", "C", "D"], [2000, 1000], "in line with the last wall"))
+    check("  a drawing's own earlier corners line up too",
+          any(l["why"] == "in line with drawn corner 1" for l in sn["lines"]), True)
 
 
 if __name__ == "__main__":
