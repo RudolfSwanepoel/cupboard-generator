@@ -1200,8 +1200,10 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
            f'<rect width="{W}" height="{H}" fill="none"/>']
 
     out += _plan_room_side(rm, T, std)
-    out += _plan_walls(rm, corners, T, scale, std)
+    walls_out, lengths = _plan_walls(rm, corners, T, scale, std)
+    out += walls_out
     gap_shapes, labels = _plan_gaps(job, show, T)
+    labels = lengths + labels      # a wall's length first: it is never dropped
     out += gap_shapes
     # a wall is selected by a click on it: a fat invisible line under the
     # cabinets (a panel's PANEL_GRAB, the same bargain), so a cabinet on the
@@ -1335,8 +1337,9 @@ def _plan_wall_hits(rm, T):
 def _plan_walls(rm, corners, T, scale, std: Standard = STANDARD):
     """Wall lines, their lengths, openings as breaks, obstructions as boxes;
     and the wall's thickness as a hatched band on its BACK (`Wall.thickness`,
-    drawing only, `Standard.wall_thickness` where none is set)."""
-    out = []
+    drawing only, `Standard.wall_thickness` where none is set). Returns
+    `(shapes, length labels)`: the lengths go through `_place_labels`."""
+    out, lengths = [], []
     frames = wall_frames(rm)
     for w in rm.walls:
         (ax, ay), (bx, by) = T((w.x0, w.y0)), T((w.x1, w.y1))
@@ -1364,13 +1367,21 @@ def _plan_walls(rm, corners, T, scale, std: Standard = STANDARD):
             out.append(f'<text x="{mid[0]:.1f}" y="{mid[1] - 6:.1f}" font-size="8.5" '
                        f'text-anchor="middle" fill="{MUTED}">{escape(op.kind)} {op.width}</text>')
         # length label, pushed outside the room along the outward normal, clear
-        # of the thickness band
+        # of the thickness band; placed with every other label by
+        # `_place_labels`, and where it would sit on another, moved further out
+        # along the same normal on a short leader — never dropped (touch-ups,
+        # 3 October 2026). Its box is the one the page draws over it: the
+        # figure in a text box and "mm" beside it (`planLengths`).
         off = max(22, t * scale + 12)
         mx, my = (ax + bx) / 2, (ay + by) / 2
-        out.append(f'<text class="walllen" data-wall="{escape(w.id)}" x="{mx - nx * off:.1f}" '
-                   f'y="{my - ny * off + 4:.1f}" font-size="10.5" '
-                   f'text-anchor="middle" fill="{INK}">{escape(w.id)} · {w.length}</text>')
-    return out
+        text = f"{w.id} · {w.length}"
+        lb = _label(mx - nx * off, my - ny * off + 4, text, 10.5, INK, prio=0)
+        lb["w"] = len(f"{text} mm") * 10.5 * 0.58 + 12
+        lb["top"], lb["bottom"] = 14, 6      # the field the page lays over it
+        lb["steps"] = [(-nx * LENGTH_STEP * k, -ny * LENGTH_STEP * k) for k in range(1, LENGTH_STEPS + 1)]
+        lb["attrs"] = f' class="walllen" data-wall="{escape(w.id)}"'
+        lengths.append(lb)
+    return out, lengths
 
 
 def _plan_gaps(job, show, T):
@@ -1674,6 +1685,10 @@ def _plan_label(rm, cab, p, T, std: Standard = STANDARD, materials: dict = None)
 # given up on: pixels, and nothing reads it but `_place_labels`.
 LEADER_STEPS = ((0, -13), (0, 13), (16, 0), (-16, 0), (14, -13), (-14, -13),
                 (14, 13), (-14, 13), (0, -24), (0, 24), (26, 0), (-26, 0))
+# A wall's length label moves only out along its wall's outward normal, this
+# far a step, up to this many steps: pixels, read by `_plan_walls` alone.
+LENGTH_STEP = 8
+LENGTH_STEPS = 16
 
 
 def _label(x, y, text, size, fill, anchor="middle", prio=1, drop=False,
@@ -1687,8 +1702,10 @@ def _label(x, y, text, size, fill, anchor="middle", prio=1, drop=False,
 
 
 def _label_box(lb, dx=0.0, dy=0.0):
-    w = len(lb["text"]) * lb["size"] * 0.58
+    w = lb.get("w") or len(lb["text"]) * lb["size"] * 0.58
     x0 = lb["x"] + dx - (w / 2 if lb["anchor"] == "middle" else 0)
+    if "top" in lb:          # a box of its own: a wall length's field, 20 high
+        return (x0 - 1, lb["y"] + dy - lb["top"], x0 + w + 1, lb["y"] + dy + lb["bottom"])
     y1 = lb["y"] + dy + lb["size"] * 0.2
     return (x0 - 1, y1 - lb["size"] * 0.95, x0 + w + 1, y1)
 
@@ -1712,7 +1729,8 @@ def _place_labels(labels) -> list:
     for lb in sorted(labels, key=lambda lb: lb["prio"]):
         if lb["beside"] is not None and lb["beside"]["at"] != (0, 0):
             continue                     # its number was moved: the size goes
-        steps = [(0, 0)] + (list(LEADER_STEPS) if lb["leader"] else [])
+        steps = [(0, 0)] + (lb["steps"] if lb.get("steps")
+                            else list(LEADER_STEPS) if lb["leader"] else [])
         at = next((d for d in steps if clear(_label_box(lb, *d))), None)
         if at is None:
             if lb["drop"]:
@@ -1731,7 +1749,7 @@ def _place_labels(labels) -> list:
                        f'x2="{ex:.1f}" y2="{ey:.1f}" stroke="{MUTED}" '
                        f'stroke-width="{WEIGHT["dim"]}" pointer-events="none"/>')
         anchor = "" if lb["anchor"] == "start" else f' text-anchor="{lb["anchor"]}"'
-        out.append(f'<text x="{lb["x"] + dx:.1f}" y="{lb["y"] + dy:.1f}" '
+        out.append(f'<text{lb.get("attrs", "")} x="{lb["x"] + dx:.1f}" y="{lb["y"] + dy:.1f}" '
                    f'font-size="{lb["size"]}"{anchor} fill="{lb["fill"]}">'
                    f'{escape(lb["text"])}</text>')
     return out

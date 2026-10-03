@@ -595,9 +595,10 @@
   #plan .cornerhandle{fill:var(--accent);fill-opacity:0;stroke:var(--accent);stroke-opacity:0;
                       stroke-width:1.5;cursor:move;pointer-events:all}
   /* a wall's length on the plan, a text box styled as the label (ruling 5) */
-  #plan .planlen{display:flex;align-items:center;justify-content:center;gap:3px;height:20px;
+  #plan .planlen{display:inline-flex;align-items:center;gap:3px;height:20px;width:max-content;
                  font:10.5px system-ui,sans-serif;color:var(--ink);white-space:nowrap}
-  #plan .planlen input{width:4.6ch;padding:0 2px;height:17px;font:inherit;text-align:center;border:1px solid transparent;
+  #plan .planlen input{width:6ch;padding:0 2px;height:17px;font:inherit;text-align:center;border:1px solid transparent;
+                       box-sizing:border-box;font-variant-numeric:tabular-nums;
                        background:transparent;box-shadow:none;border-radius:4px;color:inherit}
   #plan .planlen input:hover{border-color:var(--rule);background:var(--panel)}
   #plan .planlen input:focus{border-color:var(--accent);background:var(--panel);box-shadow:var(--focus);outline:none}
@@ -6345,19 +6346,18 @@ function planLengths() {
     const w = info.walls.find((x) => x.id === wid);
     if (!w) return;
     const x = +t.getAttribute("x"), y = +t.getAttribute("y");
-    // as wide as the label it stands for, and the "mm" beside it
-    let half = 50;
-    try { half = Math.max(40, t.getBBox().width / 2 + 16); } catch (err) { /* not laid out: the default */ }
     const fo = document.createElementNS(NS, "foreignObject");
-    fo.setAttribute("x", (x - half).toFixed(1));
+    fo.setAttribute("x", (x - 100).toFixed(1));
     fo.setAttribute("y", (y - 14).toFixed(1));
-    fo.setAttribute("width", (2 * half).toFixed(1));
+    fo.setAttribute("width", "200");
     fo.setAttribute("height", "20");
     fo.setAttribute("class", "planlenfo");
+    fo.dataset.cx = x;
     fo.innerHTML = `<div xmlns="http://www.w3.org/1999/xhtml" class="planlen"><span>${esc(wid)} ·</span><input
       type="text" inputmode="numeric" data-planlen="${esc(wid)}" value="${w.length}"
       title="wall ${esc(wid)}'s length — type the measured figure, Enter"><span>mm</span></div>`;
     t.replaceWith(fo);
+    planLenFit(fo.querySelector("input"));
   });
   const f = S.planLenFocus;
   S.planLenFocus = null;
@@ -6366,9 +6366,26 @@ function planLengths() {
   const inp = f && m.svg.querySelector(`input[data-planlen="${CSS.escape(f)}"]`);
   if (inp) {
     inp.focus();
-    if (keep) { inp.value = keep.value; inp.setSelectionRange(keep.a, keep.b); } else inp.select();
+    if (keep) { inp.value = keep.value; inp.setSelectionRange(keep.a, keep.b); planLenFit(inp); } else inp.select();
   }
 }
+
+// A length's box is as wide as what it holds, at every zoom (touch-ups, 3
+// October 2026): the field as wide as its figure, the label as wide as the
+// field and its "B ·" and "mm", centred where the engine put the text. Inside
+// a foreignObject a CSS pixel is a drawing unit, so the zoom scales it all.
+function planLenFit(inp) {
+  if (!inp) return;
+  inp.style.width = `calc(${Math.max(2, inp.value.length)}ch + 6px)`;
+  const div = inp.parentElement, fo = div.parentElement;
+  const wd = Math.ceil(div.scrollWidth) + 2;
+  fo.setAttribute("width", wd);
+  fo.setAttribute("x", (+fo.dataset.cx - wd / 2).toFixed(1));
+}
+
+$("plan").addEventListener("input", (e) => {
+  if (e.target.dataset && e.target.dataset.planlen) planLenFit(e.target);
+});
 
 function planLenNext(wid) {
   const order = ((roomInfo() || {}).walk) || [];

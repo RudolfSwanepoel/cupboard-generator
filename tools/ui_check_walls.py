@@ -4,7 +4,7 @@ optional).
 
     python run_app.py --no-window --port 8766      # in another window
     python tools/ui_check_walls.py [--port 8766] [--stage draw|one|flip|renumber|height|input|drag|3d|
-        closure|layout|cornerdrag|walldrag|align|angle|label|typedraw|split|nook|flipall|all]
+        closure|layout|cornerdrag|walldrag|align|angle|label|typedraw|split|nook|flipall|labels|all]
 
 Drives what check_room.py cannot: the toolbar, the Room card and the Wall card
 in the dock; Draw walls ADDING walls to a room and starting on an existing
@@ -16,7 +16,9 @@ in 3D. Phase 2 (3 October 2026): open / closed said the same by every display
 a wall dragged with snaps (cornerdrag, walldrag, align, angle), a length typed
 on the plan (label), typed lengths while drawing (typedraw), a T-wall split
 (split), the Nook tool (nook), Flip room and Add back face (flipall); and
-Draw walls drawing ON the plan, one SVG before, during and after (draw). Every job is built in the page (`adopt`), never loaded from jobs/ and
+Draw walls drawing ON the plan, one SVG before, during and after (draw). Touch-ups
+(3 October 2026): the tools in the strip and Placements beside the plan (layout),
+length labels sized to their text and never on each other at 50 / 93 / 150 % (labels). Every job is built in the page (`adopt`), never loaded from jobs/ and
 never saved. Screenshots go into output/_checks/ui_check_walls/.
 
 Playwright is the only third-party package anywhere near this app and only the
@@ -1149,6 +1151,69 @@ def stage_nook(pw):
     browser.close()
 
 
+def stage_labels(pw):
+    print("\nLength labels on the plan: sized to their text, never on each other (touch-ups, 3 Oct 2026)")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    adopt(page, box_job("labels"))
+    room_plan(page)
+    # a nook: short walls side by side, as on Rudolf's laptop (F 355 over H 560)
+    page.click("#toolnook")
+    page.wait_for_selector("#plan svg #drawlayer .drawgrid", state="attached", timeout=5000)
+    click_mm(page, 1000, 0)
+    page.wait_for_selector("#nookbox", timeout=5000)
+    page.fill("#nookw", "355")
+    page.fill("#nookd", "560")
+    page.fill("#nookat", "1000")
+    page.click("#nookgo")
+    page.wait_for_function("() => S.job.room.walls.length === 8", timeout=10000)
+    computed(page)
+    # a five-digit wall as well: the widest figure a label has to hold
+    page.click('#plan input[data-planlen="C"]')
+    page.keyboard.press("Control+A")
+    page.keyboard.type("12000")
+    page.keyboard.press("Enter")
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'C').x0 - S.job.room.walls.find((w) => w.id === 'C').x1 === 12000",
+                           timeout=10000)
+    settle(page)
+    for pct in (50, 93, 150):
+        page.evaluate("(z) => { S.zoom.plan = z / 100; applyZoom('plan'); }", pct)
+        time.sleep(0.3)
+        r = page.evaluate("""() => {
+            const labs = [...document.querySelectorAll('#plan foreignObject.planlenfo')].map((fo) => {
+                const div = fo.firstElementChild, inp = div.querySelector('input');
+                const a = div.getBoundingClientRect(), f = fo.getBoundingClientRect();
+                return {wall: inp.dataset.planlen, text: div.textContent.replace(/\\s+/g, ' ').trim(), value: inp.value,
+                        inputHolds: inp.scrollWidth <= inp.clientWidth,
+                        boxHolds: div.scrollWidth <= +fo.getAttribute('width') && a.right <= f.right + 0.5 && a.left >= f.left - 0.5,
+                        r: [a.left, a.top, a.right, a.bottom]}; });
+            const over = [];
+            for (let i = 0; i < labs.length; i++) for (let j = i + 1; j < labs.length; j++) {
+                const p = labs[i].r, q = labs[j].r;
+                if (p[0] < q[2] && q[0] < p[2] && p[1] < q[3] && q[1] < p[3]) over.push(labs[i].wall + '/' + labs[j].wall); }
+            return {n: labs.length, walls: labs.map((l) => l.wall).sort(),
+                    clipped: labs.filter((l) => !l.inputHolds || !l.boxHolds).map((l) => l.wall), over: over}; }""")
+        check(f"{pct}%: every wall has its length on the plan, a text box", [r["n"], r["walls"]],
+              [8, ["A", "B", "C", "D", "E", "F", "G", "H"]])
+        check(f"{pct}%:   each box holds its full text (none clipped)", r["clipped"], [])
+        check(f"{pct}%:   no two labels overlap", r["over"], [])
+        shot(page, f"touchup_labels_{pct}", "#plancard")
+    page.evaluate("() => { S.zoom.plan = 1; applyZoom('plan'); }")
+    page.click('#plan input[data-planlen="A"]')
+    page.keyboard.press("Control+A")
+    page.keyboard.type("123456")
+    time.sleep(0.2)
+    check("typing a longer figure grows the box with it",
+          page.evaluate("() => { const i = document.querySelector('#plan input[data-planlen=\"A\"]'); "
+                        "return i.scrollWidth <= i.clientWidth && i.parentElement.scrollWidth <= +i.closest('foreignObject').getAttribute('width'); }"),
+          True)
+    page.keyboard.press("Escape")
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 def stage_flipall(pw):
     print("\nFlip face on a closed room asks: Flip room / Flip just / Cancel; and Add back face")
     browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
@@ -1206,7 +1271,8 @@ STAGES = {"draw": stage_draw, "one": stage_one, "flip": stage_flip, "renumber": 
           "height": stage_height, "input": stage_input, "drag": stage_drag, "3d": stage_3d,
           "closure": stage_closure, "layout": stage_layout, "cornerdrag": stage_cornerdrag,
           "walldrag": stage_walldrag, "align": stage_align, "angle": stage_angle, "label": stage_label,
-          "typedraw": stage_typedraw, "split": stage_split, "nook": stage_nook, "flipall": stage_flipall}
+          "typedraw": stage_typedraw, "split": stage_split, "nook": stage_nook, "flipall": stage_flipall,
+          "labels": stage_labels}
 
 
 def main() -> int:

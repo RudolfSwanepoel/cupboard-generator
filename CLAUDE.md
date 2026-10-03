@@ -2235,10 +2235,14 @@ gap in red. Elevation cabinets are no longer told apart by outline — base, wal
 and tall all at the carcass weight, undashed; shelves and the swing triangle
 are solid.
 
-**Plan labels never sit on each other** (`render._place_labels`): cabinet
-numbers first, then panel numbers, then sizes, then gap widths; a label that
-does not fit moves a short step on a leader, a size is dropped rather than
-moved.
+**Plan labels never sit on each other** (`render._place_labels`): wall
+lengths first (touch-ups, 3 Oct 2026), then cabinet numbers, then panel
+numbers, then sizes, then gap widths; a label that does not fit moves a short
+step on a leader, a size is dropped rather than moved. A wall's length moves
+only out along its wall's normal (`LENGTH_STEP` 8 px, up to `LENGTH_STEPS`
+16) and is never dropped; its box is the field the page lays over it
+(`planLengths`, `planLenFit`: the input as wide as its figure, the label as
+wide as its content, at every zoom).
 
 **A drawing is a read-only view of the model. Nothing reads one back.** The
 colours, the grain lines and the legend are output; no check, no cut list and
