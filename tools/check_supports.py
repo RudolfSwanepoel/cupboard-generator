@@ -203,8 +203,21 @@ def main():
     check("nor do seven under a Top Rear with no backing (Back 1 drops 16)",
           len(crits(job_of(box(back="none", support_rows=typed(0, 1, 7))), "support-back-fit")), 1)
 
-    print("\nback 'three' is legacy: readable, cut as it was, not offered")
+    print("\na NEW cupboard's size is Standard's, per kind, handed over by /api/defaults (3 October 2026)")
     d = api.defaults({})
+    check("base 450 x 790 x 570", std.new_size("base"), (450, 790, 570))
+    check("tall 800 x 2500 x 600", std.new_size("tall"), (800, 2500, 600))
+    check("upper 350 x 1100 x 300", std.new_size("upper"), (350, 1100, 300))
+    check("/api/defaults carries all three", d["new_sizes"],
+          {"tall": {"width": 800, "height": 2500, "depth": 600},
+           "upper": {"width": 350, "height": 1100, "depth": 300},
+           "base": {"width": 450, "height": 790, "depth": 570}})
+    check("and upper_z 1500 in the standard block", d["standard"]["upper_z"], 1500)
+    src = open(os.path.join(ROOT, "app", "index.html"), encoding="utf-8").read()
+    check("the browser's blank cabinet types no dimension of its own",
+          ("width: 600, height: 2400, depth: 500" in src, "newSize(kind)" in src), (False, True))
+
+    print("\nback 'three' is legacy: readable, cut as it was, not offered")
     check("not offered for a new cabinet", d["backs"], ["four", "none"])
     check("named as legacy", d["backs_legacy"], ["three"])
     three = box(back="three")

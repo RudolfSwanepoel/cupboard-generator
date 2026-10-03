@@ -36,7 +36,7 @@ from cabinetgen.room import (_gap_along, arm_shelf_max_depth,              # noq
                              blind_panel_height, blind_spans,
                              clashes, convex_overlap,
                              corner_outline,
-                             corner_shadow, gaps as room_gaps, geometry,
+                             corner_shadow, free_z, gaps as room_gaps, geometry,
                              mitre_blank, mitre_inner_span, mitre_legs,
                              overlaps, polygons_overlap, pullout_envelope,
                              rectangular, runs as room_runs, snap_points,
@@ -914,6 +914,16 @@ def main() -> int:
           [(s.get("x0"), s.get("not_x0")) for s in
            z_snap_points(jo, 1, "A", std, spans=True) if "window" in s["why"]],
           [(None, None)] * 4)
+    print("\nwhere a FIRST placement's underside goes: free_z (ruled 2-3 October 2026)")
+    check("an upper hangs at Standard.upper_z", free_z(cab(1, 600, kind="upper", h=700), std), 1500)
+    check("a base stands on the floor", free_z(cab(1, 600, kind="base", h=720), std), 0)
+    check("a tall stands on the floor", free_z(cab(1, 600, kind="tall", h=2400), std), 0)
+    jfz = job([cab(1, 600, kind="upper", h=700)], [])
+    jfz.room.ceiling = 2700
+    from app import api as _api                                          # noqa: E402
+    dz = _api.drag({"job": job_to_dict(jfz), "cabinet": 1})
+    check("/api/drag hands it to the browser beside free_x", dz["free_z"], 1500)
+
     tallo = cab(2, 600, kind="tall", h=2400)
     jo2 = job([tallo], [Placement(2, "A", 2400)])
     jo2.room.ceiling = 2700

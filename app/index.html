@@ -1077,10 +1077,19 @@ function plinthChoices() {
   return S.job.plinths;
 }
 
-function blankCabinet(number) {
+// The size a new cupboard starts at is Standard's, per kind, handed over by
+// /api/defaults (`new_sizes`, ruled 2-3 October 2026) — the browser types no
+// dimension. It follows the kind while still untouched (`redefaultSize`).
+function newSize(kind) {
+  const s = (S.def && S.def.new_sizes) || {};
+  return s[kind] || s.tall || {width: 0, height: 0, depth: 0};
+}
+function blankCabinet(number, kind) {
+  kind = kind || "tall";
+  const sz = newSize(kind);
   return {
-    number: number, width: 600, height: 2400, depth: 500,
-    kind: "tall", back: "four", template: "standard",
+    number: number, width: sz.width, height: sz.height, depth: sz.depth,
+    kind: kind, back: "four", template: "standard",
     // Typed from the start (27 September 2026), the rows for its kind (28
     // September 2026), filled in by /api/support-defaults once the boards are
     // chosen — cut from the carcass, in that board's own edging.
@@ -1802,14 +1811,15 @@ $("add").addEventListener("click", async () => {
     if (rd.added) toast(`${rd.name} selected into this project for the drawers — ` +
                         `change it on Catalogue -> Runners.`);
   }
-  // The support rows for its kind (28 September 2026): the engine's defaults,
-  // not the browser's — base Front + Top Rear + 2 Backs, wall 3 Backs, tall 4,
-  // each cut from the carcass in that board's own edging. They follow the
+  // The support rows for its kind: the engine's defaults, not the browser's
+  // (ruled 3 October 2026: base Top Front in the exterior PVC + Top Rear + one
+  // Back row of 2, wall and tall one Back row of 3, unedged). They follow the
   // kind while untouched (`redefaultSupports`).
   const sr = await post("/api/support-defaults",
                         {job: Object.assign({}, S.job, {cabinets: [fresh]}), index: 0});
   fresh.support_rows = (sr && sr.rows) || [];
   noteFreshRows(fresh);
+  noteFreshSize(fresh);
   S.job.cabinets.push(fresh);
   // P3: a new cabinet isolates itself. It has no placement yet, so there is
   // nothing to draw until a wall is picked for it in the Room tab — and the
@@ -2495,6 +2505,7 @@ $("editor").addEventListener("input", (e) => {
     else if (t === "opt") c[k] = raw === "" ? null : parseInt(raw, 10);
     else c[k] = raw === "" ? 0 : parseInt(raw, 10);
     cornerFollowUp(c, k);
+    if (k === "kind") redefaultSize(c);
     if (k === "kind" || k === "corner_style") redefaultSupports(c);
     // A board decides materials and edging, and the door count decides how many
     // leaf rows there are. Both used to force the whole editor to be rebuilt;
@@ -3239,7 +3250,7 @@ function renderDoors() {
     const side = sides[i] || (n >= 2 ? (i === 0 ? "L" : "R") : "L");
     const chosen = (c.door_boards || [])[i] || "";
     leaves.push(`<div class="leaf">
-      <b>Leaf ${i + 1}</b>
+      <b>${n >= 2 ? (i === 0 ? "Left door" : "Right door") : "Door"}</b>
       <span class="note">${widths[i] || "?"} wide</span>
       ${n === 1
         ? `<select data-leaf="0" class="hinge">
@@ -3247,7 +3258,7 @@ function renderDoors() {
              <option value="R"${side === "R" ? " selected" : ""}>hinged right</option>
            </select>`
         : `<span class="note hinge">hinged ${side === "L" ? "left" : "right"}</span>`}
-      <select data-dboard="${i}" title="what this leaf is cut from">
+      <select data-dboard="${i}" title="what this door is cut from">
         <option value=""${chosen ? "" : " selected"}>exterior board (${
           esc(c.exterior_board || "—")})</option>
         ${chosen && boardIsThin(chosen)
@@ -3260,13 +3271,13 @@ function renderDoors() {
     </div>`);
   }
 
-  // Which board is in effect, said in words: the exterior one, and any leaf
+  // Which board is in effect, said in words: the exterior one, and any door
   // that has been given a board of its own instead.
   const named = (k) => k ? k + ((mats[k] || {}).board ? " — " + mats[k].board : "") : "—";
   const own = [];
   for (let i = 0; i < n; i++) {
     const k = (c.door_boards || [])[i];
-    if (k && k !== c.exterior_board) own.push(`Leaf ${i + 1} is cut from ${named(k)} instead.`);
+    if (k && k !== c.exterior_board) own.push(`${n >= 2 ? (i === 0 ? "The left door" : "The right door") : "The door"} is cut from ${named(k)} instead.`);
   }
   const stale = have > 2
     ? `<p class="hint" style="color:var(--warn)">This job was saved with ${have} doors on
@@ -3288,7 +3299,7 @@ function renderDoors() {
     ${stale}
     ${leaves.join("")}
     <p class="hint">${n === 2
-      ? "A pair is fixed: left leaf hinged left, right leaf hinged right. "
+      ? "A pair is fixed: the left door hinged left, the right door hinged right. "
       : n === 1 ? "One door: choose which side its hinges are on — the handle goes on the other side. " : ""}External board
       is <b>${esc(named(c.exterior_board))}</b>.${own.length ? " " + esc(own.join(" ")) : ""}</p>
     ${edgingHTML(c, "door")}
@@ -4586,6 +4597,22 @@ function noteFreshRows(c) {
   if (!S.freshRows) S.freshRows = new Map();
   S.freshRows.set(c.number, rowsSig(c));
 }
+// The size the same way: a new cupboard's W x H x D is its kind's default off
+// /api/defaults, and a kind change re-sizes it only while all three are still
+// exactly that default (a typed dimension, or any stored cabinet, is left alone).
+function sizeSig(c) { return [c.width, c.height, c.depth].join("x"); }
+function noteFreshSize(c) {
+  if (!S.freshSize) S.freshSize = new Map();
+  S.freshSize.set(c.number, sizeSig(c));
+}
+function redefaultSize(c) {
+  if (!S.freshSize || S.freshSize.get(c.number) !== sizeSig(c)) return;
+  if (c.kind === "panel") return;
+  const sz = newSize(c.kind);
+  c.width = sz.width; c.height = sz.height; c.depth = sz.depth;
+  noteFreshSize(c);
+  renderEditor();
+}
 async function redefaultSupports(c) {
   if (!S.freshRows || S.freshRows.get(c.number) !== rowsSig(c)) return;
   const i = S.job.cabinets.indexOf(c);
@@ -5695,7 +5722,7 @@ async function swapBoard(fromId, to) {
     {minimumFractionDigits: 2, maximumFractionDigits: 2});
   const boards = (t) => Object.keys(t.boards).sort()
     .map((m) => `${m} ${t.boards[m]}`).join(", ");
-  // The field labels are the engine's words already ("door leaf 2 board"), so
+  // The field labels are the engine's words already ("door 2 board"), so
   // they are shown as they come rather than translated here.
   const cabs = pre.cabinets.map((c) =>
     `    cabinet ${c.cabinet} — ${c.fields.join(", ")}`).join("\n");
@@ -7870,7 +7897,9 @@ function upTarget(d, e) {
       if (off < near) { near = off; pick = sn; }
     }
     if (pick) { x = pick.x; why = pick.why; }
-    return {wall: best.t.wall, x: x, z: 0, why: why, whyZ: ""};
+    // the underside: an upper's first placement hangs at Standard.upper_z, the
+    // engine's `free_z`; everything else stands on the floor
+    return {wall: best.t.wall, x: x, z: m.free_z || 0, why: why, whyZ: ""};
   }
   const elevSvg = document.querySelector("#elevation svg");
   const t = elevTrack();
@@ -7891,7 +7920,7 @@ function upTarget(d, e) {
     // over a wall, held by its middle at the point under the cursor; over
     // the floor, standing on it
     const at = elevSnap(m, wall, Math.round(hit.along - m.width / 2),
-                        hit.floor ? 0 : Math.round(hit.up - m.height / 2));
+                        hit.floor ? (m.free_z || 0) : Math.round(hit.up - m.height / 2));
     return Object.assign({wall: hit.wall}, at);
   }
   return null;
@@ -8045,7 +8074,8 @@ $("places").addEventListener("input", async (e) => {
       // A NEW placement. Where it goes is the engine's answer, not 0 mm: at 0 it
       // landed on top of whatever was already at the start of that wall and out
       // of sight underneath it. `free_x` comes off the same candidates the drag
-      // reads, so nothing is worked out here.
+      // reads, and `free_z` is the kind's first height (an upper hangs at
+      // Standard.upper_z), so nothing is worked out here.
       const place = {cabinet: n, wall: e.target.value, x: 0, z: 0, y: 0,
                      flip: false, layer: null};
       places().push(place);
@@ -8054,6 +8084,7 @@ $("places").addEventListener("input", async (e) => {
       const w = model.ok && model.walls[place.wall];
       if (w && places().indexOf(place) >= 0) {
         place.x = w.free_x;
+        place.z = model.free_z || 0;
         const cc = S.job.cabinets.find((c) => c.number === n);
         if (cc) cornerFollowUp(cc, "corner_unit");   // ...unless it is a corner unit
         renderPlaces(true);
@@ -9082,7 +9113,7 @@ function showPartCard(number, part, view) {
   const c = number !== null && S.job.cabinets.find((x) => x.number === number);
   const g = c && S.res && S.res.geometry && S.res.geometry[String(number)];
   const kind = c ? (c.kind === "panel" ? "Panel" : c.kind + (g && g.corner && g.corner.kind ? " · " + g.corner.kind : "")) : "";
-  const roleNames = {side: "Side", top: "Top", bottom: "Bottom", door: "Door leaf", drawer: "Drawer face",
+  const roleNames = {side: "Side", top: "Top", bottom: "Bottom", door: "Door", drawer: "Drawer face",
                      blind: "Blind panel", panel: "Panel", back: "Backing", carcass: "Carcass",
                      plinth: "Plinth board", filler: "Filler"};
   let role = part ? (roleNames[part.role] || part.role) : "";
@@ -9138,6 +9169,7 @@ function adopt(job) {
   S.acceptOpen = null;
   S.selRendered = -2;
   S.freshRows = new Map();   // every stored cabinet's rows are its own
+  S.freshSize = new Map();   // and its size
   roomSig = null;
   placesSig = null;
   gapsSig = null;

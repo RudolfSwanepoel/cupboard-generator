@@ -353,21 +353,22 @@ def main():
     y8 = y_snap_points(tj, 8, "A")
     check("  and its y snaps are what they were", bool(y8) and all("y" in s for s in y8), True)
 
-    print("\nA: a new cabinet's supports follow its kind (ruled 28 September 2026)")
+    print("\nA: a new cabinet's supports follow its kind (ruled 3 October 2026)")
     mats = job().materials
-    rows = lambda c: [(r.type, r.qty, r.cut_board, r.kind, r.edges) for r in c.default_supports(mats)]
-    check("base: Front, Top Rear, Back, Back", rows(box(1, 0, kind="base", carcass_board="MEL")),
-          [("front", 1, "MEL", "pvc", ["front"]), ("top_rear", 1, "MEL", "pvc", ["front"]),
-           ("back", 1, "MEL", "pvc", []), ("back", 1, "MEL", "pvc", [])])
-    check("wall: three Backs", [r[0] for r in rows(box(1, 0, kind="upper"))], ["back"] * 3)
-    check("tall: four Backs", [r[0] for r in rows(box(1, 0, kind="tall"))], ["back"] * 4)
-    check("blind corner, base: by its kind", [r[0] for r in rows(box(1, 0, kind="base", corner_style="blind", blind_width=300))],
-          ["front", "top_rear", "back", "back"])
-    check("blind corner, tall: by its kind", [r[0] for r in rows(box(1, 0, kind="tall", corner_style="blind", blind_width=300))], ["back"] * 4)
+    rows = lambda c: [(r.type, r.qty, r.cut_board, r.board, r.kind, r.edges) for r in c.default_supports(mats)]
+    check("base: Top Front in the exterior PVC, Top Rear, one Back row of 2 unedged",
+          rows(box(1, 0, kind="base", carcass_board="MEL", exterior_board="BROOKHILL")),
+          [("front", 1, "MEL", "BROOKHILL", "pvc", ["front"]), ("top_rear", 1, "MEL", "MEL", "pvc", ["front"]),
+           ("back", 2, "MEL", "MEL", "pvc", [])])
+    check("wall: one Back row of 3", [(r[0], r[1]) for r in rows(box(1, 0, kind="upper"))], [("back", 3)])
+    check("tall: one Back row of 3", [(r[0], r[1]) for r in rows(box(1, 0, kind="tall"))], [("back", 3)])
+    check("blind corner, base: by its kind", [(r[0], r[1]) for r in rows(box(1, 0, kind="base", corner_style="blind", blind_width=300))],
+          [("front", 1), ("top_rear", 1), ("back", 2)])
+    check("blind corner, tall: by its kind", [(r[0], r[1]) for r in rows(box(1, 0, kind="tall", corner_style="blind", blind_width=300))], [("back", 3)])
     check("mitre: none", rows(box(1, 0, kind="tall", corner_style="mitre", arm_a=850, arm_b=850, face_a=500, face_b=500)), [])
     check("ell: none", rows(box(1, 0, kind="base", corner_style="ell", arm_a=850, arm_b=850, face_a=500, face_b=500)), [])
     r = api.support_defaults({"job": job_to_dict(job()), "index": 0})
-    check("/api/support-defaults hands them back for the cabinet's kind", [x["type"] for x in r["rows"]], ["front", "top_rear", "back", "back"])
+    check("/api/support-defaults hands them back for the cabinet's kind", [(x["type"], x["qty"]) for x in r["rows"]], [("front", 1), ("top_rear", 1), ("back", 2)])
     check("an existing cabinet's rows are not touched by any of it", job().cabinets[0].support_rows, [])
 
     restructure()

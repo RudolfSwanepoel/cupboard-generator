@@ -58,7 +58,7 @@ from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, 
                              corner_move as room_corner_move, wall_move as room_wall_move,
                              split_wall as room_split_wall, wall_nook as room_wall_nook,
                              add_back_face, flip_room as room_flip_room, main_chain,
-                             free_x, gaps as room_gaps, geometry, walls_from_points,
+                             free_x, free_z, gaps as room_gaps, geometry, walls_from_points,
                              is_closed, next_wall, prev_wall, walk_order, wall_height,
                              corner_before, out_of_square, flip_face, renumber_walls,
                              delete_wall, set_length, set_corner, set_out_of_square,
@@ -157,6 +157,10 @@ def defaults(payload):
         "codes": CODES,
         "edge_materials": sorted(x for x in ALLOWED_EDGE if x),
         "kinds": ["tall", "upper", "base", "panel"],
+        # The size a NEW cupboard of each kind starts at (ruled 2-3 October
+        # 2026), off Standard: the browser types no dimension of its own.
+        "new_sizes": {k: dict(zip(("width", "height", "depth"), STANDARD.new_size(k)))
+                      for k in ("tall", "upper", "base")},
         # The three orientations, each said in the words the editor shows and
         # with the two typed extents named for that orientation. The browser
         # labels its fields from this rather than holding its own copy.
@@ -165,7 +169,7 @@ def defaults(payload):
              "a": "Width along the wall", "b": "Height",
              "a_short": "width", "b_short": "height",
              "hint": "a panel standing up and facing into the room, like a door "
-                     "leaf or a bulkhead front"},
+                     "or a bulkhead front"},
             {"key": "flat", "name": "Flat (horizontal)",
              "a": "Width along the wall", "b": "Depth out from the wall",
              "a_short": "width", "b_short": "depth",
@@ -2312,6 +2316,8 @@ def drag(payload):
         # measured — there is nothing to cap it against, and the ceiling check
         # blocks the export until one is taken.
         "max_z": max(ceiling - g.height, 0) if ceiling else None,
+        # where a first placement's underside goes: an upper at Standard.upper_z
+        "free_z": free_z(cab, job.std),
         "walls": {w.id: {"length": w.length,
                          "max_x": max(w.length - g.width, 0),
                          # where it would land if it were newly given this wall,
@@ -2825,9 +2831,9 @@ def support_reenter(payload):
 
 def support_defaults(payload):
     """The support rows a NEW cabinet starts with, for its kind
-    (`Cabinet.default_supports`, ruled 28 September 2026): base Front + Top
-    Rear + 2 Backs, wall 3 Backs, tall 4, a blind corner by its kind, a mitre
-    or an ell none. Only the browser's "new cabinet" path and a kind change
+    (`Cabinet.default_supports`, ruled 3 October 2026): base Top Front
+    (exterior PVC) + Top Rear + one Back row of 2, wall and tall one Back row
+    of 3, a blind corner by its kind, a mitre or an ell none. Only the browser's "new cabinet" path and a kind change
     on rows still at these defaults ask; nothing here touches a stored row."""
     job, cab = _cabinet_of(payload)
     return {"ok": True, "rows": [asdict(r) for r in cab.default_supports(job.materials)]}

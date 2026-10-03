@@ -727,7 +727,7 @@ def _boards_and_tapes(job: Job):
                     chosen.append((d.face_board, f"drawer {i} face board"))
         for i in range(c.door_count):
             if c.door_boards[i:i + 1] and c.door_boards[i]:
-                chosen.append((c.door_boards[i], f"door leaf {i + 1} board"))
+                chosen.append((c.door_boards[i], f"door {i + 1} board"))
         # Everything else the cabinet names — the two edging boards, a support
         # row's board, a bespoke panel's material — off the one list, so a board
         # the project does not carry cannot reach the cut list through a field
@@ -839,7 +839,7 @@ def _thin_boards(job: Job):
             wants.append((c.blind_board, "blind panel board"))
         for i, b in enumerate(c.door_boards or []):
             if b:
-                wants.append((b, f"door leaf {i + 1} board"))
+                wants.append((b, f"door {i + 1} board"))
         if c.drawer_list:
             for attr, what in (("drawer_carcass_board", "drawers' box board"),
                                ("drawer_face_board", "drawers' face board")):

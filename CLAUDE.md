@@ -278,8 +278,10 @@ rear leg setback 50 mm · back/base groove 8 mm deep, 6 mm engagement ·
 16 mm cavity behind backing · door gaps 3 mm single / 6 mm pair ·
 hinge_clearance 50 mm · mitre_shelf_clear 3 mm · arm-shelf max depth
 rounded down to the nearest 5 mm · panel and blind-panel code 08 ·
-support W − 32 × 100, code 04 · new-cabinet supports: base Front + Top
-Rear + 2 Back, wall 3 Back, tall 4 Back, mitre/ell none, blind by kind.
+support W − 32 × 100, code 04 · new-cabinet supports: base Top Front (exterior PVC) + Top
+Rear + one Back row ×2, wall one Back row ×3, tall one Back row ×3, mitre/ell
+none, blind by kind · new-cupboard sizes base 450 × 790 × 570, tall 800 × 2500 ×
+600, upper 350 × 1100 × 300; an upper's first placement at upper_z 1500.
 
 ## Conventions
 

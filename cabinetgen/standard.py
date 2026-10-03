@@ -135,6 +135,27 @@ class Standard:
     # height — nothing else is built around it.
     leg_setback: int = 50
 
+    # ---- a NEW cupboard (ruled by Rudolf, 2-3 October 2026) ------------------
+    # The size a cupboard starts at, per kind. These were typed in the browser
+    # (600 x 2400 x 500 for every kind) until the cabinet round brief; a
+    # dimension computed anywhere but here is the failure this file prevents.
+    # A new cupboard follows its kind's size while the size is still this
+    # untouched default (the same rule its support rows follow).
+    new_base_width: int = 450
+    new_base_height: int = 790
+    new_base_depth: int = 570
+    new_tall_width: int = 800
+    new_tall_height: int = 2500      # raises above-ceiling / tip-up in a low room:
+                                     # that is the checks working, not a wrong default
+    new_tall_depth: int = 600
+    new_upper_width: int = 350
+    new_upper_height: int = 1100
+    new_upper_depth: int = 300
+    # Where an upper's FIRST placement puts its underside: with a tall on
+    # 100 mm legs at 2600, a default upper's top (1500 + 1100) lines up with
+    # it. Read through `room.free_z`; a drag in the elevation keeps its own z.
+    upper_z: int = 1500
+
     # ---- placement ---------------------------------------------------------
     snap_tolerance: int = 20    # how near a snap target a drag has to get, in mm
     door_open_deg: int = 90     # the angle a swing is checked at; drawing convention,
@@ -155,6 +176,20 @@ class Standard:
 
     def internal_width(self, w: int) -> int:
         return w - 2 * self.board_t
+
+    def new_size(self, kind: str) -> tuple:
+        """(width, height, depth) a NEW cupboard of this kind starts at. A panel
+        has no carcass size; it gets the tall figures, which its own fields
+        replace the moment it is a panel.
+
+        >>> STANDARD.new_size("base")
+        (450, 790, 570)
+        >>> STANDARD.new_size("upper")
+        (350, 1100, 300)
+        """
+        k = kind if kind in ("base", "tall", "upper") else "tall"
+        return (getattr(self, f"new_{k}_width"), getattr(self, f"new_{k}_height"),
+                getattr(self, f"new_{k}_depth"))
 
     def back_face_from_front(self, d: int) -> int:
         """Distance from the cabinet front to the front face of the backing board."""

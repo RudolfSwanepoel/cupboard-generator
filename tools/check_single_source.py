@@ -109,7 +109,7 @@ def main():
 
     print("\nevery slot has a label a message can name out loud")
     labels = {key: label for key, label in cab.board_refs()}
-    check("door leaf 2 is named as such", labels.get("SENT_DOOR1"), "door leaf 2 board")
+    check("door 2 is named as such", labels.get("SENT_DOOR1"), "door 2 board")
     check("drawer 1's face is named", labels.get("SENT_DFACE"), "drawer 1 face board")
     check("the support row's board is named", labels.get("SENT_SUPROW"),
           "support row 1 edging board")

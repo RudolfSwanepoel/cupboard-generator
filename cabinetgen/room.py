@@ -3274,6 +3274,23 @@ def _on_wall(job, wall_id: str, std: Standard, exclude: int = None):
     return out
 
 
+def free_z(cab, std: Standard = STANDARD) -> int:
+    """Where a newly-placed item's underside goes: an upper hangs at
+    `Standard.upper_z` (ruled 2-3 October 2026), everything else stands on the
+    floor at 0. The elevation drag keeps whatever height it was dropped at;
+    this is for the three places that used to write z 0 for every kind — the
+    Placements wall picker, the plan drop and the 3D drop. Nothing caps it
+    against the ceiling: the ceiling and tip-up checks say what they say.
+
+        >>> from cabinetgen.model import Cabinet
+        >>> free_z(Cabinet(number=1, width=600, height=720, depth=300, kind="upper"))
+        1500
+        >>> free_z(Cabinet(number=1, width=600, height=720, depth=560, kind="base"))
+        0
+    """
+    return int(std.upper_z) if cab.kind == "upper" else 0
+
+
 def free_x(job, number: int, wall_id: str, std: Standard = STANDARD) -> int:
     """Where a newly-placed item goes so it lands clear of what is already there.
 

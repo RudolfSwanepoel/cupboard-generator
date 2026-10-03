@@ -946,7 +946,7 @@ class Cabinet:
     def _board_slots(self):
         """Every place this cabinet names a board, as `(label, get, set, hand)`.
 
-        The label is what a message says out loud — "door leaf 2 board",
+        The label is what a message says out loud — "door 2 board",
         "drawer 1 face board" — so a refusal can name the thing to go and change.
 
         `hand` marks a HAND-SPECIFIED panel: a bespoke panel names its own
@@ -973,7 +973,7 @@ class Cabinet:
         simple("door_edge_board", "door edging board")
         simple("drawer_edge_board", "drawer edging board")
         for i in range(len(self.door_boards or [])):
-            slots.append((f"door leaf {i + 1} board",
+            slots.append((f"door {i + 1} board",
                           lambda i=i: self.door_boards[i] or "",
                           lambda v, i=i: self.door_boards.__setitem__(i, v), False))
         for i, d in enumerate(self.drawers or []):
@@ -1216,41 +1216,49 @@ class Cabinet:
         return (sum(1 for e in chosen if e in SUPPORT_LONG_EDGES),
                 sum(1 for e in chosen if e not in SUPPORT_LONG_EDGES))
 
-    def new_support(self, materials: dict, type: str) -> "Support":
+    def new_support(self, materials: dict, type: str, qty: int = 1) -> "Support":
         """A fresh typed row of this type, with the defaults ruled 27 September
-        2026: cut from the carcass board, edged in that board's own edging
-        (`default_support_kind`; '' for a board with no edging), and — on a
-        Back — NO edge ticked, so it is unedged until one is. A Front or Top
-        Rear keeps the type's default, its front long edge."""
+        2026 and 3 October 2026: cut from the carcass board; a Back or a Top
+        Rear edged in that board's own edging (`default_support_kind`; '' for a
+        board with no edging); a Top Front edged PVC in the EXTERIOR board's
+        colour (3 October) — the board's own first kind where it offers no PVC.
+        A Back has NO edge ticked, so it is unedged until one is; a Front or
+        Top Rear starts on the type's default, its front long edge."""
         board = self.carcass_board
-        return Support(edge="none", qty=1, type=type, cut_board=board, board=board,
-                       kind=default_support_kind(materials, board),
+        edge_board = board
+        kind = default_support_kind(materials, board)
+        if type == "front" and self.exterior_board:
+            edge_board = self.exterior_board
+            offered = material_offers(materials, edge_board)
+            kind = "pvc" if "pvc" in offered else (offered[0] if offered else "")
+        return Support(edge="none", qty=qty, type=type, cut_board=board, board=edge_board,
+                       kind=kind,
                        edges=[] if type == "back" else list(SUPPORT_DEFAULT_EDGES))
 
     def default_supports(self, materials: dict) -> List[Support]:
-        """The support rows a NEW cabinet of this kind starts with (ruled 28
-        September 2026, replacing the four Back rows of 27 September):
+        """The support rows a NEW cabinet of this kind starts with (ruled 3
+        October 2026, replacing the 28 September rows):
 
-            base          Front 1, Top Rear 1, Back 2
-            wall (upper)  Back 3
-            tall          Back 4
+            base          Top Front 1 (exterior PVC), Top Rear 1, ONE Back row qty 2
+            wall (upper)  one Back row qty 3
+            tall          one Back row qty 3   (was four rows of 1)
             blind corner  by its kind, as above
             mitre / ell   none
 
-        One row per support, each `new_support`'s defaults — cut from the
-        carcass, in that board's own edging kind, a Back with no edge ticked.
-        Only ever applied to a cabinet being made or one whose rows are still
-        these untouched defaults; an existing cabinet and a legacy row are
-        never rewritten by it.
+        The Backs are one row per cupboard, unedged; "+ Back support" still adds
+        a separate row when one must differ. Each row is `new_support`'s
+        defaults. Only ever applied to a cabinet being made or one whose rows
+        are still these untouched defaults; an existing cabinet and a legacy
+        row are never rewritten by it.
         """
         offered = self.support_types_offered
         if not offered:
             return []
         if "front" in offered:
-            types = ["front", "top_rear", "back", "back"]
-        else:
-            types = ["back"] * (3 if self.kind == "upper" else 4)
-        return [self.new_support(materials, t) for t in types]
+            return [self.new_support(materials, "front"),
+                    self.new_support(materials, "top_rear"),
+                    self.new_support(materials, "back", qty=2)]
+        return [self.new_support(materials, "back", qty=3)]
 
     def reentered_supports(self, materials: dict) -> List[Support]:
         """The legacy rows rewritten as typed rows — Rudolf's explicit act.
