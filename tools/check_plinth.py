@@ -33,7 +33,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from cabinetgen.engine import generate_job, plinth_panels                 # noqa: E402
 from cabinetgen.model import (Cabinet, GapChoice, Job, Placement,         # noqa: E402
                               PlinthChoice)
-from cabinetgen.room import plinth_lengths, rectangular, runs             # noqa: E402
+from cabinetgen.room import plinth_lengths, rectangular, runs, set_corner # noqa: E402
 from cabinetgen.standard import STANDARD                                  # noqa: E402
 from cabinetgen.store import job_from_dict, job_to_dict                   # noqa: E402
 from cabinetgen.validate import validate                                  # noqa: E402
@@ -133,7 +133,7 @@ def main() -> int:
 
     print("\nan inside corner that is not 90: no butt, a warning (ruled 29 September 2026)")
     rm = rectangular(4000, 3000, ceiling=2600)
-    rm.walls[0].corner_end = 135
+    set_corner(rm, "A", 135)              # the A-B corner splayed: B and the rest turn
     j = Job(name="c", room=rm,
             cabinets=[cab(1, 900), cab(2, 600)],
             placements=[Placement(1, "A", 3100), Placement(2, "B", 0)],
@@ -150,7 +150,7 @@ def main() -> int:
     j.plinths = [PlinthChoice("B", "base", 2)]
     check("not said when only one run has a plinth there",
           [i for i in validate(j, generate_job(j)) if i.check == "plinth-corner"], [])
-    rm.walls[0].corner_end = 90
+    set_corner(rm, "A", 90)
     j.plinths = [PlinthChoice("A", "base", 1), PlinthChoice("B", "base", 2)]
     check("back at 90: the 16 mm butt, and nothing said",
           (sorted(p.length for p in plinth_panels(j)),

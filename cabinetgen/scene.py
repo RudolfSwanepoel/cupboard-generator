@@ -36,10 +36,10 @@ from .model import Job, Placement, resolve_board, material_thickness
 from .render import PICTURE_TILE_MM, Fills, board_look, run_layout
 from .room import (DRAWER_MOVING, RUNNER_ROLES, Part, _from_plan, _placed_frame, _to_plan, back_part,
                    carcass_z, drawer_layout, clashes, corner_points, door_hinges,
-                   filler_solids, geometry, interior_parts, layer_of, overlaps,
+                   filler_solids, geometry, interior_parts, is_closed, layer_of, overlaps,
                    placed, placed_panels, placement_for, plinth_solids,
                    pullout_envelope, solid_parts, swing_envelopes, tape_solids,
-                   wall_frames)
+                   wall_frames, wall_height)
 from .standard import STANDARD, Standard
 from .validate import CRITICAL, validate
 
@@ -225,11 +225,14 @@ def _room_payload(job: Job, top: float) -> Optional[dict]:
     frames = wall_frames(rm)
     corners = corner_points(rm)
     walls = []
-    for i, w in enumerate(rm.walls):
+    for w in rm.walls:
         (sx, sy), (dx, dy), (nx, ny) = frames[w.id]
-        ex, ey = sx + dx * w.length, sy + dy * w.length
+        ex, ey = float(w.x1), float(w.y1)
         walls.append({
             "id": w.id, "length": w.length,
+            # its own height (2 October 2026), the ceiling where none is set,
+            # the drawing's top where neither is measured
+            "height": wall_height(rm, w) or round(top, 1),
             "start": [round(sx, 1), round(sy, 1)], "end": [round(ex, 1), round(ey, 1)],
             "dir": [round(dx, 6), round(dy, 6)], "normal": [round(nx, 6), round(ny, 6)],
             # each opening's two jambs as world points, and its sill and head
@@ -246,7 +249,7 @@ def _room_payload(job: Job, top: float) -> Optional[dict]:
                               "centre": [round(sx + dx * ob.x, 1), round(sy + dy * ob.x, 1)]}
                              for ob in w.obstructions],
         })
-    return {"name": rm.name, "closed": rm.closed, "ceiling": rm.ceiling,
+    return {"name": rm.name, "closed": is_closed(rm), "ceiling": rm.ceiling,
             "top": round(top, 1),
             "floor": [[round(x, 1), round(y, 1)] for x, y in corners],
             "walls": walls}

@@ -369,7 +369,8 @@ def main() -> int:
           (2, False))
 
     print("\nevery wall drawn by one rule, whatever the room (22 Sept 2026)")
-    from cabinetgen.model import Room as _Room, Wall as _Wall, PanelSpec as _PS  # noqa: E402
+    from cabinetgen.model import Room as _Room, PanelSpec as _PS  # noqa: E402
+    from cabinetgen.room import chain_walls  # noqa: E402
 
     def walled(walls, closed):
         cabs, pl, n = [], [], 1
@@ -379,8 +380,7 @@ def main() -> int:
                 pl.append(_Pl(n, wid, x))
                 n += 1
         return _Job(name="w", cabinets=cabs, placements=pl,
-                    room=_Room(name="r", walls=[_Wall(w, ln) for w, ln in walls],
-                               closed=closed, ceiling=2600))
+                    room=_Room(name="r", walls=chain_walls(walls, closed), ceiling=2600))
 
     three = walled([("A", 3000), ("B", 2400), ("C", 3000)], False)
     check("three walls, open: each end wall sees only the wall it meets",
@@ -419,8 +419,7 @@ def main() -> int:
                                   _Cab(1, 600, 2400, 600, kind="tall", doors=2)],
               room=rectangular(4000, 3000, ceiling=2600),
               placements=[_Pl(13, "B", 0), _Pl(11, "B", 1000), _Pl(1, "A", 200)])
-    tj.room.closed = False
-    tj.room.walls = tj.room.walls[:2]
+    tj.room.walls = tj.room.walls[:2]            # an open L: A and B
     for k, colour in (("MEL", "#f4f4f0"), ("BROOKHILL", "#c4a35a")):
         if isinstance(tj.materials.get(k), dict):
             tj.materials[k] = dict(tj.materials[k], colour=colour)
@@ -484,8 +483,7 @@ def main() -> int:
                             _Cab(1, 600, 2400, 600, kind="tall", doors=2,
                                  carcass_board="WHITEMEL", exterior_board="BROOKHILL")],
                   placements=[_Pl(13, "B", 0), _Pl(11, "B", 1000), _Pl(1, "A", 200)])
-        cj.room.closed = False
-        cj.room.walls = cj.room.walls[:2]
+        cj.room.walls = cj.room.walls[:2]        # an open L: A and B
         if with_panel:
             cj.cabinets.append(_Cab(12, 600, 2400, 16, kind="panel",
                                     panel=_PS(board="GREY", orientation="end",
@@ -636,9 +634,8 @@ def ui_restructure():
 
     three = kitchen()
     three.room.ceiling = 2700
-    three.room.closed = False
     three.room.walls = three.room.walls[:2]
-    add_wall(three.room, "end", 2000)
+    add_wall(three.room, after="B", length=2000)
     ids = [w.id for w in three.room.walls]
     check("a three-wall room to export", len(ids), 3)
     out = tempfile.mkdtemp(prefix="cupboard_export_")

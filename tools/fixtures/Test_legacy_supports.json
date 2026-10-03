@@ -900,21 +900,22 @@
     "name": "Test",
     "ceiling": 2600,
     "offset_depth": 600,
-    "closed": false,
     "walls": [
       {
         "id": "A",
-        "length": 4000,
-        "offset_start": 0,
-        "offset_end": 0,
+        "x0": 0,
+        "y0": 0,
+        "x1": 4000,
+        "y1": 0,
         "openings": [],
         "obstructions": []
       },
       {
         "id": "B",
-        "length": 3000,
-        "offset_start": 0,
-        "offset_end": 0,
+        "x0": 4000,
+        "y0": 0,
+        "x1": 4000,
+        "y1": 3000,
         "openings": [],
         "obstructions": []
       }

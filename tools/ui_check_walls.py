@@ -1,17 +1,17 @@
-"""Walls at any angle and Draw walls (brief of 29 September 2026) in the running
-app, with a real mouse (Playwright, optional).
+"""The Room tab re-laid out, walls as positioned segments (room redo Phase 1,
+brief of 2 October 2026) in the running app, with a real mouse (Playwright,
+optional).
 
     python run_app.py --no-window --port 8766      # in another window
-    python tools/ui_check_walls.py [--port 8766] [--stage draw|ell|corner|input|drag|side|3d|all]
+    python tools/ui_check_walls.py [--port 8766] [--stage draw|one|flip|renumber|height|input|drag|3d|all]
 
-Drives what check_room.py cannot: a 4-wall room drawn by clicks on Room ->
-Plan and closed on its first corner; an L drawn with an outside corner; a
-corner set to 270 in the Walls card turning the plan; a negative length and an
-angle out of range refused at the input; and a cabinet dragged in the plan onto
-a wall standing at 45 degrees; an open L drawn
-both ways with its cabinets on the room side, and Flip side. Every job is built in the page (`adopt`), never
-loaded from jobs/ and never saved. Screenshots go into
-output/_checks/ui_check_walls/.
+Drives what check_room.py cannot: the toolbar, the Room card and the Wall card
+in the dock; Draw walls ADDING walls to a room and starting on an existing
+corner; a one-wall room that draws; Flip face on one wall; Renumber; a wall's
+height; a negative length and an angle out of range refused at the input; a
+cabinet dragged in the plan onto a wall at 45 degrees; and an L with a splay
+in 3D. Every job is built in the page (`adopt`), never loaded from jobs/ and
+never saved. Screenshots go into output/_checks/ui_check_walls/.
 
 Playwright is the only third-party package anywhere near this app and only the
 ui_check scripts need it; without it this says so and exits 0.
@@ -34,6 +34,7 @@ except ImportError:                                            # pragma: no cove
     sys.exit(0)
 
 from cabinetgen.model import Cabinet, Job, Placement, Room, Wall   # noqa: E402
+from cabinetgen.room import chain_walls, rectangular               # noqa: E402
 from cabinetgen.store import job_to_dict                           # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -43,6 +44,7 @@ ap.add_argument("--headed", action="store_true")
 args = ap.parse_args()
 URL = f"http://127.0.0.1:{args.port}/"
 SHOTS = os.path.join(ROOT, "output", "_checks", "ui_check_walls")
+LAUNCH = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
 
 FAILS = []
 
@@ -128,8 +130,12 @@ def click_mm(page, x, y, **kw):
 
 
 def walls(page):
-    return page.evaluate("() => S.job.room.walls.map((w) => [w.id, w.length, "
-                         "w.corner_end === undefined ? 90 : w.corner_end, !!w.drawn])")
+    """[id, length, corner after, drawn] per wall, in walk order, off the engine."""
+    return page.evaluate("() => S.res.room.walls.map((w) => [w.id, w.length, w.after.angle, w.drawn])")
+
+
+def points(page):
+    return page.evaluate("() => S.res.room.walls.map((w) => [w.id, w.x0, w.y0, w.x1, w.y1])")
 
 
 def issues(page, check_id):
@@ -137,24 +143,67 @@ def issues(page, check_id):
                          ".map((i) => i.message)", check_id)
 
 
+def click_wall(page, wid):
+    """A real click on a wall's hit line in the plan, at a point clear of the
+    cabinets on it (walked from one end until the hit line is on top)."""
+    el = page.locator(f'#plan .wallhit[data-wallhit="{wid}"]')
+    bb = el.bounding_box()
+    for f in (0.05, 0.15, 0.3, 0.5, 0.7, 0.85, 0.95):
+        x, y = bb["x"] + bb["width"] * (0.5 if bb["width"] <= 20 else f), \
+               bb["y"] + bb["height"] * (0.5 if bb["height"] <= 20 else f)
+        top = page.evaluate("([x, y]) => { const e = document.elementFromPoint(x, y); "
+                            "return e && e.dataset ? e.dataset.wallhit || null : null; }", [x, y])
+        if top == wid:
+            page.mouse.click(x, y)
+            time.sleep(0.25)
+            return True
+    return False
+
+
+def room_side(page, own_only=False):
+    """Every placed cabinet's drawn footprint (the 3D scene's parts, world mm)
+    against the room side of every wall's line — or only its own wall's — off
+    the engine's wall points: the half-plane test check_room.py makes."""
+    sc = page.evaluate("async () => await post('/api/scene', {job: S.job})")
+    ws = page.evaluate("() => S.res.room.walls")
+    out = []
+    for item in sc["items"]:
+        if not item["parts"]:
+            continue
+        ok = True
+        for w in ws:
+            if own_only and w["id"] != item["wall"]:
+                continue
+            ax, ay, bx, by = w["x0"], w["y0"], w["x1"], w["y1"]
+            ln = math.hypot(bx - ax, by - ay)
+            nx, ny = -(by - ay) / ln, (bx - ax) / ln
+            for part in item["parts"]:
+                for x, y in part["outline"]:
+                    if (x - ax) * nx + (y - ay) * ny < -0.5:
+                        ok = False
+        out.append((item["number"], ok))
+    return sorted(out)
+
+
 # ---------------------------------------------------------------------------
 
 def stage_draw(pw):
-    print("\nDraw a 4-wall room by clicks and close it")
-    browser = pw.chromium.launch(headless=not args.headed)
+    print("\nDraw walls: a 4-wall room by clicks, closed on its first corner; then more walls ADDED")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
     errors, dialogs = [], []
     ctx, page = open_page(browser, errors, dialogs)
     adopt(page, empty_job("draw4"))
     room_plan(page)
-    check("with no room, the plan offers Draw walls",
-          page.evaluate("() => !document.querySelector('#drawwalls').hidden"), True)
+    check("the toolbar: Select on, Draw walls off",
+          page.evaluate("() => [...document.querySelectorAll('#roomtools [data-tool]')].map((b) => [b.dataset.tool, b.classList.contains('on')])"),
+          [["select", True], ["draw", False]])
+    check("with no room the dock shows the Room card, offering a room",
+          (page.locator("#roomdock #room").is_visible(), page.locator("#room #roomadd").count()), (True, 1))
     page.click("#drawwalls")
     page.wait_for_selector("#drawsvg", timeout=5000)
-    check("no room to replace, so nothing is asked", dialogs, [])
+    check("Draw walls is the tool now", page.evaluate("() => $('drawwalls').classList.contains('on')"), True)
+    check("no room, so nothing is asked", dialogs, [])
     check("the hint says how", "Shift" in page.inner_text("#drawhint"), True)
-    # A screen pixel is some 9 mm on this canvas, so a click lands within a
-    # step of where it was aimed; the direction snap is what keeps each wall
-    # square, and the length snap what keeps it in whole 10 mm.
     click_mm(page, 1000, 1000)
     cx, cy = at_mm(page, 5000, 1030)            # 30 mm off square: snapped to 0 degrees
     page.mouse.move(cx, cy, steps=4)
@@ -162,8 +211,6 @@ def stage_draw(pw):
     band = page.evaluate("() => document.querySelector('#drawreadout').textContent")
     check("the rubber band reads the length in whole 10 mm, about 4000",
           band.endswith("0 mm") and abs(int(band.split()[0]) - 4000) <= 10, True)
-    check("  on a square direction",
-          page.evaluate("() => Math.abs(DRAW.at[1] - DRAW.pts[0][1]) < 1e-6"), True)
     page.mouse.click(cx, cy)
     cx, cy = at_mm(page, 5030, 4000)
     page.mouse.move(cx, cy, steps=4)
@@ -189,122 +236,248 @@ def stage_draw(pw):
     check("  about 4000 x 3000, in whole 10 mm, opposite walls equal",
           [all(abs(w[1] - want) <= 10 and w[1] % 10 == 0 for w, want in zip(got, (4000, 3000) * 2)),
            got[0][1] == got[2][1], got[1][1] == got[3][1]], [True, True, True])
-    check("closed", page.evaluate("() => S.job.room.closed"), True)
-    check("the room closes", page.evaluate("() => S.res.room.closure_error"), 0)
+    a0 = points(page)[0][1:3]
+    check("the points are where they were drawn: A starts at (1000, 1000) within a step, nothing re-oriented",
+          all(abs(v - 1000) <= 10 for v in a0), True)
+    check("closed, and the plan tints the floor",
+          (page.evaluate("() => S.res.room.closed"), page.locator("#plan polygon.roomside").count()), (True, 1))
+    check("back on Select", page.evaluate("() => $('toolselect').classList.contains('on')"), True)
     check("every drawn wall is a critical", len(issues(page, "wall-drawn")), 4)
-    check("the Walls card marks them drawn",
+    check("the Room card marks them drawn",
           page.evaluate("() => document.querySelectorAll('#room [data-wmeasured]').length"), 4)
     shot(page, "draw_closed")
-    # measured: typed on A, ticked on B
-    page.fill('#room input[data-w="0"][data-wk="length"]', "4010")
-    page.click('#room [data-wmeasured="1"]')
+    # measured: typed on A in the Room card's table, ticked on B
+    page.fill('#room input[data-wall="A"][data-wk="length"]', "4010")
+    page.press('#room input[data-wall="A"][data-wk="length"]', "Enter")
+    page.wait_for_function("() => !S.job.room.walls.find((w) => w.id === 'A').drawn", timeout=5000)
+    page.click('#room [data-wmeasured="B"]')
+    page.wait_for_function("() => !S.job.room.walls.find((w) => w.id === 'B').drawn", timeout=5000)
     computed(page)
     check("typing a length or ticking measured clears it",
           [w[3] for w in walls(page)], [False, False, True, True])
+    check("  the typed length moved the end point, and the walls after it followed", walls(page)[0][1], 4010)
+    check("  so the loop opened by the 10 mm: reported as a near miss, the room an open run",
+          page.evaluate("() => [S.res.room.closed, S.res.room.closure_error]"), [False, 10])
+    page.fill('#room input[data-wall="A"][data-wk="length"]', str(got[0][1]))
+    page.press('#room input[data-wall="A"][data-wk="length"]', "Enter")
+    time.sleep(0.3)
+    computed(page)
+    check("  typed back: closed again", page.evaluate("() => [S.res.room.closed, S.res.room.closure_error]"), [True, 0])
     check("  and the critical with it", sorted(issues(page, "wall-drawn")),
           ["wall C: drawn, not measured — type its length, or tick it as measured",
            "wall D: drawn, not measured — type its length, or tick it as measured"])
 
-    print("\nDrawing again over a room asks first, and Esc cancels")
-    page.evaluate("() => { S.job.placements.push({cabinet: 1, wall: 'A', x: 0, z: 0, y: 0, "
-                  "flip: false, layer: null}); }")
-    dialogs.clear()
+    print("\nDrawing again ADDS walls, starting on an existing corner; nothing is asked")
+    corner = points(page)[1][3:5]               # B's end: the far corner
     page.click("#drawwalls")
-    time.sleep(0.2)
-    check("it asks 'Replace walls A–D?'", dialogs[:1] and dialogs[0].startswith("Replace walls A–D?"),
-          True)
-    check("  saying placements keep their wall letter",
-          "keep their wall letter" in (dialogs[0] if dialogs else ""), True)
+    page.wait_for_selector("#drawsvg", timeout=5000)
+    check("no 'Replace walls' question", dialogs, [])
+    check("the canvas shows the existing walls, and marks their corners",
+          page.evaluate("() => [document.querySelectorAll('#drawsvg line[stroke-dasharray]').length, "
+                        "document.querySelectorAll('#drawsvg circle[fill=\"none\"]').length]"), [4, 8])
+    click_mm(page, corner[0] + 40, corner[1] + 30)      # near the corner: starts on it
+    check("the first click lands on the corner itself", page.evaluate("() => DRAW.pts[0]"), corner)
+    click_mm(page, corner[0] + 2000, corner[1])
+    cx, cy = at_mm(page, corner[0] + 2000, corner[1] + 1500)
+    page.mouse.move(cx, cy, steps=3)
+    page.mouse.dblclick(cx, cy)
+    page.wait_for_function("() => !DRAW && S.job.room.walls.length === 6", timeout=10000)
+    computed(page)
+    check("two walls added with the next letters, the four kept",
+          [w[0] for w in walls(page)], ["A", "B", "C", "D", "E", "F"])
+    check("  E starts exactly on the corner it was clicked near", points(page)[4][1:3], corner)
+    check("  E and F are drawn; A-D as they were",
+          [w[3] for w in walls(page)], [False, False, True, True, True, True])
+    check("  the room is still closed, E and F a run off its corner",
+          page.evaluate("() => [S.res.room.closed, S.res.room.walk]"), [True, ["A", "B", "C", "D", "E", "F"]])
+    shot(page, "draw_added", "#plancard")
+    page.click("#drawwalls")
     page.wait_for_selector("#drawsvg", timeout=5000)
     click_mm(page, 0, 0)
     page.keyboard.press("Escape")
     time.sleep(0.2)
-    check("Esc cancels the whole drawing and keeps the room",
-          [page.evaluate("() => !!DRAW"), len(walls(page))], [False, 4])
+    check("Esc cancels the drawing, keeps the room and returns to Select",
+          [page.evaluate("() => !!DRAW"), len(walls(page)), page.evaluate("() => $('toolselect').classList.contains('on')")],
+          [False, 6, True])
     check("no console errors", errors, [])
     ctx.close()
     browser.close()
 
 
-def stage_ell(pw):
-    print("\nDraw an L with an outside corner, anticlockwise, as an open run and closed")
-    browser = pw.chromium.launch(headless=not args.headed)
+def stage_one(pw):
+    print("\nA one-wall room draws and computes")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
     errors, dialogs = [], []
     ctx, page = open_page(browser, errors, dialogs)
-    adopt(page, empty_job("drawL"))
+    adopt(page, empty_job("one"))
     room_plan(page)
     page.click("#drawwalls")
     page.wait_for_selector("#drawsvg", timeout=5000)
-    # anticlockwise on screen: down first, then round
-    for x, y in ((0, 0), (0, 3000), (4000, 3000), (4000, 1000), (3000, 1000), (3000, 0)):
-        click_mm(page, x, y)
     click_mm(page, 0, 0)
-    page.wait_for_function("() => !DRAW && S.job.room && S.job.room.walls.length === 6",
-                           timeout=10000)
-    computed(page)
-    got = walls(page)
-    check("six walls, the first drawn still A", [w[1] for w in got][:1], [3000])
-    check("one outside corner, 270; the rest 90",
-          sorted(w[2] for w in got), [90, 90, 90, 90, 90, 270])
-    check("it closes", page.evaluate("() => S.res.room.closure_error"), 0)
-    check("no wall crosses another", issues(page, "room-self-intersect"), [])
-    shot(page, "ell_plan", "#plancard")
-    shot(page, "ell_walls_card", "#room")
-
-    print("\nan open run: double-click finishes it")
-    page.click("#drawwalls")
-    page.wait_for_selector("#drawsvg", timeout=5000)
-    click_mm(page, 0, 0)
-    click_mm(page, 3000, 0)
-    cx, cy = at_mm(page, 3000, 2000)
+    cx, cy = at_mm(page, 3000, 0)
     page.mouse.move(cx, cy, steps=3)
     page.mouse.dblclick(cx, cy)
-    page.wait_for_function("() => !DRAW && S.job.room.walls.length === 2", timeout=10000)
+    page.wait_for_function("() => !DRAW && S.job.room && S.job.room.walls.length === 1", timeout=10000)
     computed(page)
-    check("two walls, an open run", [walls(page), page.evaluate("() => S.job.room.closed")],
-          [[["A", 3000, 90, True], ["B", 2000, 90, True]], False])
-    check("the open run's last wall has no corner",
-          page.evaluate("() => document.querySelectorAll('#room select[data-wk=\"corner_pick\"]').length"), 1)
+    one = walls(page)
+    check("one wall, A, about 3000, free", (len(one), one[0][0], abs(one[0][1] - 3000) <= 10, one[0][2:]),
+          (1, "A", True, [None, True]))
+    L = one[0][1]
+    check("the plan draws it", (page.locator("#plan svg").count(), page.locator("#plan .wallhit").count()), (1, 1))
+    check("  with the room side tinted as a band on its face",
+          page.locator('#plan polygon.roomside[data-wall="A"]').count(), 1)
+    check("the Room card says open run, one wall",
+          "open run" in page.inner_text("#closure") and "1 wall," in page.inner_text("#closure"), True)
+    shot(page, "one_wall_plan", "#plancard")
+    # a cabinet on it, placed from the Placements table
+    page.evaluate("() => { S.job.cabinets.push({number: 1, width: 900, height: 720, depth: 580, kind: 'base', "
+                  "template: 'standard', doors: 2, drawers: [], support_rows: [], bespoke: [], shelves: 1}); "
+                  "S.job.placements = [{cabinet: 1, wall: 'A', x: 500, z: 0, y: 0, flip: false, layer: null}]; "
+                  "placesSig = null; schedule(); }")
+    computed(page)
+    check("a cabinet placed on it is drawn", page.locator('#plan .cab[data-cab="1"]').count() > 0, True)
+    g = page.evaluate("() => S.res.room.gaps.map((x) => [x.after, x.before, x.nominal, x.front])")
+    check("gaps: to the start and to the end, no corner so no taper", g,
+          [[None, 1, 500, 500], [1, None, L - 1400, L - 1400]])
+    page.click('#roomsubs [data-roomsub="elev"]')
+    page.wait_for_function("() => S.roomSub === 'elev'", timeout=5000)
+    page.wait_for_selector("#elevation svg", timeout=10000)
+    check("the elevation draws wall A", page.evaluate("() => document.querySelector('#elevation .etrack').dataset.wall"), "A")
+    shot(page, "one_wall_elevation", "#elevcard")
+    sc = page.evaluate("async () => await post('/api/scene', {job: S.job})")
+    check("3D: one wall, the floor its own segment, open", (len(sc["room"]["walls"]), sc["room"]["closed"]), (1, False))
     check("no console errors", errors, [])
     ctx.close()
     browser.close()
 
 
-def stage_corner(pw):
-    print("\nSet a corner to 270 in the Walls card: the plan turns")
-    browser = pw.chromium.launch(headless=not args.headed)
+def open_l_job(name):
+    rm = Room(name=name, ceiling=2600, walls=chain_walls([("A", 3000), ("B", 2000)], closed=False))
+    return Job(name=name, room=rm,
+               cabinets=[Cabinet(number=n, width=600, height=720, depth=560, kind="base") for n in (1, 2)],
+               placements=[Placement(1, "A", 1000), Placement(2, "B", 700)])
+
+
+def stage_flip(pw):
+    print("\nFlip face: one wall's room side turned round, from its Wall card")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
     errors, dialogs = [], []
     ctx, page = open_page(browser, errors, dialogs)
-    job = empty_job("corner")
-    job.room = Room(name="corner", ceiling=2600, closed=False,
-                    walls=[Wall("A", 3000), Wall("B", 2000)])
+    adopt(page, open_l_job("flip"))
+    room_plan(page)
+    check("both cabinets inside the L, on the room side of both walls", room_side(page), [(1, True), (2, True)])
+    check("a click on wall A's hit line selects it", click_wall(page, "A") and page.evaluate("() => S.selWall"), "A")
+    check("  and the dock shows its Wall card",
+          (page.locator("#wallcard").is_visible(), page.locator("#wallcard h2").text_content().startswith("Wall A"),
+           page.evaluate("() => $('room').hidden")), (True, True, True))
+    check("  the hit line is marked selected", page.locator('#plan .wallhit.sel[data-wallhit="A"]').count(), 1)
+    shot(page, "flip_wall_card", "#roomdock")
+    page.click('#wallcard [data-wflip="A"]')
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'A').x0 === 3000", timeout=5000)
+    computed(page)
+    check("A's end points swapped; B untouched", points(page), [["A", 3000, 0, 0, 0], ["B", 3000, 0, 3000, 2000]])
+    check("cabinet 1 keeps its place along A, x from the other end",
+          page.evaluate("() => S.job.placements.map((p) => [p.cabinet, p.wall, p.x])"), [[1, "A", 1400], [2, "B", 700]])
+    check("it stands on the room's side of its own wall — the outside of the L now",
+          room_side(page, own_only=True), [(1, True), (2, True)])
+    check("  and cabinet 2 on B is no longer on A's room side (1 is still on B's: B's half plane is the "
+          "whole left side)", room_side(page), [(1, True), (2, False)])
+    check("A and B no longer meet: two free walls, each with a band",
+          (page.evaluate("() => S.res.room.walls.map((w) => w.free)"), page.locator("#plan polygon.roomside").count()),
+          ([True, True], 2))
+    shot(page, "flip_flipped", "#plancard")
+    page.click('#wallcard [data-wflip="A"]')
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'A').x0 === 0", timeout=5000)
+    computed(page)
+    check("flipped again: back as it was",
+          (points(page), page.evaluate("() => S.job.placements.map((p) => [p.cabinet, p.wall, p.x])")),
+          ([["A", 0, 0, 3000, 0], ["B", 3000, 0, 3000, 2000]], [[1, "A", 1000], [2, "B", 700]]))
+    page.click("#wallback")
+    time.sleep(0.2)
+    check("Room takes the dock back to the Room card",
+          (page.locator("#room").is_visible(), page.evaluate("() => S.selWall")), (True, None))
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+def stage_renumber(pw):
+    print("\nRenumber: letters along the walk, behind a confirm that lists the changes")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    rm = Room(name="rn", ceiling=2600, walls=chain_walls([("C", 4000), ("A", 3000), ("D", 4000), ("B", 3000)]))
+    job = Job(name="rn", room=rm,
+              cabinets=[Cabinet(number=n, width=600, height=720, depth=560, kind="base") for n in (1, 2)],
+              placements=[Placement(1, "A", 100), Placement(2, "D", 200)])
     adopt(page, job)
     room_plan(page)
-    before = page.evaluate("() => S.res.room.corners")
-    check("A then B at 90: B runs into the room", before, [[0, 0], [3000, 0], [3000, 2000]])
-    label = page.evaluate("() => document.querySelector('#room select[data-wk=\"corner_pick\"]')"
-                          ".closest('td').textContent.trim().slice(0, 3)")
-    check("the corner is labelled A→B", label, "A→B")
-    shot(page, "corner_90", "#plancard")
-    svg0 = page.evaluate("() => document.querySelector('#plan svg').outerHTML")
-    page.select_option('#room select[data-w="0"][data-wk="corner_pick"]', "270")
+    check("the walk starts at the lowest letter of the loop: A, D, B, C — the table in that order",
+          page.evaluate("() => [...document.querySelectorAll('#room tr[data-wallrow]')].map((r) => r.dataset.wallrow)"),
+          ["A", "D", "B", "C"])
+    page.click("#roomrenumber")
+    page.wait_for_function("() => S.res.room.walk.join('') === 'ABCD'", timeout=10000)
     computed(page)
-    check("270 stored on the wall before the corner",
-          page.evaluate("() => S.job.room.walls[0].corner_end"), 270)
-    check("B now turns back out", page.evaluate("() => S.res.room.corners"),
-          [[0, 0], [3000, 0], [3000, -2000]])
-    check("and the plan was redrawn",
-          page.evaluate("() => document.querySelector('#plan svg').outerHTML") != svg0, True)
-    shot(page, "corner_270", "#plancard")
-    page.select_option('#room select[data-w="0"][data-wk="corner_pick"]', "custom")
-    page.fill('#room input[data-w="0"][data-wk="corner_end"]', "112.5")
+    check("it asked, listing the changes", dialogs[:1] and "D → B" in dialogs[0] and "B → C" in dialogs[0]
+          and "C → D" in dialogs[0], True)
+    check("the walls are A, B, C, D along the walk, their points untouched",
+          points(page), [["A", 4000, 0, 4000, 3000], ["B", 4000, 3000, 0, 3000], ["C", 0, 3000, 0, 0], ["D", 0, 0, 4000, 0]])
+    check("the placements followed their walls",
+          page.evaluate("() => S.job.placements.map((p) => [p.cabinet, p.wall, p.x])"), [[1, "A", 100], [2, "B", 200]])
+    check("nothing orphaned", issues(page, "placement-wall"), [])
+    dialogs.clear()
+    page.click("#roomrenumber")
+    time.sleep(0.3)
+    check("already in order: nothing asked, nothing changed", (dialogs, page.evaluate("() => S.res.room.walk")),
+          ([], ["A", "B", "C", "D"]))
+    shot(page, "renumbered", "#roomdock")
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+def stage_height(pw):
+    print("\nWall height: a half wall, a tall unit against it, the elevation and 3D")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    job = Job(name="height", room=rectangular(4000, 3000, ceiling=2600),
+              cabinets=[Cabinet(number=1, width=600, height=2100, depth=580, kind="tall")],
+              placements=[Placement(1, "B", 500)])
+    adopt(page, job)
+    room_plan(page)
+    page.click('#room tr[data-wallrow="B"] td:first-child')
+    page.wait_for_function("() => S.selWall === 'B'", timeout=5000)
+    check("a row click selects the wall", page.locator("#wallcard h2").text_content().startswith("Wall B"), True)
+    check("the Wall card shows both corners at 90, square",
+          page.evaluate("() => ['angle_before', 'angle_after', 'square_before', 'square_after'].map((k) => "
+                        "document.querySelector(`#wallcard [data-wk=\"${k}\"]`).value)"), ["90", "90", "0", "0"])
+    page.fill('#wallcard input[data-wk="height"]', "1200")
+    page.press('#wallcard input[data-wk="height"]', "Enter")
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'B').height === 1200", timeout=5000)
     computed(page)
-    check("a custom angle, decimals allowed",
-          page.evaluate("() => S.job.room.walls[0].corner_end"), 112.5)
-    page.select_option('#room select[data-w="0"][data-wk="corner_pick"]', "90")
-    computed(page)
-    check("back to 90: nothing stored, as in a room nobody turned",
-          page.evaluate("() => 'corner_end' in S.job.room.walls[0]"), False)
+    check("the height is stored on the wall, the others at the ceiling",
+          page.evaluate("() => S.res.room.walls.map((w) => w.wall_height)"), [2600, 1200, 2600, 2600])
+    check("a tall unit against the half wall is a WARNING", issues(page, "above-wall"),
+          ["reaches 2200, above wall B, which is 1200 high"])
+    check("  not a critical: nothing blocks",
+          page.evaluate("() => S.res.issues.filter((i) => i.level === 'critical').length"), 0)
+    shot(page, "height_wall_card", "#roomdock")
+    page.click('#roomsubs [data-roomsub="elev"]')
+    page.wait_for_function("() => S.roomSub === 'elev'", timeout=5000)
+    page.wait_for_function("() => document.querySelector('#elevation .etrack') && document.querySelector('#elevation .etrack').dataset.wall === 'B'", timeout=10000)
+    check("the elevation of B (selected, so shown) has the ceiling dashed above the wall",
+          page.locator("#elevation .ceilingline").count(), 1)
+    shot(page, "height_elevation", "#elevcard")
+    page.click('nav [data-tab="view3d"]')
+    page.wait_for_function("() => typeof V3D === 'object' && V3D !== null", timeout=30000)
+    page.wait_for_selector("#v3dview canvas", timeout=15000)
+    page.wait_for_function("() => !S.sceneStale && V3D.memory().groups > 0", timeout=30000)
+    page.wait_for_function("() => V3D.idle()", timeout=15000)
+    shell = page.evaluate("() => V3D.debugShell()")
+    tops = {w["wall"]: round(w["max"][2]) for w in shell}
+    check("3D: wall B stands 1200 high, the others to the ceiling", tops, {"A": 2600, "B": 1200, "C": 2600, "D": 2600})
+    shot(page, "height_3d", "#v3dview")
     check("no console errors", errors, [])
     ctx.close()
     browser.close()
@@ -312,30 +485,41 @@ def stage_corner(pw):
 
 def stage_input(pw):
     print("\nRefused at the input: a negative length, an angle out of range")
-    browser = pw.chromium.launch(headless=not args.headed)
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
     errors, dialogs = [], []
     ctx, page = open_page(browser, errors, dialogs)
     job = empty_job("input")
-    job.room = Room(name="input", ceiling=2600, walls=[Wall("A", 4000), Wall("B", 3000),
-                                                       Wall("C", 4000), Wall("D", 3000)])
+    job.room = rectangular(4000, 3000, ceiling=2600)
     adopt(page, job)
     room_plan(page)
-    page.fill('#room input[data-w="2"][data-wk="length"]', "-4000")
-    time.sleep(0.2)
-    check("a negative length is not stored", page.evaluate("() => S.job.room.walls[2].length"),
-          4000)
-    check("  and the note says how to turn instead", page.inner_text("#wallnote"),
+    page.fill('#room input[data-wall="C"][data-wk="length"]', "-4000")
+    page.press('#room input[data-wall="C"][data-wk="length"]', "Enter")
+    time.sleep(0.4)
+    computed(page)
+    check("a negative length is not stored", walls(page)[2][1], 4000)
+    check("  and the note says how to turn instead", page.inner_text("#room .wallnote"),
           "Wall C: a length cannot be negative. To turn the other way, set the corner angle to 270.")
-    page.fill('#room input[data-w="2"][data-wk="length"]', "4000")
-    time.sleep(0.2)
-    check("a good entry clears the note", page.evaluate("() => $('wallnote').style.display"), "none")
-    page.select_option('#room select[data-w="1"][data-wk="corner_pick"]', "custom")
-    page.fill('#room input[data-w="1"][data-wk="corner_end"]', "400")
-    time.sleep(0.2)
-    check("an angle of 400 is not stored",
-          page.evaluate("() => 'corner_end' in S.job.room.walls[1]"), False)
-    check("  and is said", "between 0 and 360" in page.inner_text("#wallnote"), True)
-    shot(page, "input_refused", "#room")
+    page.fill('#room input[data-wall="C"][data-wk="length"]', "4100")
+    page.press('#room input[data-wall="C"][data-wk="length"]', "Enter")
+    time.sleep(0.4)
+    computed(page)
+    check("a good entry clears the note, and is stored", (page.inner_text("#room .wallnote"), walls(page)[2][1]), ("", 4100))
+    page.fill('#room input[data-wall="B"][data-wk="angle_after"]', "400")
+    page.press('#room input[data-wall="B"][data-wk="angle_after"]', "Enter")
+    time.sleep(0.4)
+    computed(page)
+    check("an angle of 400 is not stored: the corner still reads 90", walls(page)[1][2], 90)
+    check("  and is said", "between 0 and 360" in page.inner_text("#room .wallnote"), True)
+    shot(page, "input_refused", "#roomdock")
+    # a good angle turns the plan
+    page.fill('#room input[data-wall="A"][data-wk="angle_after"]', "270")
+    page.press('#room input[data-wall="A"][data-wk="angle_after"]', "Enter")
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'B').y1 === -3000", timeout=5000)
+    computed(page)
+    check("270 at A→B: B turns back out, the walls after it with it",
+          points(page)[1], ["B", 4000, 0, 4000, -3000])
+    check("  the room is an open run now, and the toast said so",
+          page.evaluate("() => S.res.room.closed"), False)
     check("no console errors", errors, [])
     ctx.close()
     browser.close()
@@ -343,20 +527,18 @@ def stage_input(pw):
 
 def stage_drag(pw):
     print("\nDrag a cabinet onto an angled wall")
-    browser = pw.chromium.launch(headless=not args.headed)
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
     errors, dialogs = [], []
     ctx, page = open_page(browser, errors, dialogs)
     # a 4 x 3 room with its C-D corner splayed: E runs at 45 degrees
     job = Job(name="splay", cabinets=[Cabinet(number=1, width=600, height=720, depth=560,
                                               kind="base")],
               placements=[Placement(1, "A", 1000)])
-    job.room = Room(name="splay", ceiling=2600, walls=[
-        Wall("A", 4000), Wall("B", 3000), Wall("C", 2000, corner_end=135),
-        Wall("E", 2828, corner_end=135), Wall("D", 1000)])
+    job.room = Room(name="splay", ceiling=2600, walls=chain_walls(
+        [("A", 4000), ("B", 3000), ("C", 2000), ("E", 2828), ("D", 1000)], corners=[90, 90, 135, 135, 90]))
     adopt(page, job)
     room_plan(page)
-    check("the splayed room closes", page.evaluate("() => S.res.room.closure_error"), 0)
-    # the middle of wall E and a point 300 mm into the room from it, on screen
+    check("the splayed room closes", page.evaluate("() => [S.res.room.closed, S.res.room.closure_error]"), [True, 0])
     tr = page.evaluate("""() => { const t = [...document.querySelectorAll('#plan .track')]
         .find((k) => k.dataset.wall === 'E');
         const r = t.ownerSVGElement.getBoundingClientRect(), vb = t.ownerSVGElement.viewBox.baseVal;
@@ -385,100 +567,9 @@ def stage_drag(pw):
     fp = page.evaluate("() => S.res.room.placements['1']")
     check("the engine has it on E", fp["wall"], "E")
     check("no overlap raised", page.evaluate("() => S.res.room.overlaps"), [])
+    check("the drag selected it: the editor shows in the dock",
+          (page.locator("#roomdock #editor").is_visible(), page.evaluate("() => $('room').hidden")), (True, True))
     shot(page, "drag_angled_wall", "#plancard")
-    check("no console errors", errors, [])
-    ctx.close()
-    browser.close()
-
-
-def stage_side(pw):
-    print("\nAn OPEN run drawn with the mouse: which side is the room")
-    browser = pw.chromium.launch(headless=not args.headed)
-    errors, dialogs = [], []
-    ctx, page = open_page(browser, errors, dialogs)
-
-    def draw_open(points):
-        page.click("#drawwalls")
-        page.wait_for_selector("#drawsvg", timeout=5000)
-        for x, y in points[:-1]:
-            click_mm(page, x, y)
-        cx, cy = at_mm(page, *points[-1])
-        page.mouse.move(cx, cy, steps=3)
-        page.mouse.dblclick(cx, cy)
-        page.wait_for_function("() => !DRAW", timeout=10000)
-        computed(page)
-
-    def room_side(own_only=False):
-        """Every placed cabinet's drawn footprint (the 3D scene's parts, world
-        mm) against the room side of every wall line — or only its own wall's
-        — off the engine's corners: the half-plane test check_room.py makes.
-        Inside an L the room is on the room side of both walls; round the
-        outside of one it is on the room side of each cabinet's own."""
-        sc = page.evaluate("async () => await post('/api/scene', {job: S.job})")
-        corners = page.evaluate("() => S.res.room.corners")
-        ids = page.evaluate("() => S.res.room.walls.map((w) => w.id)")
-        out = []
-        for item in sc["items"]:
-            if not item["parts"]:
-                continue
-            ok = True
-            for k in range(len(corners) - 1):
-                if own_only and ids[k] != item["wall"]:
-                    continue
-                (ax, ay), (bx, by) = corners[k], corners[k + 1]
-                ln = math.hypot(bx - ax, by - ay)
-                nx, ny = -(by - ay) / ln, (bx - ax) / ln
-                for part in item["parts"]:
-                    for x, y in part["outline"]:
-                        if (x - ax) * nx + (y - ay) * ny < -0.5:
-                            ok = False
-            out.append((item["number"], ok))
-        return sorted(out)
-
-    def place_two():
-        page.evaluate("() => { S.job.placements = [{cabinet: 1, wall: 'A', x: 1000, z: 0, y: 0, "
-                      "flip: false, layer: null}, {cabinet: 2, wall: 'B', x: 500, z: 0, y: 0, "
-                      "flip: false, layer: null}]; placesSig = null; schedule(); }")
-        computed(page)
-
-    job = Job(name="side", cabinets=[Cabinet(number=n, width=600, height=720, depth=560,
-                                             kind="base") for n in (1, 2)])
-    adopt(page, job)
-    room_plan(page)
-    ltr = [(0, 0), (3000, 0), (3000, 2000)]
-    for name, pts in (("left to right", ltr), ("right to left", ltr[::-1])):
-        page.evaluate("() => { S.job.room = null; S.job.placements = []; schedule(); }")
-        computed(page)
-        draw_open(pts)
-        check(f"an L drawn {name}: A 3000, B 2000, corner 90", walls(page),
-              [["A", 3000, 90, True], ["B", 2000, 90, True]])
-        place_two()
-        check(f"  both cabinets inside the L, on the room side of both walls", room_side(),
-              [(1, True), (2, True)])
-        shot(page, "side_" + name.replace(" ", "_"), "#plancard")
-    check("Flip side is offered on an open run",
-          page.evaluate("() => !!document.querySelector('#roomflip')"), True)
-    page.click("#roomflip")
-    computed(page)
-    check("Flip side: the walls walked the other way, the corner now 270",
-          walls(page), [["B", 2000, 270, True], ["A", 3000, 90, True]])
-    check("  the cabinets keep their places along the walls, x from the other end",
-          page.evaluate("() => S.job.placements.map((p) => [p.cabinet, p.wall, p.x])"),
-          [[1, "A", 1400], [2, "B", 900]])
-    check("  and stand on the room's side of their own walls — the outside of the L now",
-          room_side(own_only=True), [(1, True), (2, True)])
-    check("  no longer inside the L", room_side(), [(1, False), (2, False)])
-    shot(page, "side_flipped", "#plancard")
-    page.click("#roomflip")
-    computed(page)
-    check("Flip side again: back as it was",
-          page.evaluate("() => S.job.placements.map((p) => [p.cabinet, p.wall, p.x])"),
-          [[1, "A", 1000], [2, "B", 500]])
-    page.select_option('#room select[data-r="closed"]', "yes")
-    computed(page)
-    page.evaluate("() => renderRoom(true)")
-    check("not offered on a closed room",
-          page.evaluate("() => !!document.querySelector('#roomflip')"), False)
     check("no console errors", errors, [])
     ctx.close()
     browser.close()
@@ -486,8 +577,7 @@ def stage_side(pw):
 
 def stage_3d(pw):
     print("\n3D: an L room with an outside corner and a splayed wall")
-    browser = pw.chromium.launch(headless=not args.headed, args=[
-        "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
     errors, dialogs = [], []
     ctx, page = open_page(browser, errors, dialogs)
     job = Job(name="ell3d", cabinets=[Cabinet(number=1, width=600, height=720, depth=560,
@@ -495,12 +585,11 @@ def stage_3d(pw):
                                       Cabinet(number=2, width=600, height=720, depth=560,
                                               kind="base")],
               placements=[Placement(1, "A", 1200), Placement(2, "G", 600)])
-    job.room = Room(name="ell3d", ceiling=2600, walls=[
-        Wall("A", 3000), Wall("B", 1000, corner_end=270), Wall("C", 1000),
-        Wall("D", 2000, corner_end=135), Wall("G", 1414, corner_end=135),
-        Wall("E", 3000), Wall("F", 4000)])
+    job.room = Room(name="ell3d", ceiling=2600, walls=chain_walls(
+        [("A", 3000), ("B", 1000), ("C", 1000), ("D", 2000), ("G", 1414), ("E", 3000), ("F", 4000)],
+        corners=[90, 270, 90, 135, 135, 90, 90]))
     adopt(page, job)
-    check("the room closes", page.evaluate("() => S.res.room.closure_error"), 0)
+    check("the room closes", page.evaluate("() => [S.res.room.closed, S.res.room.closure_error]"), [True, 0])
     page.click('nav [data-tab="view3d"]')
     page.wait_for_function("() => typeof V3D === 'object' && V3D !== null", timeout=30000)
     page.wait_for_selector("#v3dview canvas", timeout=15000)
@@ -527,8 +616,8 @@ def stage_3d(pw):
     browser.close()
 
 
-STAGES = {"draw": stage_draw, "ell": stage_ell, "corner": stage_corner,
-          "input": stage_input, "drag": stage_drag, "side": stage_side, "3d": stage_3d}
+STAGES = {"draw": stage_draw, "one": stage_one, "flip": stage_flip, "renumber": stage_renumber,
+          "height": stage_height, "input": stage_input, "drag": stage_drag, "3d": stage_3d}
 
 
 def main() -> int:

@@ -47,7 +47,7 @@ from cabinetgen.model import (Cabinet, GapChoice, Job, Placement,           # no
                               PlinthChoice, Room, Wall, hinge_side)
 from cabinetgen.render import RUN_GAP, run_layout, PICTURE_TILE_MM          # noqa: E402
 from cabinetgen.room import (EXAMPLE_MITRE, geometry, rectangular,          # noqa: E402
-                             to_world, carcass_z, placement_for)
+                             to_world, carcass_z, placement_for, set_out_of_square)
 from cabinetgen.standard import STANDARD                                    # noqa: E402
 from cabinetgen.store import job_to_dict, load                              # noqa: E402
 from jobs.wardrobe_oct2025 import JOB as OCT                                # noqa: E402
@@ -177,7 +177,7 @@ def main():
 
     print("\nworld vertices are room.to_world of the cabinet-local corners")
     rm = rectangular(4000, 3000)
-    rm.walls[0].offset_end = 60                      # a corner well out of square
+    set_out_of_square(rm, "A", 60)                   # the A-B corner 60 mm out of square at 600
     rm.ceiling = 2600
     job = Job(name="w", room=rm, cabinets=[straight_cab(1), straight_cab(2, kind="upper", height=720)],
               placements=[Placement(1, "B", 500), Placement(2, "B", 500, z=1400)])

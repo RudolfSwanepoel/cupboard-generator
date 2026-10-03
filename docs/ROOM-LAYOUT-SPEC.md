@@ -262,9 +262,12 @@ Gaps below the filler minimum are dimensioned in red.
 
 Interaction rules, in order of how much grief each one saves:
 
-- A cabinet belongs to a wall and drags **along that wall only**. Free 2D
-  dragging is what makes these interfaces unusable. Dragging it near a
-  different wall re-parents it to that wall.
+- ~~A cabinet belongs to a wall and drags **along that wall only**. Free 2D
+  dragging is what makes these interfaces unusable.~~ **Overruled 2 October
+  2026 for Phase 4 of the room redo** (free cabinets: a placement on a wall
+  OR free, detach by pulling off the wall, magnet back on, rotate). In Phase
+  1 a cabinet still drags along its wall exactly as before; dragging it near
+  a different wall re-parents it to that wall.
 - Snap to the wall face, to neighbouring cabinet edges, and to opening edges.
 - Overlapping cabinets render red and raise a critical on export.
 - A gap below the filler minimum shows its dimension and warns.
@@ -1011,3 +1014,104 @@ corner unit's hand swapped; a gap decision's two sides swapped; a plinth
 decision moved to the cabinet that now starts its run. No cut changes, and
 flipping twice gives the job file back exactly. A closed room has no other
 side and is refused.
+
+## Ruled — 2 Oct 2026 (room redo, Phase 1: walls become positioned segments)
+
+Brief `Claude outputs/room-redo-phase1-brief-2026-10-02.md`, agreed with
+Rudolf; the survey of comparable tools in
+`Claude outputs/room-redo-research-2026-10-02.md`. Rudolf's verdict on the
+Room tab was "terrible", and every complaint traced to one decision: a wall
+had no position of its own. Four phases; this is the first.
+
+1. **The model and the Walls UI** — built: walls as segments with end points,
+   the chain and corners derived, migration of every job and fixture, wall
+   height, lettering fixed for life plus Renumber, a one-wall room that
+   draws, the room side shown and flippable per wall, Draw walls that adds,
+   the Room tab re-laid out around one canvas and one dock.
+2. **Drawing** — the integrated draw mode: typed lengths while drawing, join
+   on an existing corner, a wall drawn onto a wall splits it (T-walls,
+   nooks), drag a corner to reshape, drag a wall to move it parallel, a Nook
+   tool. Not built.
+3. **Openings and obstructions** — a palette (Door, Window, Arch,
+   Obstruction) dragged onto a wall, edited in the dock and by drag in plan
+   and elevation, a room door's swing into a cabinet as a WARNING. Not built.
+4. **Free cabinets** — a placement either on a wall or free (position +
+   angle), detach by pulling off the wall, magnet back on, rotate by handle in
+   15° steps / R for 90° / typed, free-to-free snaps for islands. Not built.
+
+Island as a cupboard Kind and the shelves / doors / defaults round come
+between the room phases and Phase 4.
+
+**The eleven rulings** (build to these; don't reopen them):
+
+1. **Walls are positioned segments.** `Wall` stores `x0, y0, x1, y1`, whole
+   mm. Length, direction, the corner angles, the walk order and whether the
+   room is closed are DERIVED (`room.connections`, `walk_order`, `is_closed`,
+   `corner_angle`, `corner_points`, `closure_error`). Nothing else stores a
+   wall position.
+2. **The room is on the RIGHT of x0 → x1** — the drawn line is the inside
+   face (`wall_normal`, the right-hand normal, `(-dy, dx)` in this frame —
+   walls clockwise as the app always had them). The thickness band is drawn
+   on the left, the back. **Flip face** (`room.flip_face`, `/api/wall-flip`)
+   swaps x0 / x1 and re-measures the wall's openings, obstructions,
+   placements (`L − x − width`), a corner unit's hand, its gap and plinth
+   decisions from the other end — one wall at a time; `flip_side` is gone.
+3. **One face per wall.** A partition taking cabinets on both sides is two
+   walls back to back ("Add back face", Phase 2). Every engine rule stays
+   single-sided.
+4. **Thickness is drawing only.** `Wall.thickness`, default
+   `Standard.wall_thickness` 110, written only when set; the hatched band on
+   the back of the face line. It moves no check.
+5. **Wall height.** `Wall.height`, None = the room ceiling, written only when
+   set (`room.wall_height`). The elevation draws the wall to it with the
+   ceiling dashed above a lower wall; 3D draws each wall to it. An opening
+   whose head is above the wall's height is a CRITICAL (`opening-height`); a
+   cabinet reaching above a wall lower than the ceiling is a WARNING
+   (`above-wall`) — a tall unit can stand against a half wall.
+6. **Letters are for life.** A wall keeps its letter whatever is drawn, added
+   or deleted; a new wall takes the first unused letter (after Z, AA). The
+   Room card lists walls in walk order, free walls last. **Renumber**
+   (`room.renumber_walls`, `/api/room-renumber`) re-letters A, B, C… along
+   the walk and rewrites every placement, gap and plinth decision and
+   acceptance naming a wall — a deliberate act behind a confirm listing the
+   changes. Nothing re-letters on its own.
+7. **Offsets are an input method, not a stored fact.** `offset_start`,
+   `offset_end` and `corner_end` are read for migration and never written
+   again. The Wall card shows each corner's actual interior angle (derived,
+   0.1°) and, within `Standard.square_within` (10°) of 90, 180 or 270, an
+   **out-of-square** figure: the deviation at `Room.offset_depth` (600) in
+   mm, positive opening away from the room. Typing either writes the angle
+   (`set_corner` / `set_out_of_square`); the angle moves the end points. The
+   open item on the `offset_depth` default and sign stays open.
+8. **Byte-for-byte round trip broken ONCE, deliberately, for jobs with a
+   room.** Loading migrates the chain to points (`store.room_from_dict`
+   through `room._legacy_frames`); saving writes points. Load → save → load
+   is stable (pinned). Every fixture with a room was re-saved in the new form
+   in the same commit. Jobs with no room — the benchmark included — did not
+   change by a byte.
+9. **Migration within 1 mm.** Every fixture room's `wall_frames` after
+   migration is within 1 mm of what the chain gave — exact where every
+   corner is 90 and every length an integer, which is every fixture and job
+   on disk, so no pinned figure moved. The angled legacy rooms (the
+   parallelogram, the hexagon, the splay, the bay) are migration cases in
+   `check_room.py`.
+10. **Units on screen.** Every length field and column says mm; angles say °.
+11. **The spec's "a cabinet drags along its wall only" (above) and the 21
+    Sept 2026 deferral of islands are OVERRULED** — for Phase 4. In this
+    phase cabinets still drag along their wall exactly as they do now.
+
+**Built beyond the rulings, as the brief asked:** `closure_error` is a near
+miss within `closure_block` only — a chain missing by more is an open run and
+nothing is said; a typed length or angle on a closed room therefore opens the
+loop by the difference, the toast says so, and the Room card reads "open
+run". A typed corner on a closed loop turns every other wall round the loop,
+so the last corner of the walk can be typed too. `crossing_walls` names
+proper crossings only — a T-wall, and an end point lying on another wall,
+are legal. `/api/wall-set`, `wall-add` (off a free end only), `wall-delete`
+(with an `ask` step naming what becomes unplaced), `wall-flip`,
+`room-renumber` (a dry run for the confirm) and `room-draw` (adds; a first
+point within `snap_tolerance` of an existing corner joins it) are the API;
+`/api/room-extend` and `/api/room-flip` are gone. The room side is SHOWN in
+the plan: a closed room's floor tinted, an open run's or a free wall's face
+side a 300 mm band fading out (`render.ROOM_TINT`, `ROOM_BAND_MM`).
+

@@ -1,4 +1,5 @@
 """Data model: panels, drawers, cabinets, jobs."""
+import math
 from dataclasses import dataclass, field
 from typing import Optional, List
 
@@ -1514,37 +1515,44 @@ class Obstruction:
 
 @dataclass
 class Wall:
-    """One wall, measured on site.
+    """One wall: a positioned segment (room redo Phase 1, 2 October 2026).
 
-    `offset_start` / `offset_end` are the perpendicular deviation from square at
-    each corner, taken Room.offset_depth mm out from this wall's face. Zero is
-    square; positive means the return wall opens away from the room. The corner
-    angle follows from atan(offset / offset_depth).
+    `x0, y0` -> `x1, y1` are its two end points in room millimetres, whole
+    numbers. The drawn line is the INSIDE face, and the room is on the RIGHT of
+    x0 -> x1 (walls clockwise, as the app has always had them): wall A of a
+    4000 x 3000 room runs (0, 0) -> (4000, 0) and the room is at +Y. Length,
+    direction, the inward normal, which wall meets which, the corner angles,
+    the walk order and whether the room closes are all DERIVED in `room.py`;
+    nothing else stores a wall position. A wall's letter is for life: nothing
+    re-letters one but `room.renumber_walls`, a deliberate act.
 
-    `corner_end` is the NOMINAL interior angle of the corner after this wall,
-    measured inside the room between the two wall faces (ruled 29 September
-    2026): 90 an inside corner, 270 an outside one (a chimney breast, a nib),
-    135 / 225 a splay in and out, 180 walls in line — anything strictly
-    between 0 and 360. The offsets stay the fine correction on top of it,
-    measured exactly as before. On a closed room the last wall's is the corner
-    back to the first wall; on an open run the last wall's is not read.
+    `height` is None for the room ceiling; `thickness` None for
+    `Standard.wall_thickness` (drawing only — it moves no check). `drawn` says
+    the segment came off a mouse sketch on Room -> Plan, not a tape: a
+    CRITICAL until it is typed or ticked as measured, so a cut list never goes
+    out on a drawn length. Each is written to the job file only when set
+    (`store.wall_to_dict`).
 
-    `drawn` says the length came off a mouse sketch on Room -> Plan, not a
-    tape: a CRITICAL until it is typed or ticked as measured, so a cut list
-    never goes out on a drawn length.
-
-    Both are written to the job file only when they are not at their default
-    (`store.room_to_dict`), so every room saved before them round-trips byte
-    for byte — the discipline of `Placement.y`.
+    A room saved before this (walls as a length and a corner angle, the chain
+    walked from wall A along +X) is migrated ONCE on load by
+    `store.room_from_dict` through the old chain arithmetic
+    (`room._legacy_frames`), to whole mm; saving then writes points.
     """
-    id: str                # 'A', 'B', 'C' ... clockwise
-    length: int            # measured tight against the wall
-    offset_start: int = 0
-    offset_end: int = 0
+    id: str                # 'A', 'B', 'C' ... (after Z, AA)
+    x0: int = 0
+    y0: int = 0
+    x1: int = 0
+    y1: int = 0
+    height: Optional[int] = None       # None: the room ceiling
+    thickness: Optional[int] = None    # None: Standard.wall_thickness; drawing only
+    drawn: bool = False                # drawn with the mouse, not yet measured
     openings: List[Opening] = field(default_factory=list)
     obstructions: List[Obstruction] = field(default_factory=list)
-    corner_end: float = 90     # nominal interior angle of the corner after this wall
-    drawn: bool = False        # length drawn with the mouse, not yet measured
+
+    @property
+    def length(self) -> int:
+        """The wall's length in whole mm, off its two end points."""
+        return int(round(math.hypot(self.x1 - self.x0, self.y1 - self.y0)))
 
 
 @dataclass
@@ -1554,8 +1562,7 @@ class Room:
     # check is only worth trusting against a real figure, so a room with no
     # ceiling blocks the export until one is measured.
     ceiling: Optional[int] = None
-    offset_depth: int = 600    # depth at which the offsets were measured
-    closed: bool = True        # walls form a loop
+    offset_depth: int = 600    # depth an out-of-square figure is read at (the Wall card)
     walls: List[Wall] = field(default_factory=list)
 
 

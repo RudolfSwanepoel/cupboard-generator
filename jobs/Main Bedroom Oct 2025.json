@@ -1412,37 +1412,40 @@
     "name": "Main bedroom",
     "ceiling": 2800,
     "offset_depth": 600,
-    "closed": true,
     "walls": [
       {
         "id": "A",
-        "length": 3200,
-        "offset_start": 0,
-        "offset_end": 0,
+        "x0": 0,
+        "y0": 0,
+        "x1": 3200,
+        "y1": 0,
         "openings": [],
         "obstructions": []
       },
       {
         "id": "B",
-        "length": 3800,
-        "offset_start": 0,
-        "offset_end": 0,
+        "x0": 3200,
+        "y0": 0,
+        "x1": 3200,
+        "y1": 3800,
         "openings": [],
         "obstructions": []
       },
       {
         "id": "C",
-        "length": 3200,
-        "offset_start": 0,
-        "offset_end": 0,
+        "x0": 3200,
+        "y0": 3800,
+        "x1": 0,
+        "y1": 3800,
         "openings": [],
         "obstructions": []
       },
       {
         "id": "D",
-        "length": 3800,
-        "offset_start": 0,
-        "offset_end": 0,
+        "x0": 0,
+        "y0": 3800,
+        "x1": 0,
+        "y1": 0,
         "openings": [],
         "obstructions": []
       }

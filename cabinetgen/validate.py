@@ -17,8 +17,8 @@ from .room import (above_ceiling, arm_shelf_depth, arm_shelf_max_depth,
                    attached_carcass_overlaps, cabinet_by_number, host_of,
                    blind_door_width, blind_opening, blocked_openings,
                    cab_corner_outline, corner_angle, corner_shadow,
-                   clashes as room_clashes, closure_error, corner_offset,
-                   corner_exists, crossing_walls, unit_corner,
+                   clashes as room_clashes, closure_error, above_wall,
+                   crossing_walls, low_openings, unit_corner,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
                    panel_clashes as room_panel_clashes, placed,
                    plinth_choice_for, plinth_open_corners, run_key, runs as room_runs, tip_inputs,
@@ -1063,46 +1063,39 @@ def _room(job: Job, std):
     for i in dupes:
         out.append(Issue(CRITICAL, f"wall {i}", "two walls share this id", check="wall-id-unique"))
     if dupes:
-        return out          # the chain is keyed by id; nothing below can be trusted
+        return out          # every record names a wall by id; nothing below can be trusted
 
-    err = closure_error(rm)
+    # A chain that NEARLY closes and misses (2 October 2026): the walls are
+    # positioned, so a miss within `closure_block` is measurements that
+    # disagree; a bigger miss is simply an open run, and nothing is said.
+    err = closure_error(rm, std)
     if err > std.closure_block:
         out.append(Issue(CRITICAL, rm.name,
                          f"walls miss closing by {err} mm — the measurements "
                          f"contradict each other, remeasure before placing anything", check="room-closure"))
     elif err > std.closure_warn:
-        out.append(Issue(WARNING, rm.name, f"walls miss closing by {err} mm"))
+        out.append(Issue(WARNING, rm.name, f"walls miss closing by {err} mm", check="room-closure"))
 
-    for i, w in enumerate(rm.walls):
-        if not corner_exists(rm, i):
-            continue
-        a = getattr(w, "corner_end", 90)
-        try:
-            ok = 0 < float(a) < 360
-        except (TypeError, ValueError):
-            ok = False
-        if not ok:
-            nxt = rm.walls[(i + 1) % len(rm.walls)]
-            out.append(Issue(CRITICAL, f"{w.id}-{nxt.id}",
-                             f"corner {w.id}→{nxt.id}: angle {a!r} is not between 0 and "
-                             f"360 degrees — drawn as 90 until it is", check="corner-angle"))
-    # Walls that cross each other in plan cannot be built as drawn — usually
-    # a corner entered as 90 that is really 270, or a length on the wrong wall.
-    # Not asked while a wall has no length: that is its own critical, and a
-    # wall of nothing folds its neighbours onto each other.
+    # Walls that cross each other in plan cannot be built as drawn. Meeting at
+    # an end, or an end on another wall (a T-wall), is legal geometry. Not
+    # asked while a wall has no length: that is its own critical.
     unmeasured = any(w.length <= 0 for w in rm.walls)
     for a, b in ([] if unmeasured else crossing_walls(rm)):
         out.append(Issue(CRITICAL, f"{a}/{b}",
                          f"walls {a} and {b} cross each other in plan — check the corner "
                          f"angles and the lengths", check="room-self-intersect"))
 
-    for i, w in enumerate(rm.walls):
-        _, disagree = corner_offset(rm, i)
-        if disagree > std.corner_disagree:
-            nxt = rm.walls[(i + 1) % len(rm.walls)]
-            out.append(Issue(WARNING, f"{w.id}-{nxt.id}",
-                             f"corner measured {w.offset_end} from {w.id} but "
-                             f"{nxt.offset_start} from {nxt.id}"))
+    # Wall height (2 October 2026): an opening cannot be taller than its wall;
+    # a cabinet reaching above a wall lower than the ceiling is a warning — a
+    # tall unit can stand against a half wall.
+    for wid, kind, head, h in low_openings(rm):
+        out.append(Issue(CRITICAL, f"wall {wid}",
+                         f"wall {wid}: the {kind}'s head at {head} is above the wall, "
+                         f"which is {h} high", check="opening-height"))
+    for number, top, h, wid in above_wall(job, std):
+        out.append(Issue(WARNING, str(number),
+                         f"reaches {top}, above wall {wid}, which is {h} high",
+                         check="above-wall"))
 
     by_number = {c.number: c for c in job.cabinets}
     lengths = {w.id: w.length for w in rm.walls}
@@ -1131,11 +1124,11 @@ def _room(job: Job, std):
         # (ruling 4, 29 September 2026). In any other corner its construction
         # has not been ruled: a critical, and no shadow is cast there — so the
         # "not standing in a corner" warning below is not said as well.
-        k = unit_corner(rm, cab, p) if cab.corner_on else None
+        k = unit_corner(rm, cab, p, std) if cab.corner_on else None
         if (k is not None and cab.corner_kind in ("mitre", "blind")
-                and corner_angle(rm, k) != 90):
+                and corner_angle(rm, k, std) != 90):
             out.append(Issue(CRITICAL, str(p.cabinet),
-                             f"Corner unit at a {corner_angle(rm, k):g}° corner: "
+                             f"Corner unit at a {corner_angle(rm, k, std):g}° corner: "
                              f"construction not ruled.", check="corner-unit-angle"))
             continue
         # A corner unit stands in a corner. The editor moves it there whenever

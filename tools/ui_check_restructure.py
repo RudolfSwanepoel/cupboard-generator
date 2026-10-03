@@ -227,8 +227,12 @@ def stage_plan(pw):
     page.wait_for_selector("#plan svg", timeout=15000)
     check("Plan is the default sub-tab, the elevation card hidden",
           (page.locator("#plancard").is_visible(), page.locator("#elevcard").is_visible()), (True, False))
-    check_true("the walls, placements, gaps and plinth cards are under it",
-               all(page.locator(f"#{i}").is_visible() for i in ("room", "places", "gaps", "plinth")))
+    # the Room redo (2 October 2026): the Walls card is the Room card in the
+    # dock, shown while nothing is selected; Placements, Gaps and Plinth stay under
+    check_true("the placements, gaps and plinth cards are under it",
+               all(page.locator(f"#{i}").is_visible() for i in ("places", "gaps", "plinth")))
+    check_true("and the Room card is in the dock with nothing selected",
+               page.locator("#roomdock #room").is_visible() and page.locator("#room #walltable").count() == 1)
     check("the one editor is docked beside it",
           page.evaluate("() => document.getElementById('editor').parentElement.id"), "roomdock")
     # layer toggles
@@ -670,7 +674,11 @@ def stage_export(pw):
     ctx, page = new_page(browser, errors)
     load_job(page, "Test")
     room_sub(page, "plan")
-    page.click('#room [data-walladd="end"]')
+    # a third wall off B's free end: the Wall card's "+ Wall after" (room redo
+    # Phase 1, 2 October 2026 — the Walls card's "+ Wall after" went with it)
+    page.click('#room tr[data-wallrow="B"] td:first-child')
+    page.wait_for_function("() => S.selWall === 'B'", timeout=5000)
+    page.click('#wallcard [data-wadd="after"]')
     page.wait_for_function("() => S.job.room.walls.length === 3", timeout=10000)
     computed(page)
     name = "ui_restructure_export"

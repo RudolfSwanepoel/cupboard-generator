@@ -121,10 +121,15 @@ def placement_to_dict(p: Placement) -> dict:
     return d
 
 
-# Wall fields added after the room format had settled (29 September 2026):
-# each written only when it is not at its default, so every room saved before
-# walls could turn at any angle reads and writes byte for byte.
-LATE_WALL_FIELDS = ("corner_end", "drawn")
+# Wall fields written only when set (room redo Phase 1, 2 October 2026): a
+# height of None is the room ceiling, a thickness of None is
+# Standard.wall_thickness, and `drawn` is the mouse-sketch marker.
+LATE_WALL_FIELDS = ("height", "thickness", "drawn")
+
+# What a wall record said before walls had positions: a length, the offsets
+# and the nominal corner angle, the chain walked from wall A along +X. READ
+# for migration (`wall_from_dict` / `room_from_dict`) and never written again.
+LEGACY_WALL_FIELDS = ("length", "offset_start", "offset_end", "corner_end")
 
 
 def wall_to_dict(w: Wall) -> dict:
@@ -142,14 +147,50 @@ def room_to_dict(room: Room) -> dict:
     return d
 
 
+def wall_from_dict(d: dict) -> Wall:
+    """One wall off the wire or the file. A record carrying the old keys and no
+    `x0` is read with its points at the origin along +X: `room_from_dict`
+    places it, because the old form only means anything as a chain."""
+    w = dict(_only_known(Wall, d))
+    if "x0" not in d and d.get("length") is not None:
+        w.update(x0=0, y0=0, x1=int(d.get("length") or 0), y1=0)
+    for k in ("x0", "y0", "x1", "y1"):
+        w[k] = int(round(float(w.get(k) or 0)))
+    for k in ("height", "thickness"):
+        if w.get(k) in ("", 0, None):
+            w[k] = None
+        else:
+            w[k] = int(w[k])
+    w["drawn"] = bool(w.get("drawn", False))
+    w["openings"] = [Opening(**_only_known(Opening, o)) for o in d.get("openings", [])]
+    w["obstructions"] = [Obstruction(**_only_known(Obstruction, o))
+                         for o in d.get("obstructions", [])]
+    return Wall(**w)
+
+
+def _legacy_room(d: dict) -> bool:
+    walls = d.get("walls") or []
+    return any("x0" not in w and w.get("length") is not None for w in walls) \
+        or (bool(walls) and all("x0" not in w for w in walls) and "closed" in d)
+
+
 def room_from_dict(d: dict) -> Room:
+    """A room off the wire or the file. A room saved before walls had positions
+    — walls as a length and a corner angle, with `closed` on the room — is
+    MIGRATED once here (ruling 8, 2 October 2026): the old chain arithmetic
+    (`room._legacy_frames`) places every wall, rounded to whole mm, so the room
+    is exactly the room it was, wall A still from (0, 0) along +X. Saving then
+    writes points, and load -> save -> load is stable."""
+    from .room import _legacy_frames
     d = dict(d)
-    d["walls"] = [Wall(**dict(_only_known(Wall, w),
-                             openings=[Opening(**_only_known(Opening, o))
-                                       for o in w.get("openings", [])],
-                             obstructions=[Obstruction(**_only_known(Obstruction, o))
-                                           for o in w.get("obstructions", [])]))
-                  for w in d.get("walls", [])]
+    raw = d.get("walls", [])
+    walls = [wall_from_dict(w) for w in raw]
+    if _legacy_room(d):
+        frames = _legacy_frames(raw, int(d.get("offset_depth") or 600), bool(d.get("closed", True)))
+        for w, (_id, (sx, sy), (ex, ey)) in zip(walls, frames):
+            w.x0, w.y0, w.x1, w.y1 = (int(round(sx)), int(round(sy)),
+                                      int(round(ex)), int(round(ey)))
+    d["walls"] = walls
     return Room(**_only_known(Room, d))
 
 

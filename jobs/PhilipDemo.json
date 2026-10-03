@@ -152,21 +152,22 @@
     "name": "PhilipDemo",
     "ceiling": 2600,
     "offset_depth": 600,
-    "closed": true,
     "walls": [
       {
         "id": "B",
-        "length": 3000,
-        "offset_start": 0,
-        "offset_end": 0,
+        "x0": 0,
+        "y0": 0,
+        "x1": 3000,
+        "y1": 0,
         "openings": [],
         "obstructions": []
       },
       {
         "id": "C",
-        "length": 3000,
-        "offset_start": 0,
-        "offset_end": 0,
+        "x0": 3000,
+        "y0": 0,
+        "x1": 3000,
+        "y1": 3000,
         "openings": [],
         "obstructions": []
       }

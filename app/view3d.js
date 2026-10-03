@@ -1182,7 +1182,10 @@ function buildShell(payload) {
       new THREE.LineBasicMaterial({color: PAPER.edgeWall, toneMapped: false})));
     shell.add(floorEdge);
     for (const w of room.walls) {
-      const [mesh, edges] = wallMesh(w, room.top, room.closed);
+      // to ITS height (Wall.height, 2 October 2026): a half wall stops short
+      // of the ceiling; the payload carries the ceiling, or the drawing's top,
+      // where none is set
+      const [mesh, edges] = wallMesh(w, Math.min(w.height || room.top, room.top), room.closed);
       shell.add(mesh, edges);
       V.wallMeshes.push(mesh);
       for (const ob of obstructionMeshes(w)) { shell.add(ob); V.obstructions.push(ob); }
