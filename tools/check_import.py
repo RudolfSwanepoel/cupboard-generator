@@ -51,7 +51,7 @@ The follow-up brief (3 October 2026), on folders of their own:
     no list, and said so;
   * `tools/build_demo.py`'s `assemble()` writes that list, naming exactly the
     jobs it copied, the zip listing names it, the importer reads it, and the
-    demo's Load list does not offer it.
+    demo's Load list does not offer it, nor its Boards tab as an unreadable job.
 """
 import contextlib
 import copy
@@ -683,6 +683,8 @@ def demo_list(top):
           sorted(i["name"] + ".json" for i in r["items"] if i["action"] == "shipped"), copied)
     point_api(app)
     check("the demo's Load list does not offer the list", api.job_list({})["jobs"], copied)
+    check("... nor does Boards count it as a job that could not be read",
+          api.board_list({})["unreadable"], [])
 
 
 def asdict_board(b):

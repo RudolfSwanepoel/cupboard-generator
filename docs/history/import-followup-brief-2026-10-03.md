@@ -6,7 +6,8 @@ repo. Plan approved by Rudolf with two decisions (Status folded to one line;
 `shipped-jobs.json` hidden from Load) and two additions (apply the Esc fix;
 reword protocol step 7). Nothing that cuts, nests or costs changed.
 
-Commits: 50c5bc7 (Part 1), ccc8cd9 (Part 2), and Part 3 (this write-up).
+Commits: 50c5bc7 (Part 1), ccc8cd9 (Part 2), 229285e (Part 3), and the
+review's one finding fixed after it (below).
 
 ## Part 1 — the two import rulings
 
@@ -72,7 +73,7 @@ area only when it is new (Rudolf's addition).
 ## Evidence
 
 - `python tools/check_all.py`: **24 of 24 passed** at each commit.
-  `check_import.py` 91 → 117 PASS lines (one existing line moved: the
+  `check_import.py` 91 → 118 PASS lines (one existing line moved: the
   preview's counts gained `"shipped": 0`).
 - Benchmark: **272 MEL / 59 BROOKHILL / 30 BACK, 92 pot holes, 18 / 9 / 6
   boards, R28,363.50.** The 22-of-30 cabinet diff needs the real cut list,
@@ -96,6 +97,11 @@ area only when it is new (Rudolf's addition).
 - `shipped-jobs.json` in `jobs\` would have shown in the demo's Load list
   (hidden, decision 2) and been read as a broken job by the importer
   (excluded from `_job_files`).
+- **Found by the fresh-context review:** the Boards tab's job scan
+  (`boards.scan_jobs`) also read it, so every new demo's Boards tab would have
+  shown "1 job could not be read — shipped-jobs.json". It now skips the list
+  (any other unreadable file is still reported), pinned in `check_import.py`
+  (`board_list` reports nothing unreadable in the assembled demo).
 - A list that cannot be read is treated as no list, with a note naming it.
 - The list is by file name, as ruled: a friend who renames a shipped job
   brings it in; one who deletes a shipped job and saves his own under the

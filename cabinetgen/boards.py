@@ -339,11 +339,13 @@ def map_cabinet_board_ids(cab: dict, fn) -> None:
 
 
 def scan_jobs(jobs_dir: str) -> Usage:
+    from .importer import SHIPPED_FILE      # importer imports this module
     out = Usage()
     if not os.path.isdir(jobs_dir):
         return out
     for name in sorted(os.listdir(jobs_dir)):
-        if not name.endswith(".json"):
+        # a demo's list of the jobs it shipped with is not a job (3 Oct 2026)
+        if not name.endswith(".json") or name.casefold() == SHIPPED_FILE.casefold():
             continue
         path = os.path.join(jobs_dir, name)
         try:
