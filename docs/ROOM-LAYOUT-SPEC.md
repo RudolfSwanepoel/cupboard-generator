@@ -1231,3 +1231,23 @@ neighbour); the cabinets on a stretched neighbour keep their x from its start, s
 neighbour whose START is the moved joint they shift in the room by the
 stretch.
 
+
+**Ruled by Rudolf, 3 October 2026, on Phase 2's two open decisions:**
+
+- `Standard.loop_miss_max` 1000 — **accepted**: a closed room's loop opened
+  by more than a metre by a typed figure reads as an open run.
+- A corner unit keeps its x when walls are dragged, and Validation's
+  out-of-corner warning flags it — **accepted**; nothing re-runs it into the
+  corner.
+
+**Touch-ups after Phase 2 (3 October 2026, brief
+`Claude outputs/room-layout-touchups-brief-2026-10-03.md`).** Layout and the
+plan's labels only. (1) Select · Draw walls · Wall nook are a segmented
+control in the strip at the top of the Room tab, right of Plan | Elevation,
+on Plan only. (2) Placements is the left column beside the plan, the plan's
+height, its table narrowed (Item · Wall · X · Z · Y · Layer, five-digit
+inputs), scrolled within; under the plan Gaps full width and Plinth under it
+(item 11's side-by-side Plinth | Placements replaced). (3) Wall lengths go
+through `render._place_labels` with the other labels, first, moved only out
+along their wall's normal on a leader and never dropped; the page sizes each
+length's field to its figure and its label to its content, at every zoom.

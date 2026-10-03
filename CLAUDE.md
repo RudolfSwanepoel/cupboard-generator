@@ -112,6 +112,30 @@ gitignored; never commit an .exe or a zip.
 
 ## Status
 
+**Room tab touch-ups after Phase 2 (3 October 2026, brief
+`Claude outputs/room-layout-touchups-brief-2026-10-03.md`, ruled by Rudolf).**
+Layout and the plan's labels only; one commit per item; nothing that cuts,
+nests or costs moved: benchmark unchanged (272 / 59 / 30, 92 pot holes,
+18 / 9 / 6, R28,363.50), `check_all` 23 of 23, `snapshot.py --compare`:
+panels, issues and totals identical, Test.json's plan SVG moved (the length
+labels are placed with the others). (1) Select · Draw walls · Wall nook are a
+segmented control in the strip right of Plan | Elevation (`#roomstrip`,
+`#roomtools`), Plan only. (2) **Placements** is the left column beside the
+plan, the plan's height (`fitPlaces`, a ResizeObserver, which also redraws the
+plan when its box changes width), its table narrowed, scrolled within; Plinth
+under Gaps on its own. (3) Length labels: through `_place_labels` first, out
+along their wall's normal on a leader, never dropped; the field and the label
+sized to their content (`planLenFit`). `ui_check_walls.py --stage labels`
+(a nook room, a five-digit wall, at 50 / 93 / 150 %) and `--stage layout`
+re-pointed; screenshots `touchup_*` in `output/_checks/ui_check_walls/`.
+`ui_check_walls`, `ui_check_attached`, `ui_check_drawers`, `ui_check_3d` pass;
+`ui_check_restructure` but for its three pre-existing `attach` lines.
+**Phase 2's two open decisions are ruled: `loop_miss_max` 1000 accepted; a
+corner unit keeping its x on a wall drag, flagged by Validation, accepted**
+(`docs/ROOM-LAYOUT-SPEC.md`, Ruled — 3 Oct 2026). Seen, not touched: a length
+label on a wall running up the page is centred 22 px out, so its text
+straddles the wall line (as before).
+
 **Room redo, Phase 2 of 4 — drawing and editing walls on the plan (3 October
 2026, brief `Claude outputs/room-redo-phase2-brief-2026-10-03.md`, ruled by
 Rudolf; Phases 3-4 — openings, free cabinets — NOT built).** Six commits, one
