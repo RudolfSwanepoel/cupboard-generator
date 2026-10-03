@@ -1356,6 +1356,7 @@ dirty. Nothing else about either changed.
 | A partition (two faces) | — | the Wall card's **Add back face** |
 | Flip face on a closed room | flipped the one wall | asks: **Flip room** / Flip just B / Cancel |
 | Gaps, Placements, Plinth cards | three cards side by side under the plan, notes in the cards | **Gaps** full width; **Plinth** and **Placements** side by side under it; notes behind a **?** |
+| Select · Draw walls · Wall nook | a column of buttons left of the plan | the **strip** at the top of the Room tab, right of Plan \| Elevation, a segmented control, Plan only (touch-ups, 3 Oct 2026) |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**

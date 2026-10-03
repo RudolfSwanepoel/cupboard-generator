@@ -280,10 +280,10 @@
   #v3ddock{align-self:stretch;min-height:0}
   #v3ddock #editor{position:static;max-height:100%;height:100%;margin-top:0}
   #roomdock #editor{margin-top:0}
-  /* the Room tab's toolbar and its two cards in the dock (2 October 2026) */
-  #roomtools{display:flex;flex-direction:column;gap:6px;flex:none;width:78px;position:sticky;top:10px}
-  #roomtools button{width:100%;padding:9px 4px;font-size:11px;line-height:1.25;white-space:normal}
-  #roomtools button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  /* the Room tab's strip (Plan | Elevation, and the tools) and its two cards in the dock */
+  #roomstrip{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+  #roomstrip .subtabs{margin:0}
+  #roomtools[hidden]{display:none}
   .dockcard{width:560px;flex:none;position:sticky;top:10px;max-height:calc(100vh - 30px);
             overflow:auto;margin:0}
   .dock.closed .dockcard{display:none}
@@ -754,20 +754,20 @@
   </section>
 
   <section id="tab-room" hidden>
-    <div class="subtabs" id="roomsubs"><button data-roomsub="plan" class="on">Plan</button><button
+    <!-- The strip over the Room tab: Plan | Elevation, and to their right the
+         plan's tools as a segmented control in the same style, on Plan only
+         (touch-ups, 3 October 2026). Select is the default; Draw walls ADDS
+         walls to the room; Esc returns to Select. Phase 3 adds the openings. -->
+    <div id="roomstrip"><div class="subtabs" id="roomsubs"><button data-roomsub="plan" class="on">Plan</button><button
       data-roomsub="elev">Elevation</button></div>
-    <div id="roomwrap">
-      <!-- One canvas, one dock, a slim toolbar (room redo Phase 1, 2 October
-           2026). Select is the default; Draw walls ADDS walls to the room; Esc
-           returns to Select. Phase 2 adds Nook, Phase 3 the openings palette. -->
-      <div id="roomtools">
+      <div class="subtabs" id="roomtools">
         <button data-tool="select" id="toolselect" class="on"
-          title="select a wall, a cabinet or the room (Esc)">Select</button>
-        <button data-tool="draw" id="drawwalls"
-          title="sketch walls with the mouse — added to the room; lengths to be measured after">Draw walls</button>
-        <button data-tool="nook" id="toolnook"
+          title="select a wall, a cabinet or the room (Esc)">Select</button><button data-tool="draw" id="drawwalls"
+          title="sketch walls with the mouse — added to the room; lengths to be measured after">Draw walls</button><button
+          data-tool="nook" id="toolnook"
           title="click a wall, then type the recess's width, depth and distance from the wall's start">Wall nook</button>
-      </div>
+      </div></div>
+    <div id="roomwrap">
       <div id="roommain" style="flex:1;min-width:0">
         <div class="unplaced" id="unplaced-room"></div>
         <div class="card" id="plancard">
