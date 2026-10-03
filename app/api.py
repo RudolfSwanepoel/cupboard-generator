@@ -691,6 +691,15 @@ def board_save(payload):
         return {"ok": False,
                 "error": f"{board_id} is already {existing[board_id].name} in the "
                          f"library — give this one an id of its own"}
+    # A name already taken is an error and nothing is saved (ruling 7, 3 Oct
+    # 2026), compared case-insensitively as Windows does — asked only when the
+    # name is new or changed, so a library already holding two of a name can
+    # still have either edited.
+    before = existing.get(old_id) if old_id else None
+    if before is None or not IMP.same_name(before.name, name):
+        if any(b.id != (old_id or board_id) and IMP.same_name(b.name, name) for b in lib):
+            return {"ok": False, "taken": True, "field": "name",
+                    "error": IMP.taken_message(name)}
 
     d["id"], d["name"] = board_id, name
     if "colour" in d and str(d.get("colour") or "").strip() and not B.clean_colour(d.get("colour")):
@@ -869,6 +878,13 @@ def runner_save(payload):
         return {"ok": False, "missing": gaps,
                 "error": "a runner needs " + ", ".join(
                     said.get(k, k.replace("_", " ") + " more than 0") for k in gaps)}
+    # ruling 7: a name already taken is an error and nothing is saved — asked
+    # only when the name is new or changed
+    before = H.find(lib, old_id) if old_id else None
+    if before is None or not IMP.same_name(before.name, name):
+        if any(x.id != rid and IMP.same_name(x.name, name) for x in lib):
+            return {"ok": False, "taken": True, "field": "name",
+                    "error": IMP.taken_message(name)}
     out = [x for x in lib if x.id != rid]
     at = next((i for i, x in enumerate(lib) if x.id == rid), len(out))
     out.insert(at, r)
@@ -1852,12 +1868,186 @@ def job_delete_info(payload):
             "fixture": name in FIXTURE_JOBS}
 
 
+def _saved_job_named(base: str):
+    """The file in jobs/ whose name is `base` compared case-insensitively, as
+    Windows compares it — or None."""
+    if not os.path.isdir(JOBS_DIR):
+        return None
+    return next((n for n in os.listdir(JOBS_DIR)
+                 if n.lower().endswith(".json") and IMP.same_name(n, base)), None)
+
+
 def job_save(payload):
+    """Write the project on screen into jobs/. Under its OWN name — the file it
+    was loaded from or last saved to (`open`) — as ever; under a name that is
+    ANOTHER saved job's file it is refused and nothing is written (ruling 7,
+    3 October 2026), compared case-insensitively."""
     job = _job(payload)
     path = _job_path(payload.get("path") or job.name)
+    base = os.path.basename(path)
+    open_name = os.path.basename(str(payload.get("open") or "").strip())
+    there = _saved_job_named(base)
+    if there is not None:
+        if not (open_name and IMP.same_name(open_name, base)):
+            return {"ok": False, "taken": True, "error": IMP.taken_message(base[:-5])}
+        path = os.path.join(JOBS_DIR, there)      # its own file, under its own spelling
     os.makedirs(JOBS_DIR, exist_ok=True)
     save(job, path)
     return {"ok": True, "path": os.path.basename(path)}
+
+
+# --- renaming (ruling 6, 3 October 2026) -----------------------------------------
+
+_BAD_NAME = set('\\/:*?"<>|')
+
+
+def _clean_new_name(raw, what: str):
+    """A typed new name, or (None, the reason it cannot be one)."""
+    name = str(raw or "").strip()
+    if name.lower().endswith(".json") and what == "project":
+        name = name[:-5].rstrip()
+    if not name or name in (".", ".."):
+        return None, f"type a name for the {what}"
+    if any(ch in _BAD_NAME or ord(ch) < 32 for ch in name):
+        return None, f'a {what} name cannot hold any of \\ / : * ? " < > |'
+    return name, ""
+
+
+def job_rename(payload):
+    """Rename a saved project (ruling 6): the job file in jobs/, `job.name`
+    inside it, its output/<job>/ folder (named through `_safe_name`, with
+    cutlist/, nesting/, drawings/, snapshots/ and _previous/) and every file in
+    it whose name starts with the old job name. A move, never a copy.
+
+    `from` is the file the project on screen came from; '' when it was never
+    saved, and then only the name on screen changes. A name already taken —
+    another job's file, or another job's output folder — is an error and
+    nothing is written (ruling 7)."""
+    new, why = _clean_new_name(payload.get("to"), "project")
+    if new is None:
+        return {"ok": False, "error": why}
+    old_file = os.path.basename(str(payload.get("from") or "").strip())
+    if old_file and not old_file.lower().endswith(".json"):
+        old_file += ".json"
+    old_path = os.path.join(JOBS_DIR, old_file) if old_file else ""
+    target = new + ".json"
+    there = _saved_job_named(target)
+    if there is not None and not (old_file and IMP.same_name(there, old_file)):
+        return {"ok": False, "taken": True, "error": IMP.taken_message(new)}
+    if not old_file or not os.path.exists(old_path):
+        return {"ok": True, "path": "", "name": new, "saved": False}
+    if old_file == target:
+        return {"ok": True, "path": target, "name": new, "saved": True, "unchanged": True}
+
+    with open(old_path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    old_name = str(data.get("name") or old_file[:-5]) if isinstance(data, dict) else old_file[:-5]
+    old_safe, new_safe = _safe_name(old_name), _safe_name(new)
+    old_out, new_out = os.path.join(OUT_DIR, old_safe), os.path.join(OUT_DIR, new_safe)
+    moving = os.path.isdir(old_out) and old_safe != new_safe
+    if moving and os.path.exists(new_out) and \
+            os.path.normcase(os.path.realpath(new_out)) != os.path.normcase(os.path.realpath(old_out)):
+        return {"ok": False, "taken": True,
+                "error": IMP.taken_message(new) + f" (output/{new_safe}/ already holds exports)"}
+
+    renamed = 0
+    if moving:
+        tmp = old_out + ".renaming"
+        os.replace(old_out, tmp)                   # a case-only rename on Windows needs the step
+        os.replace(tmp, new_out)
+        for base, _dirs, files in os.walk(new_out):
+            for n in files:
+                if n.startswith(old_safe + "_"):
+                    os.replace(os.path.join(base, n),
+                               os.path.join(base, new_safe + n[len(old_safe):]))
+                    renamed += 1
+    if isinstance(data, dict):
+        data["name"] = new
+    new_path = os.path.join(JOBS_DIR, target)
+    tmp = new_path + ".renaming"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)
+    os.remove(old_path)
+    os.replace(tmp, new_path)
+    return {"ok": True, "path": target, "name": new, "saved": True,
+            "output": (f"output/{new_safe}/" if moving else ""), "files_renamed": renamed}
+
+
+def picture_rename(payload):
+    """Rename a board picture (ruling 6): the file in Pictures/, every board in
+    the library naming it, every job under jobs/ whose copy of a board names it,
+    and the project on screen. A name already taken is an error and nothing is
+    written (ruling 7)."""
+    stored = str(payload.get("from") or "")
+    old = os.path.basename(PIC.clean(stored, ROOT).replace("\\", "/"))
+    have = (next((n for n in os.listdir(PICTURES_DIR) if n == old), None)
+            if os.path.isdir(PICTURES_DIR) else None)
+    if not old or have is None:
+        return {"ok": False, "error": f"there is no picture {old or stored!r} in {PIC.DIRNAME}/"}
+    new, why = _clean_new_name(payload.get("to"), "picture")
+    if new is None:
+        return {"ok": False, "error": why}
+    stem, ext = os.path.splitext(old)
+    typed = os.path.splitext(new)[1].lower()
+    if typed in PIC.TYPES and typed != ext.lower():
+        return {"ok": False, "error": f"keep the {ext} ending — it says what kind of picture it is"}
+    if typed != ext.lower():
+        new = new + ext
+    new = PIC.safe_name(new)
+    if os.path.splitext(new)[1].lower() != ext.lower() or not os.path.splitext(new)[0]:
+        return {"ok": False, "error": f"keep the {ext} ending — it says what kind of picture it is"}
+    if new == old:
+        return {"ok": True, "picture": PIC.DIRNAME + "/" + old, "unchanged": True}
+    if any(IMP.same_name(n, new) and n != old for n in os.listdir(PICTURES_DIR)):
+        return {"ok": False, "taken": True, "error": IMP.taken_message(new)}
+
+    tmp = os.path.join(PICTURES_DIR, new + ".renaming")
+    os.replace(os.path.join(PICTURES_DIR, old), tmp)
+    os.replace(tmp, os.path.join(PICTURES_DIR, new))
+    stored_new = PIC.DIRNAME + "/" + new
+
+    def names_it(value) -> bool:
+        v = str(value or "")
+        return bool(v) and not PIC.is_data_uri(v) and \
+            os.path.basename(PIC.clean(v, ROOT).replace("\\", "/")) == old
+
+    lib = B.load()
+    boards = [b.id for b in lib if names_it(b.picture)]
+    if boards:
+        B.save([replace(b, picture=stored_new) if names_it(b.picture) else b for b in lib])
+    jobs, unreadable = [], []
+    for n in sorted(os.listdir(JOBS_DIR)) if os.path.isdir(JOBS_DIR) else []:
+        if not n.lower().endswith(".json"):
+            continue
+        p = os.path.join(JOBS_DIR, n)
+        try:
+            with open(p, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            unreadable.append(n)
+            continue
+        mats = data.get("materials") if isinstance(data, dict) else None
+        hit = False
+        for rec in (mats or {}).values() if isinstance(mats, dict) else []:
+            if isinstance(rec, dict) and names_it(rec.get("picture")):
+                rec["picture"] = stored_new
+                hit = True
+        if hit:
+            with open(p, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=2, ensure_ascii=False)
+            jobs.append(n)
+    out = {"ok": True, "picture": stored_new, "url": PIC.url_for(stored_new, ROOT),
+           "name": new, "from": old, "boards": boards, "jobs": jobs, "unreadable": unreadable}
+    if payload.get("job"):
+        job = _job(payload)
+        hit = False
+        for rec in (job.materials or {}).values():
+            if isinstance(rec, dict) and names_it(rec.get("picture")):
+                rec["picture"] = stored_new
+                hit = True
+        if hit:
+            out["job"] = job_to_dict(job)
+    return out
 
 
 def upgrade_former_ids(job) -> list:
@@ -2779,6 +2969,8 @@ ROUTES = {
     "/api/jobs": job_list,
     "/api/save": job_save,
     "/api/job-delete": job_delete,
+    "/api/job-rename": job_rename,
+    "/api/picture-rename": picture_rename,
     "/api/job-delete-info": job_delete_info,
     "/api/load": job_load,
     "/api/fixture": job_fixture,

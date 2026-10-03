@@ -93,6 +93,12 @@ def shot(page, name):
     page.screenshot(path=os.path.join(SHOTS, name + ".png"))
 
 
+def settle(page):
+    """The compute a typed name scheduled, run now and awaited."""
+    time.sleep(0.3)
+    page.evaluate("async () => { clearTimeout(computeTimer); computeTimer = null; await compute(); }")
+
+
 def make_app(top):
     """A copy of the app to run, with its own jobs, libraries and pictures."""
     here = os.path.join(top, "App")
@@ -190,6 +196,93 @@ def stage_import(page, here, top, outer, app):
     shot(page, "import_boards")
 
 
+def stage_rename(page, here):
+    print("\nRename: the project, Save onto another's name, a picture, a board")
+    if not page.evaluate("() => S.file"):
+        page.select_option("#joblist", "Test.json")
+        page.click("#load")
+        page.wait_for_function("() => S.file === 'Test.json'", timeout=10000)
+    page.click('nav [data-tab="cabinets"]')
+    old = page.evaluate("() => S.file")
+    safe = page.evaluate("() => S.job.name").replace(" ", "_").replace("(", "_").replace(")", "_")
+    snap = os.path.join(here, "output", safe, "snapshots", f"{safe}_3d_1.png")
+    os.makedirs(os.path.dirname(snap), exist_ok=True)
+    with open(snap, "wb") as fh:
+        fh.write(b"\x89PNG snapshot")
+    before = tree(here)
+
+    page.click("#jobrename")
+    page.wait_for_selector("#renamedlg[open]", timeout=5000)
+    page.fill("#renameto", "main")
+    page.click("#renamego")
+    page.wait_for_function("() => $('renamemsg').textContent.length > 0", timeout=5000)
+    check("a taken name (another case) is refused under the field",
+          page.inner_text("#renamemsg"), "main already exists — choose another name")
+    check("  the dialog stays open", page.evaluate("() => $('renamedlg').open"), True)
+    check("  nothing is written", tree(here) == before, True)
+    shot(page, "rename_taken")
+    page.fill("#renameto", "Kitchen 2")
+    page.keyboard.press("Enter")
+    page.wait_for_function("() => !$('renamedlg').open", timeout=5000)
+    check("renamed: the job on screen follows",
+          page.evaluate("() => [S.file, S.job.name, $('jobname').value]"),
+          ["Kitchen 2.json", "Kitchen 2", "Kitchen 2"])
+    jobs = page.evaluate("() => [...$('joblist').options].map((o) => o.value)")
+    check("  the job list refreshes", ("Kitchen 2.json" in jobs, old in jobs), (True, False))
+    check("  the file is moved, not copied",
+          (os.path.exists(os.path.join(here, "jobs", "Kitchen 2.json")),
+           os.path.exists(os.path.join(here, "jobs", old))), (True, False))
+    check("  the output folder and its files follow",
+          os.path.exists(os.path.join(here, "output", "Kitchen_2", "snapshots", "Kitchen_2_3d_1.png")),
+          True)
+    check("  not unsaved by it", page.evaluate("() => S.dirty"), False)
+
+    before = tree(here)
+    page.fill("#jobname", "MAIN")
+    page.click("#save")
+    page.wait_for_function("() => !$('jobnamemsg').hidden", timeout=5000)
+    check("Save onto another job's name is refused under the name",
+          page.inner_text("#jobnamemsg"), "MAIN already exists — choose another name")
+    check("  nothing is written", tree(here) == before, True)
+    shot(page, "save_taken")
+    page.fill("#jobname", "Kitchen 2")
+    check("  typing clears it", page.evaluate("() => $('jobnamemsg').hidden"), True)
+    page.click("#save")
+    page.wait_for_function("() => !S.dirty", timeout=5000)
+    check("  saving under its own name is as ever", page.evaluate("() => S.file"), "Kitchen 2.json")
+
+    # the board on screen pictured in Storm Grey (GREY, or the imported one)
+    bid = page.evaluate("() => Object.entries(S.job.materials).find(([k, m]) => "
+                        "m && m.picture && m.picture.indexOf('Storm') >= 0)[0]")
+    page.click('nav [data-tab="catalogue"]')
+    page.wait_for_function("() => S.lib && S.lib.boards", timeout=10000)
+    settle(page)             # a compute repaints the Boards tab, editor and all
+    page.click(f'[data-bedit="{bid}"]')
+    pic = page.input_value("#bf-picture")
+    page.wait_for_selector("#bf-picrename:not([hidden])", timeout=5000)
+    page.click("#bf-picrename")
+    page.fill("#bf-picrenameto", "cascade grey")
+    page.click("#bf-picrenamego")
+    page.wait_for_function("() => $('bf-picrenamemsg').textContent.length > 0", timeout=5000)
+    check("a picture renamed to a taken name is refused under the field",
+          page.inner_text("#bf-picrenamemsg"), "cascade grey.jpg already exists — choose another name")
+    page.fill("#bf-picrenameto", "Storm 2")
+    page.click("#bf-picrenamego")
+    page.wait_for_function("() => $('bf-picture').value === 'Pictures/Storm 2.jpg'", timeout=5000)
+    check("  a free name renames the file",
+          (os.path.exists(os.path.join(here, "Pictures", "Storm 2.jpg")),
+           os.path.exists(os.path.join(here, *pic.split("/")))), (True, False))
+    check("  and the project on screen follows",
+          page.evaluate(f"() => S.job.materials['{bid}'].picture"), "Pictures/Storm 2.jpg")
+    page.fill("#bf-name", "cascade GREY")
+    page.click("#bf-save")
+    page.wait_for_function("() => $('bf-namemsg') && $('bf-namemsg').textContent.length > 0",
+                           timeout=5000)
+    check("a board renamed to a taken name is refused under the field",
+          page.inner_text("#bf-namemsg"), "cascade GREY already exists — choose another name")
+    shot(page, "board_taken")
+
+
 def main() -> int:
     top = tempfile.mkdtemp(prefix="ui_check_import_")
     proc = None
@@ -207,8 +300,8 @@ def main() -> int:
             page.wait_for_function("() => S.def !== null && S.res", timeout=15000)
             if args.stage in ("", "import"):
                 stage_import(page, here, top, outer, app)
-            if args.stage in ("", "rename") and "stage_rename" in globals():
-                globals()["stage_rename"](page, here)
+            if args.stage in ("", "rename"):
+                stage_rename(page, here)
             check("no script errors in the page", errors, [])
             browser.close()
     finally:

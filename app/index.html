@@ -89,21 +89,30 @@
   ::-webkit-scrollbar-track{background:transparent}
 
   /* ---------- header, summary strip, tab bar --------------------------- */
-  header{display:flex;gap:8px;align-items:center;padding:9px 16px;
+  header{display:flex;gap:5px;align-items:center;padding:9px 16px;
          background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
-  header h1{font-size:14.5px;margin:0 12px 0 0;font-weight:700;letter-spacing:.01em;
+  header h1{font-size:14.5px;margin:0 2px 0 0;font-weight:700;letter-spacing:.01em;
             display:flex;align-items:center;gap:8px}
   header h1::before{content:"";width:14px;height:14px;border-radius:4px;background:var(--accent);
                     box-shadow:inset 3px -3px 0 rgba(255,255,255,.35)}
   header .grow{flex:1}
-  header button{padding:5px 12px}
-  #jobname{width:190px}
+  /* one row at 1360 wide with "unsaved changes" showing (Import project and
+     Rename joined it on 3 Oct 2026) */
+  header button{padding:5px 8px}
+  #jobname{width:150px}
+  header #jobrename{padding:5px 7px}
+  /* a refusal said under the field it is about (ruling 7, 3 Oct 2026) */
+  .namebox{position:relative;display:inline-flex}
+  .fieldmsg{position:absolute;left:0;top:calc(100% + 3px);z-index:30;white-space:nowrap;
+    font-size:12px;color:var(--crit);background:var(--crit-soft);border:1px solid var(--crit-line);
+    border-radius:var(--r-s);padding:2px 8px}
+  .namemsg{display:block;color:var(--crit);font-size:12px;margin-top:3px}
   .grain b{font-size:11px;text-transform:uppercase;letter-spacing:.3px}
   .grain{white-space:nowrap}
   .dirty{font-size:11px;font-weight:700;color:var(--crit);background:var(--crit-soft);
          border:1px solid var(--crit-line);border-radius:999px;padding:2px 9px;white-space:nowrap}
   .dirty::before{content:"● ";font-size:9px}
-  #joblist{width:170px}
+  #joblist{width:150px}
 
   #strip{display:flex;gap:0;align-items:stretch;padding:0 16px;
          background:var(--surface);border-bottom:1px solid var(--line);flex-wrap:wrap}
@@ -646,6 +655,7 @@
      its "?" notes wrap to the card rather than widening it */
   #placescard{flex:none;width:max-content;display:flex;flex-direction:column;margin:0;min-height:0}
   #placescard[hidden]{display:none}
+  #bf-picrenamerow[hidden],#bf-picrename[hidden]{display:none}
   #placescard>h2{flex:none}
   #placescard h2 .placestog{float:right;width:20px;height:20px;padding:0;border-radius:50%;font-size:9px;
                             line-height:1;color:var(--muted);text-transform:none}
@@ -745,7 +755,10 @@
 
 <header>
   <h1>CupboardApp</h1>
-  <input id="jobname" placeholder="job name" title="job name">
+  <span class="namebox"><input id="jobname" placeholder="job name" title="job name"><span
+    id="jobnamemsg" class="fieldmsg" hidden></span></span>
+  <button id="jobrename" title="Rename this project: its file in jobs\, its name, and its
+output\ folder with every file named for it. A name another project has is refused.">Rename</button>
   <button id="new">New</button>
   <button id="save">Save</button>
   <button id="undo" disabled title="Undo the last change to this job (Ctrl+Z).
@@ -957,6 +970,17 @@ folder is only read, never changed. You see what will come in before anything is
 
 <!-- Import project (3 Oct 2026): the typed path, the preview, the report -->
 <dialog id="importdlg"><div id="importbody"></div></dialog>
+<!-- Rename the project (3 Oct 2026, ruling 6) -->
+<dialog id="renamedlg">
+  <b>Rename the project</b>
+  <p class="note" style="margin:6px 0 8px" id="renamewhat"></p>
+  <input id="renameto" style="width:100%">
+  <p class="note bad" id="renamemsg" style="margin:6px 0 0;min-height:1.2em"></p>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+    <button id="renamecancel">Cancel</button>
+    <button id="renamego" class="primary">Rename</button>
+  </div>
+</dialog>
 
 <script>
 "use strict";
@@ -4833,7 +4857,8 @@ function drawBoardEditor() {
           <span class="note">the material name on every panel cut from it</span></div>
         <div class="f wide" style="grid-column:2/-1"><label>Name</label>
           <input id="bf-name" value="${esc(b.name || "")}"
-                 placeholder="e.g. Brookhill Fusion Chip"></div>
+                 placeholder="e.g. Brookhill Fusion Chip">
+          <span class="namemsg" id="bf-namemsg"></span></div>
         <div class="f"><label>Thickness</label>
           <select id="bf-thickness">${thicknesses.map((t) =>
             `<option value="${t}"${t === b.thickness ? " selected" : ""}>${t} mm</option>`
@@ -4865,9 +4890,18 @@ function drawBoardEditor() {
                 <button id="bf-picbrowse" type="button">Browse…</button>
                 <button id="bf-picclear" type="button"
                         title="no picture">Clear</button>
+                <button id="bf-picrename" type="button"${b.picture && b.picture_ok
+                        && !/^data:/i.test(b.picture) ? "" : " hidden"}
+                        title="rename the picture's file in Pictures\\ — every board and every saved job naming it follows">Rename…</button>
                 <input type="file" id="bf-picfile" accept="image/*"
                        style="display:none">
               </div>
+              <div class="leaf" id="bf-picrenamerow" hidden style="margin:4px 0">
+                <input id="bf-picrenameto" placeholder="new file name">
+                <button id="bf-picrenamego" type="button" class="primary">Rename</button>
+                <button id="bf-picrenamecancel" type="button">Cancel</button>
+              </div>
+              <span class="namemsg" id="bf-picrenamemsg"></span>
               <input id="bf-picture" value="${esc(b.picture || "")}" readonly
                      title="set with Browse… or by dropping an image here"
                      placeholder="none — Browse… or drop an image here">
@@ -5062,6 +5096,7 @@ function wirePicture() {
     img.src = r.url + (r.url.indexOf("data:") === 0 ? "" : "?t=" + Date.now());
     old.replaceWith(img);
     drop.classList.remove("empty");
+    $("bf-picrename").hidden = /^data:/i.test(r.picture);
     note.textContent = "copied into " + ((S.def && S.def.pictures_dir) || "Pictures") +
       "/ as " + r.name + " — stored relative to the project, so it works on " +
       "both machines. Save the board to keep it.";
@@ -5098,7 +5133,48 @@ function wirePicture() {
     span.className = "picpreview none";
     $("bf-picpreview").replaceWith(span);
     drop.classList.add("empty");
+    $("bf-picrename").hidden = true;
     note.textContent = "no picture. Save the board to keep it that way.";
+  });
+
+  // Rename the picture's file (ruling 6, 3 October 2026): Pictures\, every
+  // library board and every saved job naming it, and the project on screen,
+  // by /api/picture-rename. A name already taken is refused under the field.
+  const renRow = $("bf-picrenamerow"), renMsg = $("bf-picrenamemsg");
+  $("bf-picrename").addEventListener("click", () => {
+    const cur = (field.value || "").split("/").pop();
+    $("bf-picrenameto").value = cur.replace(/\.[^.]+$/, "");
+    renMsg.textContent = "";
+    renRow.hidden = false;
+    $("bf-picrenameto").select();
+  });
+  $("bf-picrenamecancel").addEventListener("click", () => { renRow.hidden = true; renMsg.textContent = ""; });
+  $("bf-picrenameto").addEventListener("input", () => { renMsg.textContent = ""; });
+  $("bf-picrenameto").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); $("bf-picrenamego").click(); }
+  });
+  $("bf-picrenamego").addEventListener("click", async () => {
+    const r = await post("/api/picture-rename",
+                         {from: field.value, to: $("bf-picrenameto").value, job: S.job});
+    if (!r.ok) { renMsg.textContent = r.error; return; }
+    renRow.hidden = true;
+    if (r.unchanged) return;
+    field.value = r.picture;
+    S.libEdit.picture = r.picture;
+    S.libEdit.picture_url = r.url;
+    const pv = $("bf-picpreview");
+    if (pv && pv.tagName === "IMG") pv.src = r.url + "?t=" + Date.now();
+    note.textContent = `renamed to ${r.name} in ${(S.def && S.def.pictures_dir) || "Pictures"}/`;
+    if (r.job) {
+      S.job = r.job;
+      undoRebase();          // a library write the job follows: not undone
+      await compute();
+    }
+    const lib = await post("/api/boards", {});
+    if (lib.ok) S.lib = lib;
+    toast(`Renamed ${r.from} to ${r.name}.` +
+      (r.boards.length ? ` Boards following it: ${r.boards.join(", ")}.` : "") +
+      (r.jobs.length ? ` Saved jobs following it: ${r.jobs.join(", ")}.` : ""));
   });
 
   // The drop itself. dragover has to be prevented or the page navigates to the
@@ -5284,7 +5360,11 @@ $("boards").addEventListener("click", async (e) => {
 
   const r = await post("/api/board-save",
                        {board: board, from: from, job: S.job});
-  if (!r.ok) { toast(r.error, true); return; }
+  if (!r.ok) {
+    if (r.field === "name") { $("bf-namemsg").textContent = r.error; $("bf-name").focus(); }
+    else toast(r.error, true);
+    return;
+  }
   if (r.job) {
     S.job = r.job;
     S.selRendered = -2;
@@ -5448,7 +5528,8 @@ function drawRunnerEditor() {
           <span class="note">what a cabinet names; fixed once saved</span></div>
         <div class="f wide${miss.indexOf("name") >= 0 ? " bad" : ""}" style="grid-column:2/-1"><label>Name <b class="req" title="required">*</b></label>
           <input id="rf-name" value="${esc(x.name || "")}"
-                 placeholder="e.g. Gelmar 45 mm full-extension ball-bearing"></div>
+                 placeholder="e.g. Gelmar 45 mm full-extension ball-bearing">
+          <span class="namemsg" id="rf-namemsg">${esc(S.rNameMsg || "")}</span></div>
         <div class="f"><label>Supplier</label><input id="rf-supplier" value="${esc(x.supplier || "")}"></div>
         <div class="f"><label>SKU</label><input id="rf-sku" value="${esc(x.sku || "")}"></div>
         ${num("price", "Price per pair", x.price || 0, "0.01", "captured into a project when it is ticked")}
@@ -5487,6 +5568,7 @@ $("runners").addEventListener("click", async (e) => {
   if (ed) {
     S.rEdit = Object.assign({}, S.rlib.runners.find((x) => x.id === ed.dataset.redit));
     S.rMissing = [];
+    S.rNameMsg = "";
     drawRunnerEditor();
     $("runneredit").scrollIntoView({block: "nearest"});
     return;
@@ -5503,11 +5585,12 @@ $("runners").addEventListener("click", async (e) => {
                // the seed's inner member is an estimate until it is confirmed
                estimated: ["inner_height", "inner_thickness"]};
     S.rMissing = [];
+    S.rNameMsg = "";
     drawRunnerEditor();
     $("runneredit").scrollIntoView({block: "nearest"});
     return;
   }
-  if (e.target.id === "rf-cancel") { S.rEdit = null; S.rMissing = []; drawRunnerEditor(); return; }
+  if (e.target.id === "rf-cancel") { S.rEdit = null; S.rMissing = []; S.rNameMsg = ""; drawRunnerEditor(); return; }
   if (e.target.id === "rf-save") {
     const v = (id) => $("rf-" + id).value;
     const runner = {id: v("id").trim().toUpperCase(), name: v("name").trim(),
@@ -5519,14 +5602,16 @@ $("runners").addEventListener("click", async (e) => {
       inner_thickness: v("inner_thickness")};
     const r = await post("/api/runner-save", {runner: runner, from: S.rEdit.id || "", job: S.job});
     if (!r.ok) {
-      toast(r.error, true);
+      if (r.field !== "name") toast(r.error, true);
       // keep what was typed, and light the fields the server named
       S.rEdit = Object.assign({}, S.rEdit, runner, {lengths: String(runner.lengths).split(/[\s,]+/)});
       S.rMissing = r.missing || (runner.name ? [] : ["name"]);
+      S.rNameMsg = r.field === "name" ? r.error : "";
       drawRunnerEditor();
       return;
     }
     S.rMissing = [];
+    S.rNameMsg = "";
     if (r.job) {
       S.job = r.job;
       S.noUndo = true; markDirty(true); S.noUndo = false;
@@ -9056,6 +9141,8 @@ function adopt(job) {
   plinthSig = null;
   $("jobname").value = job.name || "untitled";
   S.job.name = job.name || "untitled";
+  S.file = "";               // which file in jobs/ this came from: Load and Save say
+  jobNameMsg("");
   undoReset();               // Load and New clear the history
   S.savedKey = undoKey();
   compute();
@@ -9072,8 +9159,15 @@ $("new").addEventListener("click", () => {
 });
 
 $("save").addEventListener("click", async () => {
-  const r = await post("/api/save", {job: S.job, path: $("jobname").value.trim()});
-  if (!r.ok) { toast(r.error, true); return; }
+  // `open` is the file this project came from: saving under its OWN name is as
+  // ever; under ANOTHER saved job's name it is refused (ruling 7)
+  const r = await post("/api/save", {job: S.job, path: $("jobname").value.trim(), open: S.file || ""});
+  if (!r.ok) {
+    if (r.taken) jobNameMsg(r.error); else toast(r.error, true);
+    return;
+  }
+  S.file = r.path;
+  jobNameMsg("");
   markDirty(false);
   toast("Saved jobs/" + r.path);
   await refreshJobs();
@@ -9121,6 +9215,7 @@ $("jobdel").addEventListener("click", async () => {
 // one" has to be asked of. The name box is the job's name, and Save uses it as
 // the file name, so it is the same question.
 function currentJobFile() {
+  if (S.file) return S.file;
   const n = ($("jobname").value || "").trim();
   return n ? (n.endsWith(".json") ? n : n + ".json") : "";
 }
@@ -9132,6 +9227,7 @@ $("load").addEventListener("click", async () => {
   const r = await post("/api/load", {path: name});
   if (!r.ok) { toast(r.error, true); return; }
   adopt(r.job);
+  S.file = name;
   // A board the file names by an id the library has since renamed, shown under
   // its current id. Said out loud: the file itself is not touched until saved.
   // And every board's details — name, edging, thickness, grain — are the
@@ -9320,6 +9416,65 @@ $("importdlg").addEventListener("click", async (e) => {
       if (S.catSub === "runners") await renderRunnersTab(); else await renderBoardsTab();
     }
   }
+});
+
+/* ---------- Rename the project (ruling 6, 3 October 2026) ------------------
+   The file in jobs\, job.name, and output\<job>\ with every file in it named
+   for the job — moved, never copied, by /api/job-rename. A project never
+   saved only changes its name on screen. A name another project has is
+   refused under the field, and nothing is written (ruling 7).             */
+
+function jobNameMsg(msg) {
+  const el = $("jobnamemsg");
+  if (!el) return;
+  el.textContent = msg || "";
+  el.hidden = !msg;
+}
+
+$("jobname").addEventListener("input", () => jobNameMsg(""));
+
+$("jobrename").addEventListener("click", () => {
+  $("renamewhat").textContent = S.file
+    ? `jobs\\${S.file} and its output folder are renamed with it.`
+    : "This project has not been saved yet: only its name here changes.";
+  $("renameto").value = S.job.name || "";
+  $("renamemsg").textContent = "";
+  $("renamedlg").showModal();
+  $("renameto").select();
+});
+
+$("renamecancel").addEventListener("click", () => $("renamedlg").close());
+$("renameto").addEventListener("input", () => { $("renamemsg").textContent = ""; });
+$("renameto").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("renamego").click(); }
+});
+
+$("renamego").addEventListener("click", async () => {
+  const to = $("renameto").value.trim();
+  const r = await post("/api/job-rename", {from: S.file || "", to: to});
+  if (!r.ok) { $("renamemsg").textContent = r.error; return; }
+  $("renamedlg").close();
+  // the name is not an edit to undo: every snapshot carries the new one
+  const was = S.dirty;
+  S.job.name = r.name;
+  $("jobname").value = r.name;
+  jobNameMsg("");
+  [S.undo, S.redo].forEach((st) => st.forEach((j) => { j.name = r.name; }));
+  if (S.undoBase) S.undoBase.job.name = r.name;
+  undoRebase();
+  if (r.saved) {
+    S.file = r.path;
+    if (S.savedKey) {
+      try { const k = JSON.parse(S.savedKey); k.name = r.name; S.savedKey = undoKey(k); } catch (_) { /* keep */ }
+    }
+    await refreshJobs();
+    $("joblist").value = r.path;
+  }
+  if (!was) markDirty(false);
+  toast(r.saved
+    ? `Renamed to ${r.name} — jobs/${r.path}` + (r.output ? `, ${r.output}` : "") +
+      (r.files_renamed ? ` (${r.files_renamed} file${r.files_renamed === 1 ? "" : "s"} renamed)` : "")
+    : `Renamed to ${r.name}. Not saved yet.`);
 });
 
 $("jobname").addEventListener("input", schedule);

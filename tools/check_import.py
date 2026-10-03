@@ -392,6 +392,121 @@ def importing(here, outer, app, scan):
     os.remove(os.path.join(app, "jobs", "Later.json"))
 
 
+def renames(top):
+    """Ruling 6 and 7: a project, a picture, a board and a runner renamed; a
+    taken name refused (any case) and nothing written; Save onto another job's
+    name refused."""
+    print("\n-- renaming a project")
+    here = make_here(os.path.join(top, "renames"))
+    point_api(here)
+    out = os.path.join(here, "output", "Test")
+    for rel in ("cutlist/Test_GREY.csv", "cutlist/Test_accepted.txt", "nesting/nest_GREY.svg",
+                "drawings/Test_plan.svg", "drawings/Test_elevation_A.svg",
+                "drawings/Brookhill.png", "snapshots/Test_3d_1.png",
+                "_previous/cutlist/Test_GREY.csv"):
+        write(os.path.join(out, *rel.split("/")), rel)
+    before = tree(here)
+    r = api.job_rename({"from": "Test.json", "to": "shared"})
+    check("a taken name, in another case, is refused", (r["ok"], r.get("error")),
+          (False, "shared already exists — choose another name"))
+    check("  and nothing is written", tree(here), before)
+    r = api.job_rename({"from": "Test.json", "to": "a/b"})
+    check("a name holding a path is refused", r["ok"], False)
+    r = api.job_rename({"from": "Test.json", "to": "Kitchen"})
+    check("a free name renames", (r["ok"], r["path"], r["output"], r["files_renamed"]),
+          (True, "Kitchen.json", "output/Kitchen/", 6))
+    after = tree(here)
+    check("the job file is moved, not copied",
+          (os.path.exists(os.path.join(here, "jobs", "Test.json")),
+           os.path.exists(os.path.join(here, "jobs", "Kitchen.json"))), (False, True))
+    check("  the name inside it follows", read(os.path.join(here, "jobs", "Kitchen.json"))["name"],
+          "Kitchen")
+    moved = sorted(k[len("output/Kitchen/"):] for k in after if k.startswith("output/"))
+    check("the output folder and every file named for the job follow", moved,
+          sorted(["cutlist/Kitchen_GREY.csv", "cutlist/Kitchen_accepted.txt",
+                  "nesting/nest_GREY.svg", "drawings/Kitchen_plan.svg",
+                  "drawings/Kitchen_elevation_A.svg", "drawings/Brookhill.png",
+                  "snapshots/Kitchen_3d_1.png", "_previous/cutlist/Kitchen_GREY.csv"]))
+    check("  their contents are the same files",
+          sorted(v for k, v in after.items() if k.startswith("output/")),
+          sorted(v for k, v in before.items() if k.startswith("output/")))
+    check("  and the rest of the job's content is unchanged",
+          dict(read(os.path.join(here, "jobs", "Kitchen.json")), name="Test"),
+          read(job_file("Test_export.json")))
+    r = api.job_rename({"from": "", "to": "Shared"})
+    check("a project never saved: a taken name is still refused", r["ok"], False)
+    r = api.job_rename({"from": "", "to": "Bathroom"})
+    check("  a free one is only the name on screen", (r["ok"], r["saved"]), (True, False))
+
+    print("\n-- Save onto another job's name")
+    job = job_from_dict(read(os.path.join(here, "jobs", "Kitchen.json")))
+    before = tree(here)
+    r = api.job_save({"job": job_to_dict(job), "path": "SHARED", "open": "Kitchen.json"})
+    check("refused, saying so", (r["ok"], r.get("error")),
+          (False, "SHARED already exists — choose another name"))
+    r = api.job_save({"job": job_to_dict(job), "path": "Shared"})
+    check("  a new project saved onto a saved job's name: refused", r["ok"], False)
+    check("  nothing written", tree(here), before)
+    r = api.job_save({"job": job_to_dict(job), "path": "kitchen", "open": "Kitchen.json"})
+    check("its OWN name saves as ever, into its own file", (r["ok"], r["path"]),
+          (True, "Kitchen.json"))
+    check("  no second file", sorted(n for n in os.listdir(os.path.join(here, "jobs"))),
+          ["Kitchen.json", "Shared.json"])
+    r = api.job_save({"job": job_to_dict(job), "path": "Kitchen copy", "open": "Kitchen.json"})
+    check("a new name saves a copy, as ever", (r["ok"], r["path"]), (True, "Kitchen copy.json"))
+
+    print("\n-- renaming a picture")
+    before = tree(here)
+    r = api.picture_rename({"from": "Pictures/Cascade Grey.jpg", "to": "storm grey"})
+    check("a taken name, in another case, is refused", (r["ok"], r.get("error")),
+          (False, "storm grey.jpg already exists — choose another name"))
+    check("  and nothing is written", tree(here), before)
+    r = api.picture_rename({"from": "Pictures/Storm Grey.jpg", "to": "Storm.png"})
+    check("its ending is kept", r["ok"], False)
+    screen = read(os.path.join(here, "jobs", "Kitchen.json"))
+    r = api.picture_rename({"from": "Pictures/Storm Grey.jpg", "to": "Stormy", "job": screen})
+    check("a free name renames the file", (r["ok"], r["picture"],
+          os.path.exists(os.path.join(here, "Pictures", "Storm Grey.jpg")),
+          os.path.exists(os.path.join(here, "Pictures", "Stormy.jpg"))),
+          (True, "Pictures/Stormy.jpg", False, True))
+    check("  every library board naming it follows", (r["boards"],
+          B.find(B.load(), "GREY").picture), (["GREY"], "Pictures/Stormy.jpg"))
+    check("  every saved job naming it follows", r["jobs"], ["Kitchen copy.json", "Kitchen.json"])
+    check("  the job's copy names the new file",
+          read(os.path.join(here, "jobs", "Kitchen.json"))["materials"]["GREY"]["picture"],
+          "Pictures/Stormy.jpg")
+    check("  and the project on screen", r["job"]["materials"]["GREY"]["picture"],
+          "Pictures/Stormy.jpg")
+    check("  a job not naming it is untouched", tree(here)["jobs/Shared.json"],
+          before["jobs/Shared.json"])
+
+    print("\n-- renaming a board or a runner to a taken name")
+    before = tree(here)
+    grey = asdict_board(B.find(B.load(), "GREY"))
+    r = api.board_save({"board": dict(grey, name="cascade GREY"), "from": "GREY"})
+    check("a board renamed to another's name is refused", (r["ok"], r.get("error"), r.get("field")),
+          (False, "cascade GREY already exists — choose another name", "name"))
+    r = api.board_save({"board": dict(grey, id="", name="Cascade Grey")})
+    check("  a new board under another's name too", r["ok"], False)
+    check("  nothing is written", tree(here), before)
+    r = api.board_save({"board": dict(grey, price=1.0), "from": "GREY"})
+    check("  its own name, any other edit, saves", r["ok"], True)
+    gel = H.to_record(H.find(H.load(), "GELMAR45"))
+    H.save(H.load() + [H.runner_from_dict(dict(gel, id="SOFT", name="Soft close"))])
+    before = tree(here)
+    r = api.runner_save({"runner": dict(gel, name="SOFT CLOSE"), "from": "GELMAR45"})
+    check("a runner renamed to another's name is refused", (r["ok"], r.get("error")),
+          (False, "SOFT CLOSE already exists — choose another name"))
+    check("  nothing is written", tree(here), before)
+    r = api.runner_save({"runner": dict(gel, name="Gelmar 45"), "from": "GELMAR45"})
+    check("  a free name saves, the id stays", (r["ok"], r["id"]), (True, "GELMAR45"))
+
+
+def asdict_board(b):
+    from dataclasses import asdict
+    return asdict(b)
+
+
 def raw_repoint():
     print("\n-- a newer job's re-pointing agrees with rename_board_in_job")
     for name in ("Test_export.json", "Test_Panels.json", "Corner Unit Test.json"):
@@ -418,6 +533,7 @@ def main():
         scan = preview(here, outer, app)
         importing(here, outer, app, scan)
         raw_repoint()
+        renames(top)
     finally:
         (api.ROOT, api.JOBS_DIR, api.PICTURES_DIR, api.OUT_DIR, api.DELETED_DIR,
          B.LIBRARY, H.LIBRARY) = saved
