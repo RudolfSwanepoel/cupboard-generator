@@ -25,8 +25,9 @@ session follows this page in order.
    Gaps that affect correctness or the stated requirements only; fix and
    re-review.
 7. **Report back**: the evidence, what moved and why, what the brief did not
-   foresee, the open items for Rudolf, a Status line in CLAUDE.md (one line),
-   and the full write-up in `docs/history/<brief-file-name>.md`, listed from
+   foresee, the open items for Rudolf, update the date of its area in
+   CLAUDE.md's Status line (add an area only if it is new), and the full
+   write-up in `docs/history/<brief-file-name>.md`, listed from
    `docs/HISTORY.md`.
 
 ## Standing rules every brief inherits

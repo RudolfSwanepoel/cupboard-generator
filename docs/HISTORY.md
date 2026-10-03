@@ -8,8 +8,49 @@ know is in `CLAUDE.md`, and how each area works in `docs/HOW-IT-WORKS.md`.
 
 - `brief-0-protocol-and-claude-md-2026-10-02.md` — the brief protocol, and
   CLAUDE.md slimmed (3 October 2026)
+- `import-followup-brief-2026-10-03.md` — Import follow-up: a price-only
+  difference identical, the jobs a demo shipped with left out, two Playwright
+  checks repaired, CLAUDE.md under 3,400 words (3 October 2026)
 
 ## Status entries, newest first
+
+### Import follow-up (3 October 2026)
+
+**Import follow-up (3 October 2026, brief
+`Claude outputs/import-followup-brief-2026-10-03.md`, ruled by Rudolf).** On
+Import a board or runner differing from this library's only in its price is
+identical (skipped, this library's price kept); the jobs a demo shipped with
+(`jobs\shipped-jobs.json`, written by `tools/build_demo.py`) are listed
+`shipped` and left out; a folder without that list has every job considered
+and the report says so. `ui_check_3d.py` stage `room` repaired (the script);
+`ui_check_walls.py`'s nook-room label line repaired (the app: Esc refits a
+typed wall length's box, approved by Rudolf). Benchmark unchanged. Write-up:
+`docs/history/import-followup-brief-2026-10-03.md`.
+
+### CLAUDE.md's ten Status lines, as they stood before the fold (3 October 2026)
+
+Folded into one line in CLAUDE.md by the import follow-up brief (Part 3);
+kept here word for word.
+
+- **Core and cut list** — Plazaboard CSV columns and edging names; export
+  folder organised (28 Sept 2026).
+- **Boards** — every attribute on the Boards record; colour and pictures
+  drawn (Parts A–C, 20–22 Sept 2026).
+- **Panels and attached panels** — cut and placed (20–21 Sept 2026); attached
+  to a cabinet (28 Sept 2026).
+- **Corner units** — mitre and blind generated, ell shape-only, blind panel
+  inset (22 Sept 2026).
+- **Supports, drawers and runners** — typed supports (27 Sept); runners, FACES
+  LEAD, BOXES FOLLOW (28 Sept); Drawers redone (29 Sept 2026).
+- **3D** — the 3D view, one editor everywhere (23 Sept 2026); drawn
+  realistically, Rounds 1–2 (29 Sept 2026).
+- **UI** — restructure Sessions 1–2 (28 Sept 2026); one maximised window,
+  `check_all` (29 Sept 2026).
+- **Room** — walls at any angle (29 Sept 2026); redo Phases 1–2, touch-ups,
+  Undo (2–3 Oct 2026); Phases 3–4 not built.
+- **Demo build** — Nuitka zip, expires 60 days after the build (30 Sept 2026).
+- **Import project and project renaming** — preview, report, Rename, a taken
+  name refused (3 Oct 2026).
 
 ### Import project, and renaming a project (3 October 2026)
 

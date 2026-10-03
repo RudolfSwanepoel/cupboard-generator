@@ -108,25 +108,11 @@ list comes out of the engine and is checked on any machine.
 
 ## Status
 
-- **Core and cut list** — Plazaboard CSV columns and edging names; export
-  folder organised (28 Sept 2026).
-- **Boards** — every attribute on the Boards record; colour and pictures
-  drawn (Parts A–C, 20–22 Sept 2026).
-- **Panels and attached panels** — cut and placed (20–21 Sept 2026); attached
-  to a cabinet (28 Sept 2026).
-- **Corner units** — mitre and blind generated, ell shape-only, blind panel
-  inset (22 Sept 2026).
-- **Supports, drawers and runners** — typed supports (27 Sept); runners, FACES
-  LEAD, BOXES FOLLOW (28 Sept); Drawers redone (29 Sept 2026).
-- **3D** — the 3D view, one editor everywhere (23 Sept 2026); drawn
-  realistically, Rounds 1–2 (29 Sept 2026).
-- **UI** — restructure Sessions 1–2 (28 Sept 2026); one maximised window,
-  `check_all` (29 Sept 2026).
-- **Room** — walls at any angle (29 Sept 2026); redo Phases 1–2, touch-ups,
-  Undo (2–3 Oct 2026); Phases 3–4 not built.
-- **Demo build** — Nuitka zip, expires 60 days after the build (30 Sept 2026).
-- **Import project and project renaming** — preview, report, Rename, a taken
-  name refused (3 Oct 2026).
+**Core and cut list** (28 Sept 2026) · **Boards** (20–22 Sept) · **Panels and
+attached panels** (20–28 Sept) · **Corner units** (22 Sept) · **Supports,
+drawers and runners** (27–29 Sept) · **3D** (23–29 Sept) · **UI** (28–29 Sept)
+· **Room** (29 Sept–3 Oct; Phases 3–4 not built) · **Demo build** (30 Sept) ·
+**Import project and renaming** (3 Oct 2026).
 
 History and the reasoning behind each decision: `docs/HISTORY.md`.
 
@@ -359,10 +345,7 @@ Rear + 2 Back, wall 3 Back, tall 4 Back, mitre/ell none, blind by kind.
 
 Ruled 2 Oct 2026 (Brief 0): a **peninsula** is a run of ordinary base units of
 the island Kind standing end-on to a wall, placed free (room Phase 4), with an
-attached end panel; a **table nook** is out of scope. Ruled 3 Oct 2026, not
-built yet — follow-up brief: on Import a board or runner differing only in
-price is identical, this library's price kept; the jobs a demo shipped with
-are left out.
+attached end panel; a **table nook** is out of scope.
 
 ## Things that will bite you
 
