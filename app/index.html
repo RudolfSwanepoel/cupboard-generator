@@ -824,7 +824,9 @@ folder is only read, never changed. You see what will come in before anything is
           </div>
         </div>
         <div class="card" id="cablist">
-          <h2>Cabinets <button id="add" style="float:right;margin-top:-3px">Add cabinet</button></h2>
+          <h2>Cabinets <button id="add" style="float:right;margin-top:-3px">Add cabinet</button>
+            <button id="placecat" style="float:right;margin:-3px 6px 0 0"
+              title="copy a cupboard from the catalogue into this project, unplaced">Place from catalogue</button></h2>
           <div class="scroll" id="cabtable"></div>
         </div>
       </div>
@@ -840,12 +842,19 @@ folder is only read, never changed. You see what will come in before anything is
        sub-tabs, beside the runner library. Hinges and handles come later. -->
   <section id="tab-catalogue">
     <div class="subtabs" id="catsubs"><button data-catsub="boards" class="on">Boards</button><button
-      data-catsub="runners">Runners</button></div>
+      data-catsub="runners">Runners</button><button data-catsub="cupboards">Cupboards</button></div>
     <div id="catboards">
       <div class="card"><h2>Board library</h2><div id="boards"></div></div>
     </div>
     <div id="catrunners" hidden>
       <div class="card"><h2>Runner library</h2><div id="runners"></div></div>
+    </div>
+    <!-- The catalogue of standard cupboards (ruling 9 of the cabinet round,
+         3 October 2026): cupboards.json beside boards.json and hardware.json.
+         Add to catalogue is in the cupboard editor; Place from catalogue on
+         the Cabinets tab. -->
+    <div id="catcupboards" hidden>
+      <div class="card"><h2>Cupboard catalogue</h2><div id="cupboards"></div></div>
     </div>
   </section>
 
@@ -971,6 +980,62 @@ folder is only read, never changed. You see what will come in before anything is
 <div id="toast"></div>
 <div id="updrag"></div>
 <!-- Export: which walls' elevations to write (UI restructure, 28 Sept 2026) -->
+<dialog id="cataddlg">
+  <form method="dialog">
+    <b>Add to catalogue</b>
+    <p class="note" style="margin:6px 0 8px">The cupboard as it is configured — every setting and its
+      attached panels — without its number, placement or note. Boards and runners are named; a project
+      that lacks one maps it when the cupboard is placed.</p>
+    <div class="f"><label>Author</label><input id="cataddauthor" placeholder="who made it"></div>
+    <div class="f"><label>Name</label>
+      <div style="display:flex;gap:6px;align-items:center"><b id="cataddprefix" style="white-space:nowrap"></b>
+        <input id="cataddtext" placeholder="anything else, after the fixed part" style="flex:1"></div>
+      <span class="note">The <b>Kind W×H×D</b> part is generated and always first.</span>
+      <div id="cataddmsg" class="note" style="color:var(--crit)"></div></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+      <button value="cancel" type="button" id="cataddcancel">Cancel</button>
+      <button value="go" class="primary" type="button" id="cataddgo">Add</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="catpickdlg">
+  <form method="dialog">
+    <b>Place from catalogue</b>
+    <p class="note" style="margin:6px 0 8px">The copy gets the next free number (its attached panels theirs)
+      and lands unplaced. From then on it is this project's own — editing either changes nothing in the other.</p>
+    <div id="catpicklist" style="display:flex;flex-direction:column;gap:4px;max-height:50vh;overflow:auto;margin-bottom:10px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button value="cancel">Cancel</button>
+      <button value="go" class="primary" id="catpickgo">Place</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="catmapdlg">
+  <form method="dialog">
+    <b>Boards and runners this project has not selected</b>
+    <p class="note" style="margin:6px 0 8px">Map each to one of this project's, so the cupboard never arrives
+      with an unpriced board. A runner that is in the runner library can be ticked in from there.</p>
+    <div id="catmaplist" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button value="cancel">Cancel</button>
+      <button value="go" class="primary" id="catmapgo">Place</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="catrenamedlg">
+  <form method="dialog">
+    <b>Rename</b>
+    <div class="f" style="margin-top:8px"><label>Name</label>
+      <div style="display:flex;gap:6px;align-items:center"><b id="catrenameprefix" style="white-space:nowrap"></b>
+        <input id="catrenametext" style="flex:1"></div>
+      <span class="note">Only the text after the fixed <b>Kind W×H×D</b> part changes.</span>
+      <div id="catrenamemsg" class="note" style="color:var(--crit)"></div></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+      <button value="cancel" type="button" id="catrenamecancel">Cancel</button>
+      <button value="go" class="primary" type="button" id="catrenamego">Rename</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="exportdlg">
   <form method="dialog">
     <b>Export cut list</b>
@@ -1366,6 +1431,7 @@ async function compute() {
   renderStrip();
   if (S.tab === "catalogue" && S.catSub === "boards" && S.lib) drawBoards();
   if (S.tab === "catalogue" && S.catSub === "runners" && S.rlib) drawRunners();
+  if (S.tab === "catalogue" && S.catSub === "cupboards" && S.cat) drawCupboards();
   renderList();
   refreshScene();          // the 3D views catch up, now or when next shown
   renderTab();             // the wall elevation, where it is showing (Room -> Elevation)
@@ -1668,6 +1734,8 @@ function showCatSub() {
     x.classList.toggle("on", x.dataset.catsub === S.catSub));
   $("catboards").hidden = S.catSub !== "boards";
   $("catrunners").hidden = S.catSub !== "runners";
+  $("catcupboards").hidden = S.catSub !== "cupboards";
+  if (V3K) V3K.setVisible(S.tab === "catalogue" && S.catSub === "cupboards");
 }
 
 function openCatalogue(sub) {
@@ -1741,6 +1809,221 @@ async function dupCabinet(i) {
   selectCabinet(i + 1);
   schedule(); renderList();
 }
+
+/* ---------- the catalogue of standard cupboards (ruling 9, 3 October 2026) ----
+   cupboards.json beside boards.json and hardware.json. The name rule, the
+   taken-name refusal, the copy-in with next numbers and the board / runner
+   mapping are all cabinetgen/catalogue.py's; the browser shows what it is
+   handed and writes nothing of its own.                                      */
+
+S.cat = null;          // /api/catalogue's answer, until something changes it
+S.catSel = null;       // the record previewed on Catalogue -> Cupboards
+let V3K = null, v3kLoading = null;   // the preview's own 3D view
+
+async function renderCupboardsTab() {
+  const r = await post("/api/catalogue", {});
+  if (!r.ok) { toast(r.error, true); return; }
+  S.cat = r;
+  drawCupboards();
+}
+
+function drawCupboards() {
+  const r = S.cat;
+  const box = $("cupboards");
+  if (!r) { box.innerHTML = ""; return; }
+  if (!$("catlist")) {
+    // the layout once: the list is redrawn, the preview's canvas is kept
+    box.innerHTML = `<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div id="catlist" style="flex:1 1 460px;min-width:320px"></div>
+      <div id="catpreviewwrap" style="flex:1 1 380px;min-width:300px">
+        <div id="catpreviewtitle" class="note" style="margin-bottom:4px"></div>
+        <div id="catbar" class="v3dbar"></div>
+        <div id="catpreview" class="v3dview" style="height:380px"></div></div></div>`;
+  }
+  const rows = r.cupboards.map((x) => `<tr data-catrow="${esc(x.name)}" class="${S.catSel === x.name ? "sel" : ""}">
+      <td><b>${esc(x.prefix)}</b> ${esc(x.text)}<div class="note">${esc(x.kind)}${
+        x.panels ? ` · ${x.panels} attached panel${x.panels === 1 ? "" : "s"}` : ""} · boards ${
+        x.boards.map((b) => esc(b.id)).join(", ") || "—"}${
+        x.runners.length ? " · runner " + x.runners.map((q) => esc(q.id)).join(", ") : ""}</div></td>
+      <td>${esc(x.author || "—")}</td><td class="note">${esc(x.added)}</td>
+      <td style="white-space:nowrap"><button data-catplace="${esc(x.name)}" title="copy it into this project, unplaced">Place</button>
+        <button data-catrename="${esc(x.name)}">Rename</button>
+        <button data-catdel="${esc(x.name)}" title="remove from the catalogue">Del</button></td></tr>`).join("");
+  $("catlist").innerHTML = `<p class="note" style="margin:0 0 8px">${r.cupboards.length} cupboard${
+      r.cupboards.length === 1 ? "" : "s"} in <b>${esc(r.path)}</b>, shared through the repo.
+      <b>Add to catalogue</b> is in the cupboard editor; <b>Place from catalogue</b> on the Cabinets tab
+      and here. Click a row to preview it.</p>
+    <table class="rows" id="cattable"><thead><tr><th>Cupboard</th><th>Author</th><th>Added</th><th></th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="4" class="note">Nothing in the catalogue yet.</td></tr>`}</tbody></table>`;
+  $("catpreviewtitle").textContent = S.catSel || "Click a cupboard to preview it";
+  if (S.catSel && r.cupboards.some((x) => x.name === S.catSel)) catPreview(S.catSel);
+}
+
+async function catPreview(name) {
+  if (!V3K) {
+    if (!v3kLoading) {
+      v3kLoading = view3dModule().then((m) => {
+        V3K = m.createView({single: true});
+        V3K.mount({view: $("catpreview"), bar: $("catbar"), status: null}, {
+          select: () => {}, card: () => {}, showLine: () => {},
+          attachModel: () => Promise.resolve({ok: false}), attachDrop: () => {},
+        });
+      }).catch((err) => { v3kLoading = null; throw err; });
+    }
+    await v3kLoading;
+  }
+  const sc = await post("/api/catalogue-scene", {name: name});
+  if (!sc.ok) { toast(sc.error, true); return; }
+  if (S.catSel !== name) return;
+  V3K.setVisible(true);
+  V3K.resize();
+  V3K.update(sc, {fresh: true});
+  V3K.select(1);
+  V3K.viewHome(false);
+}
+
+$("cupboards").addEventListener("click", async (e) => {
+  const del = e.target.closest("[data-catdel]");
+  if (del) {
+    if (!window.confirm(`Remove "${del.dataset.catdel}" from the catalogue? Cupboards already placed from it are untouched.`)) return;
+    const r = await post("/api/catalogue-delete", {name: del.dataset.catdel});
+    if (!r.ok) { toast(r.error, true); return; }
+    if (S.catSel === del.dataset.catdel) S.catSel = null;
+    renderCupboardsTab();
+    return;
+  }
+  const ren = e.target.closest("[data-catrename]");
+  if (ren) { catRename(ren.dataset.catrename); return; }
+  const pl = e.target.closest("[data-catplace]");
+  if (pl) { placeFromCatalogue(pl.dataset.catplace); return; }
+  const row = e.target.closest("[data-catrow]");
+  if (row) { S.catSel = row.dataset.catrow; drawCupboards(); }
+});
+
+// Rename: the fixed prefix shown, the text typed; a taken name under the field
+function catRename(name) {
+  const x = (S.cat && S.cat.cupboards || []).find((q) => q.name === name);
+  if (!x) return;
+  $("catrenameprefix").textContent = x.prefix;
+  $("catrenametext").value = x.text || "";
+  $("catrenamemsg").textContent = "";
+  const dlg = $("catrenamedlg");
+  dlg.dataset.name = name;
+  dlg.showModal();
+  $("catrenametext").focus();
+}
+$("catrenamecancel").addEventListener("click", () => $("catrenamedlg").close());
+$("catrenamego").addEventListener("click", async () => {
+  const dlg = $("catrenamedlg");
+  const r = await post("/api/catalogue-rename", {name: dlg.dataset.name, text: $("catrenametext").value});
+  if (!r.ok) { $("catrenamemsg").textContent = r.error; return; }
+  dlg.close();
+  if (S.catSel === dlg.dataset.name) S.catSel = r.cupboard.name;
+  renderCupboardsTab();
+});
+$("catrenametext").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("catrenamego").click(); } });
+
+// Add to catalogue, from the editor's header: the prefix is the engine's
+async function addToCatalogue(c) {
+  const p = await post("/api/catalogue-prefix", {job: S.job, cabinet: c.number});
+  if (!p.ok) { toast(p.error, true); return; }
+  $("cataddprefix").textContent = p.prefix;
+  $("cataddtext").value = "";
+  $("cataddmsg").textContent = "";
+  let author = "";
+  try { author = localStorage.getItem("cupboard.author") || ""; } catch (err) { /* no storage */ }
+  $("cataddauthor").value = author;
+  const dlg = $("cataddlg");
+  dlg.dataset.cabinet = c.number;
+  dlg.showModal();
+  $("cataddtext").focus();
+}
+$("cataddcancel").addEventListener("click", () => $("cataddlg").close());
+$("cataddgo").addEventListener("click", async () => {
+  const dlg = $("cataddlg");
+  const author = $("cataddauthor").value.trim();
+  const r = await post("/api/catalogue-add", {job: S.job, cabinet: +dlg.dataset.cabinet,
+                                              author: author, text: $("cataddtext").value});
+  if (!r.ok) { $("cataddmsg").textContent = r.error; return; }
+  try { localStorage.setItem("cupboard.author", author); } catch (err) { /* no storage */ }
+  dlg.close();
+  S.cat = null;
+  toast(`${r.cupboard.name} added to the catalogue (Catalogue -> Cupboards).`);
+});
+$("cataddtext").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("cataddgo").click(); } });
+
+// Place from catalogue: pick a record; a board or runner the project has not
+// selected is mapped in a second dialog before the copy lands
+$("placecat").addEventListener("click", async () => {
+  const r = await post("/api/catalogue", {});
+  if (!r.ok) { toast(r.error, true); return; }
+  S.cat = r;
+  if (!r.cupboards.length) {
+    toast("The catalogue is empty — Add to catalogue in a cupboard's editor first.");
+    return;
+  }
+  $("catpicklist").innerHTML = r.cupboards.map((x, i) =>
+    `<label style="display:flex;gap:6px;align-items:center"><input type="radio" name="catpick" style="width:auto"
+       value="${esc(x.name)}" ${i === 0 ? "checked" : ""}> <b>${esc(x.prefix)}</b>&nbsp;${esc(x.text)}
+       <span class="note">${esc(x.author || "")}</span></label>`).join("");
+  const dlg = $("catpickdlg");
+  dlg.returnValue = "";
+  dlg.showModal();
+});
+$("catpickdlg").addEventListener("close", () => {
+  if ($("catpickdlg").returnValue !== "go") return;
+  const picked = document.querySelector('#catpicklist input[name="catpick"]:checked');
+  if (picked) placeFromCatalogue(picked.value);
+});
+
+async function placeFromCatalogue(name, map) {
+  const r = await post("/api/catalogue-place", {job: S.job, name: name, map: map || {}});
+  if (!r.ok) { toast(r.error, true); return; }
+  if (r.needs) { catMapDialog(name, r.needs, map || {}); return; }
+  if (r.runners) S.job.runners = r.runners;
+  const at = S.job.cabinets.length;
+  S.job.cabinets.push(...r.cabinets);
+  placesSig = null;
+  if (S.tab !== "cabinets") document.querySelector('nav [data-tab="cabinets"]').click();
+  selectCabinet(at);
+  schedule(); renderList();
+  toast(`${name} placed as cabinet ${r.cabinets[0].number}${r.cabinets.length > 1 ? ` with ${r.cabinets.length - 1} attached panel(s)` : ""} — ` +
+        `unplaced: give it a wall in Room -> Placements, or drag it from the unplaced list.`);
+}
+
+function catMapDialog(name, needs, map) {
+  const mats = (S.res && S.res.materials) || {};
+  const boardOpt = (k, sel) => `<option value="${esc(k)}"${k === sel ? " selected" : ""}>${esc(k)} — ${esc((mats[k] || {}).board || k)}${
+    (mats[k] || {}).thickness ? " · " + mats[k].thickness + " mm" : ""}</option>`;
+  const rows = [];
+  for (const b of needs.boards) {
+    const sel = (map.boards || {})[b.id] || b.default;
+    rows.push(`<div class="f"><label>Board ${esc(b.id)} — ${esc(b.name)}${b.thickness ? ` · ${b.thickness} mm` : ""} (not in this project)</label>
+      <select data-catmap="board" data-id="${esc(b.id)}">${b.options.length ? b.options.map((k) => boardOpt(k, sel)).join("")
+        : `<option value="">— no board selected in this project —</option>`}</select></div>`);
+  }
+  for (const q of needs.runners) {
+    const sel = (map.runners || {})[q.id] || q.default;
+    rows.push(`<div class="f"><label>Runner ${esc(q.id)} — ${esc(q.name)} (not in this project)</label>
+      <select data-catmap="runner" data-id="${esc(q.id)}">${
+        q.in_library ? `<option value="library"${sel === "library" ? " selected" : ""}>tick it in from the runner library</option>` : ""}${
+        q.options.map((k) => `<option value="${esc(k)}"${k === sel ? " selected" : ""}>${esc(k)} (in this project)</option>`).join("")}${
+        !q.in_library && !q.options.length ? `<option value="">— no runner in this project: the legacy record —</option>` : ""}</select></div>`);
+  }
+  $("catmaplist").innerHTML = rows.join("");
+  const dlg = $("catmapdlg");
+  dlg.dataset.name = name;
+  dlg.returnValue = "";
+  dlg.showModal();
+}
+$("catmapdlg").addEventListener("close", () => {
+  const dlg = $("catmapdlg");
+  if (dlg.returnValue !== "go") return;
+  const map = {boards: {}, runners: {}};
+  document.querySelectorAll('#catmaplist [data-catmap="board"]').forEach((s) => { map.boards[s.dataset.id] = s.value; });
+  document.querySelectorAll('#catmaplist [data-catmap="runner"]').forEach((s) => { map.runners[s.dataset.id] = s.value; });
+  placeFromCatalogue(dlg.dataset.name, map);
+});
 
 $("cabtable").addEventListener("click", async (e) => {
   const dup = e.target.closest("[data-dup]");
@@ -2365,7 +2648,8 @@ function renderEditor() {
   // what writes the job file. This one computes now rather than after the
   // debounce and redraws every place the cabinet appears — see saveRefresh.
   const html = `<h2>Cabinet ${c.number}<button class="edsave" id="edsave"
-      title="Recompute now and redraw everything this cabinet appears in. Does not write the job file — the top-bar Save does that.">Save</button></h2>${
+      title="Recompute now and redraw everything this cabinet appears in. Does not write the job file — the top-bar Save does that.">Save</button>${isPanelCab(c) ? "" : `<button class="edsave" id="edcat"
+      style="margin-right:6px" title="Save this cupboard, as it is configured, to the catalogue of standard cupboards (Catalogue -> Cupboards)">Add to catalogue</button>`}</h2>${
       issues}<div class="body">${sets}${bespoke}</div>`;
 
   // A different cabinet is a different editor and there is nothing on screen
@@ -2791,6 +3075,7 @@ $("editor").addEventListener("click", (e) => {
   // Duplicate, from the Panel design section. The same path the cabinet table's
   // Dup takes: the next free number from the engine, everything copied but the
   // placement - a panel is put where it is put, so a copy is not.
+  if (e.target.id === "edcat") { addToCatalogue(S.job.cabinets[S.sel]); return; }
   if (e.target.closest("#paneldup")) {
     dupCabinet(S.sel);
     return;
@@ -8981,7 +9266,11 @@ function guarded(box, render, reset) {
 }
 
 function renderTab() {
-  if (S.tab === "catalogue") { if (S.catSub === "runners") renderRunnersTab(); else renderBoardsTab(); }
+  if (S.tab === "catalogue") {
+    if (S.catSub === "runners") renderRunnersTab();
+    else if (S.catSub === "cupboards") renderCupboardsTab();
+    else renderBoardsTab();
+  }
   else if (S.tab === "cabinets") renderCab3D();
   else if (S.tab === "room") {
     renderUnplaced();
@@ -9814,8 +10103,11 @@ $("importdlg").addEventListener("click", async (e) => {
     if (first) $("joblist").value = first + ".json";
     S.lib = null;
     S.rlib = null;
+    S.cat = null;
     if (S.tab === "catalogue") {
-      if (S.catSub === "runners") await renderRunnersTab(); else await renderBoardsTab();
+      if (S.catSub === "runners") await renderRunnersTab();
+      else if (S.catSub === "cupboards") await renderCupboardsTab();
+      else await renderBoardsTab();
     }
   }
 });

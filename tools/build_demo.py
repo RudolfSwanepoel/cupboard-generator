@@ -51,7 +51,7 @@ DEMO_DIR = os.path.join(REPO, "demo")                 # the zips
 STAMP = os.path.join(REPO, "app", "_demo_build.py")
 
 # What the app reads while it runs (ruling 3). Files, and folders copied whole.
-DATA_FILES = ["boards.json", "hardware.json",
+DATA_FILES = ["boards.json", "hardware.json", "cupboards.json",
               os.path.join("app", "index.html"), os.path.join("app", "view3d.js"),
               os.path.join("app", "cupboard.ico")]
 DATA_DIRS = ["Pictures", os.path.join("app", "vendor")]

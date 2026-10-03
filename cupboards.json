@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "note": "The catalogue of standard cupboards. Shared across every project and committed to the repo so both machines see the same cupboards. Placing one copies it into the project; nothing points back here (see docs/HOW-IT-WORKS.md, Catalogue).",
+  "cupboards": []
+}

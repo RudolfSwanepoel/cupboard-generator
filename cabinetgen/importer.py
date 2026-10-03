@@ -86,6 +86,7 @@ from .model import (Acceptance, Cabinet, Drawer, GapChoice, Job, Obstruction, Op
                     Panel, PanelSpec, Placement, PlinthChoice, Room, Shelf, Support, Wall,
                     material_record)
 from .store import job_from_dict, job_to_dict
+from . import catalogue as CAT
 
 DEMO_EXE = "Cupboard App Demo.exe"     # tools/build_demo.py's EXE
 DEMO_FOLDER = "Cupboard App Demo"      # tools/build_demo.py's APP_FOLDER
@@ -94,9 +95,10 @@ BOARDS_FILE = "boards.json"
 HARDWARE_FILE = "hardware.json"
 SHIPPED_FILE = "shipped-jobs.json"     # tools/build_demo.py writes it into the demo's jobs/
 NO_SHIPPED_LIST = "No list of shipped jobs in this folder: every job was considered."
-KINDS = ("job", "board", "runner", "picture")
+KINDS = ("job", "board", "runner", "picture", "cupboard")
 KIND_PLURAL = {"job": ("project", "projects"), "board": ("board", "boards"),
-               "runner": ("runner", "runners"), "picture": ("picture", "pictures")}
+               "runner": ("runner", "runners"), "picture": ("picture", "pictures"),
+               "cupboard": ("catalogue cupboard", "catalogue cupboards")}
 
 
 def taken_message(name: str) -> str:
@@ -129,13 +131,20 @@ class Target:
     pictures_dir: str
     boards_path: str
     hardware_path: str
+    cupboards_path: str = ""          # the catalogue of cupboards (3 October 2026)
 
     @classmethod
-    def at(cls, root: str, boards_path: str = "", hardware_path: str = "") -> "Target":
+    def at(cls, root: str, boards_path: str = "", hardware_path: str = "",
+           cupboards_path: str = "") -> "Target":
         return cls(root=root, jobs_dir=os.path.join(root, JOBS),
                    pictures_dir=os.path.join(root, PIC.DIRNAME),
                    boards_path=boards_path or os.path.join(root, BOARDS_FILE),
-                   hardware_path=hardware_path or os.path.join(root, HARDWARE_FILE))
+                   hardware_path=hardware_path or os.path.join(root, HARDWARE_FILE),
+                   cupboards_path=cupboards_path or os.path.join(root, CAT.CATALOGUE_FILE))
+
+    @property
+    def catalogue_path(self) -> str:
+        return self.cupboards_path or os.path.join(self.root, CAT.CATALOGUE_FILE)
 
 
 def _job_files(jobs_dir: str) -> List[str]:
@@ -304,6 +313,7 @@ class Plan:
     boards: List[B.Board] = field(default_factory=list)
     runners: List[H.Runner] = field(default_factory=list)
     jobs: List[tuple] = field(default_factory=list)
+    cupboards: List[dict] = field(default_factory=list)      # catalogue records, re-pointed
 
     @property
     def signature(self) -> str:
@@ -366,6 +376,14 @@ def _runner_body(r: H.Runner) -> dict:
     return d
 
 
+def _record_body(rec: dict) -> dict:
+    """A catalogue record with its name, text, author and date set aside: the
+    cupboard itself (its configuration, its panels, the boards and runners it
+    names) — what makes two records the same cupboard under two names."""
+    d = {k: v for k, v in rec.items() if k not in ("name", "text", "author", "added")}
+    return json.loads(json.dumps(d, sort_keys=True))
+
+
 class _Scanner:
     def __init__(self, folder: str, target: Target):
         self.src = folder
@@ -389,6 +407,7 @@ class _Scanner:
         self.src_lib: List[B.Board] = []
         self.src_rlib: List[H.Runner] = []
         self.reserved_ids = set()                   # ids an imported job names: never a new id
+        self.cat = CAT.load(target.catalogue_path) if os.path.exists(target.catalogue_path) else []
 
     # -- pictures --
     def pictures(self):
@@ -554,6 +573,65 @@ class _Scanner:
                                         note=f"a different {r.name} is already here"))
             return new.id
         raise AssertionError("unreachable")
+
+    # -- the catalogue of cupboards (3 October 2026) --
+    def cupboards(self):
+        """The old folder's catalogue, brought across the way boards are: a
+        record identical to one here (same name, any case, and the same
+        cupboard once its board and runner ids are re-pointed) is skipped;
+        a new name comes in; a different cupboard under a taken name comes in
+        as `<name> (imported n)` — the text after the fixed prefix carrying the
+        suffix, the same name-taken rule as everywhere."""
+        path = os.path.join(self.src, CAT.CATALOGUE_FILE)
+        if not os.path.exists(path):
+            return
+        try:
+            src = CAT.load(path)
+        except (OSError, ValueError, TypeError) as exc:
+            self.plan.notes.append(f"{CAT.CATALOGUE_FILE} could not be read ({type(exc).__name__}: "
+                                   f"{exc}) — no catalogue cupboards come from it.")
+            return
+        for rec in src:
+            name = str(rec.get("name") or "")
+            if not name:
+                continue
+            moved = self._repoint_record(rec)
+            for k, cand_text in enumerate(candidates(str(rec.get("text") or ""))):
+                cand = CAT.full_name(str(rec.get("prefix") or name), cand_text) if rec.get("prefix") else (
+                    name if k == 0 else cand_text)
+                have = CAT.find(self.cat, cand)
+                if have is not None:
+                    if _record_body(have) == _record_body(moved):
+                        self.plan.items.append(Item("cupboard", name, "identical", to=have["name"],
+                                                    note="" if k == 0 else "imported before"))
+                        break
+                    continue
+                new = dict(moved, name=cand, text=" ".join(cand_text.split()))
+                self.cat.append(new)
+                self.plan.cupboards.append(new)
+                self.plan.items.append(Item("cupboard", name, "new" if k == 0 else "renamed",
+                                            to=cand if k else "",
+                                            note="" if k == 0 else f"a different {name} is already here"))
+                break
+
+    def _repoint_record(self, rec: dict) -> dict:
+        """A catalogue record with its board and runner ids as they are here."""
+        d = json.loads(json.dumps(rec))
+        fn = lambda b: self.board_map.get(b, b)                               # noqa: E731
+        for c in [d.get("cabinet")] + list(d.get("panels") or []):
+            if isinstance(c, dict):
+                B.map_cabinet_board_ids(c, fn)
+                if c.get("runner") in self.runner_map:
+                    c["runner"] = self.runner_map[c["runner"]]
+        d["boards"] = [dict(b, id=fn(b.get("id"))) for b in d.get("boards") or []]
+        d["materials"] = {fn(k): v for k, v in (d.get("materials") or {}).items()}
+        for rec_r in d.get("runners") or []:
+            rec_r["id"] = self.runner_map.get(rec_r.get("id"), rec_r.get("id"))
+        d["runner_records"] = {self.runner_map.get(k, k): v for k, v in (d.get("runner_records") or {}).items()}
+        for v in d["materials"].values():
+            if isinstance(v, dict) and v.get("picture"):
+                v["picture"] = self.repoint_picture(v["picture"])
+        return d
 
     # -- jobs --
     def _board_moves(self, job_name: str, materials: dict) -> Dict[str, str]:
@@ -731,6 +809,7 @@ def scan(path: str, target: Target) -> dict:
     s.pictures()
     s.boards()
     s.runners()
+    s.cupboards()
     s.jobs()
     order = {k: i for i, k in enumerate(KINDS)}
     s.plan.items.sort(key=lambda i: order[i.kind])
@@ -747,7 +826,10 @@ def _plural(n: int, kind: str) -> str:
 def report_text(rep: dict) -> str:
     """Ruling 8: one paragraph, fit to copy."""
     done = rep["imported"]
-    parts = [_plural(done[k], k) for k in KINDS]
+    # the four kinds as the line always read them; catalogue cupboards named
+    # only when any came in (3 October 2026), so a report without them is
+    # word for word what it was
+    parts = [_plural(done[k], k) for k in KINDS if k != "cupboard" or done.get(k)]
     lines = []
     if any(done.values()):
         lines.append("Imported " + ", ".join(parts) + ".")
@@ -803,6 +885,10 @@ def run(path: str, target: Target, signature: str = "",
         rlib = H.load(target.hardware_path) if os.path.exists(target.hardware_path) else []
         H.save(rlib + plan.runners, target.hardware_path)
         done["runner"] += len(plan.runners)
+    if plan.cupboards:
+        cat = CAT.load(target.catalogue_path) if os.path.exists(target.catalogue_path) else []
+        CAT.save(cat + plan.cupboards, target.catalogue_path)
+        done["cupboard"] += len(plan.cupboards)
     written = set()
     if plan.jobs:
         os.makedirs(target.jobs_dir, exist_ok=True)

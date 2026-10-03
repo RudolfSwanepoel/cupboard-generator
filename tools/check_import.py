@@ -71,7 +71,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fixture_jobs import job_file                                          # noqa: E402
 from app import api                                                         # noqa: E402
 from cabinetgen import boards as B                                          # noqa: E402
-from cabinetgen import hardware as H                                        # noqa: E402
+from cabinetgen import hardware as H                                        # noqa: E402
+from cabinetgen import catalogue as CAT                                   # noqa: E402
 from cabinetgen import importer as IMP                                      # noqa: E402
 from cabinetgen.engine import generate_job                                  # noqa: E402
 from cabinetgen.store import job_from_dict, job_to_dict                     # noqa: E402
@@ -207,6 +208,7 @@ def point_api(root):
     api.DELETED_DIR = os.path.join(api.JOBS_DIR, "_deleted")
     B.LIBRARY = os.path.join(root, "boards.json")
     H.LIBRARY = os.path.join(root, "hardware.json")
+    CAT.LIBRARY = os.path.join(root, "cupboards.json")
 
 
 def loaded_cost(root, name):
@@ -293,8 +295,8 @@ def importing(here, outer, app, scan):
     r = api.import_run({"path": outer, "signature": scan["signature"]})
     check("Import answers", r["ok"], True)
     rep = r["report"]
-    check("the report's counts", rep["imported"],
-          {"job": 4, "board": 3, "runner": 2, "picture": 2})
+    check("the report's counts (catalogue cupboards a kind since 3 October 2026)", rep["imported"],
+          {"job": 4, "board": 3, "runner": 2, "picture": 2, "cupboard": 0})
     check("the report's first line",
           rep["text"].split("\n")[0],
           "Imported 4 projects, 3 boards, 2 runners, 2 pictures. Skipped 5 identical. "
@@ -400,7 +402,7 @@ def importing(here, outer, app, scan):
           sorted({i["action"] for i in again["items"]}), ["broken", "identical"])
     r2 = api.import_run({"path": app, "signature": again["signature"]})
     check("the second Import brings nothing", r2["report"]["imported"],
-          {"job": 0, "board": 0, "runner": 0, "picture": 0})
+          {"job": 0, "board": 0, "runner": 0, "picture": 0, "cupboard": 0})
     check("... and writes nothing", tree(here), before2)
     check("... and says so", r2["report"]["text"].startswith("Nothing new to import."), True)
 
@@ -709,7 +711,7 @@ def raw_repoint():
 def main():
     top = tempfile.mkdtemp(prefix="check_import_")
     saved = (api.ROOT, api.JOBS_DIR, api.PICTURES_DIR, api.OUT_DIR, api.DELETED_DIR,
-             B.LIBRARY, H.LIBRARY)
+             B.LIBRARY, H.LIBRARY, CAT.LIBRARY)
     live = tree(os.path.join(ROOT, "jobs")), tree(os.path.join(ROOT, "Pictures"))
     try:
         here = make_here(top)
@@ -724,7 +726,7 @@ def main():
         demo_list(top)
     finally:
         (api.ROOT, api.JOBS_DIR, api.PICTURES_DIR, api.OUT_DIR, api.DELETED_DIR,
-         B.LIBRARY, H.LIBRARY) = saved
+         B.LIBRARY, H.LIBRARY, CAT.LIBRARY) = saved
         shutil.rmtree(top, ignore_errors=True)
     check("the live jobs/ and Pictures/ were never touched",
           (tree(os.path.join(ROOT, "jobs")), tree(os.path.join(ROOT, "Pictures"))), live)

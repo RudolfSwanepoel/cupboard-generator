@@ -46,6 +46,7 @@ from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES, D
 from cabinetgen.render import (PLAN_MARGIN_MM, cabinet_section_dims, cabinet_svg, pictures_drawn,
                                plan_svg, wall_elevation_svg)
 from cabinetgen import scene as SCENE
+from cabinetgen import catalogue as CAT
 from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, drawer_rise,
                              drawer_layout, inner_drawer_z,
                              attach_offsets, attach_snap_points, attached_panels, attached_placement,
@@ -2144,7 +2145,8 @@ def _import_target():
     """Where this app keeps jobs, pictures and the two libraries — asked at call
     time, so a check can point every one of them at a temp folder."""
     return IMP.Target(root=ROOT, jobs_dir=JOBS_DIR, pictures_dir=PICTURES_DIR,
-                      boards_path=B.LIBRARY, hardware_path=H.LIBRARY)
+                      boards_path=B.LIBRARY, hardware_path=H.LIBRARY,
+                      cupboards_path=CAT.LIBRARY)
 
 
 def _import_test_load(text: str):
@@ -2194,6 +2196,112 @@ def import_run(payload):
     return IMP.run(str(payload.get("path") or ""), _import_target(),
                    signature=str(payload.get("signature") or ""),
                    test_load=_import_test_load)
+
+
+# --- the catalogue of standard cupboards (ruling 9 of the cabinet round, 3 October 2026) ---
+
+def catalogue_list(payload):
+    """Catalogue -> Cupboards: every record's words (no cabinet records), and
+    the file's name."""
+    recs = CAT.load()
+    return {"ok": True, "cupboards": [CAT.summary(r) for r in recs],
+            "path": os.path.basename(CAT.LIBRARY)}
+
+
+def catalogue_add(payload):
+    """Add to catalogue: the cupboard `cabinet` of the job on the wire, as it
+    is configured, under `<Kind> WxHxD` + `text`, by `author`. A taken name
+    (any case) is refused with the one message, nothing written."""
+    job = _job(payload)
+    try:
+        number = int(payload.get("cabinet"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "no cabinet named"}
+    recs = CAT.load()
+    try:
+        rec = CAT.add(job, number, str(payload.get("author") or ""), str(payload.get("text") or ""), recs)
+    except ValueError as exc:
+        msg = str(exc)
+        return {"ok": False, "error": msg, "taken": "already exists" in msg, "field": "text"}
+    CAT.save(recs)
+    return {"ok": True, "cupboard": CAT.summary(rec)}
+
+
+def catalogue_prefix(payload):
+    """The generated, always-first part of the name for the cupboard
+    `cabinet` — shown fixed beside the text field; the browser types none."""
+    job = _job(payload)
+    try:
+        number = int(payload.get("cabinet"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "no cabinet named"}
+    cab = next((c for c in job.cabinets if c.number == number), None)
+    if cab is None:
+        return {"ok": False, "error": f"no cabinet {number}"}
+    if cab.is_panel:
+        return {"ok": False, "error": "a Panel is not a cupboard — Add to catalogue is for cupboards"}
+    return {"ok": True, "prefix": CAT.generated_name(cab, job.std, job.materials)}
+
+
+def catalogue_place(payload):
+    """Place from catalogue: the record `name` copied into the job on the wire
+    with the next free numbers, unplaced. Boards the project has not selected
+    must be mapped (`map.boards`: record id -> project board id) and so must
+    runners (`map.runners`: id -> project runner id, or "library"); with the
+    map incomplete the answer is `needs`, for the dialog, and nothing lands."""
+    job = _job(payload)
+    rec = CAT.find(CAT.load(), str(payload.get("name") or ""))
+    if rec is None:
+        return {"ok": False, "error": f"no cupboard {payload.get('name')!r} in the catalogue"}
+    m = payload.get("map") or {}
+    board_map = {str(k): str(v) for k, v in (m.get("boards") or {}).items()}
+    runner_map = {str(k): str(v) for k, v in (m.get("runners") or {}).items()}
+    need = CAT.needs_mapping(job, rec)
+    unmapped = ([b for b in need["boards"] if board_map.get(b["id"]) not in (job.boards or [])]
+                + [r for r in need["runners"] if r["id"] not in runner_map])
+    if unmapped:
+        return {"ok": True, "needs": need, "cabinets": []}
+    try:
+        placed = CAT.place(job, rec, board_map, runner_map)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "needs": None,
+            "cabinets": [cabinet_to_dict(c) for c in placed],
+            "runners": job.runners or {}}
+
+
+def catalogue_delete(payload):
+    recs = CAT.load()
+    try:
+        recs = CAT.delete(recs, str(payload.get("name") or ""))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    CAT.save(recs)
+    return {"ok": True}
+
+
+def catalogue_rename(payload):
+    """Rename: only the text after the fixed prefix changes (change 4); a
+    taken name is refused under the field."""
+    recs = CAT.load()
+    try:
+        rec = CAT.rename(recs, str(payload.get("name") or ""), str(payload.get("text") or ""))
+    except ValueError as exc:
+        msg = str(exc)
+        return {"ok": False, "error": msg, "taken": "already exists" in msg, "field": "text"}
+    CAT.save(recs)
+    return {"ok": True, "cupboard": CAT.summary(rec)}
+
+
+def catalogue_scene(payload):
+    """The catalogue's 3D preview of one record: the single-cabinet scene of a
+    one-cupboard job built from the record's own snapshots. Read-only."""
+    rec = CAT.find(CAT.load(), str(payload.get("name") or ""))
+    if rec is None:
+        return {"ok": False, "error": f"no cupboard {payload.get('name')!r} in the catalogue"}
+    job = CAT.preview_job(rec)
+    job.bind_runners()
+    return SCENE.build_cabinet(job, 1)
 
 
 def job_fixture(payload):
@@ -3067,6 +3175,13 @@ ROUTES = {
     "/api/drag": drag,
     "/api/elevation": elevation,
     "/api/cabinet-drawing": cabinet_drawing,
+    "/api/catalogue": catalogue_list,
+    "/api/catalogue-add": catalogue_add,
+    "/api/catalogue-prefix": catalogue_prefix,
+    "/api/catalogue-place": catalogue_place,
+    "/api/catalogue-delete": catalogue_delete,
+    "/api/catalogue-rename": catalogue_rename,
+    "/api/catalogue-scene": catalogue_scene,
     "/api/scene": scene,
     "/api/scene-cabinet": scene_cabinet,
     "/api/attach-snaps": attach_snaps,

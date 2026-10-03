@@ -32,6 +32,7 @@ ui_check scripts need it; without it this says so and exits 0.
 """
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -108,7 +109,7 @@ def make_app(top):
     ign = shutil.ignore_patterns("__pycache__", "_demo_build.py")
     for d in ("app", "cabinetgen"):
         shutil.copytree(os.path.join(ROOT, d), os.path.join(here, d), ignore=ign)
-    for f in ("run_app.py", "boards.json", "hardware.json"):
+    for f in ("run_app.py", "boards.json", "hardware.json", "cupboards.json"):
         shutil.copyfile(os.path.join(ROOT, f), os.path.join(here, f))
     shutil.copytree(os.path.join(ROOT, "Pictures"), os.path.join(here, "Pictures"))
     os.makedirs(os.path.join(here, "jobs"))
@@ -309,6 +310,90 @@ def stage_rename(page, here):
     shot(page, "board_taken")
 
 
+def stage_catalogue(page, here):
+    """Ruling 9 of the cabinet round (3 October 2026), in this copy of the app
+    (its own cupboards.json, never the live one): Add to catalogue from the
+    cupboard editor (the generated prefix fixed, the text typed, a taken name
+    refused under the field), the record on Catalogue -> Cupboards with its
+    preview, Place from catalogue into a project that lacks one of its boards
+    — the mapping dialog, defaulted — and the copy landing unplaced with the
+    next free number."""
+    print("\nCatalogue: add, see it on Catalogue -> Cupboards, place it, map a board")
+    page.select_option("#joblist", "Test.json")
+    page.click("#load")
+    page.wait_for_function("() => S.file === 'Test.json' && S.res", timeout=15000)
+    page.click('nav [data-tab="cabinets"]')
+    # a cupboard that names GREY, which Main.json (Test_Build) does not carry
+    num = page.evaluate("() => (S.job.cabinets.find((c) => c.kind !== 'panel' && (c.door_boards || []).includes('GREY')) || S.job.cabinets.find((c) => c.kind !== 'panel' && c.exterior_board === 'GREY') || {}).number")
+    check(f"Test.json has a cupboard on the GREY board [{num}]", bool(num), True)
+    page.evaluate(f"() => {{ selectCabinet(S.job.cabinets.findIndex((c) => c.number === {num})); renderList(); }}")
+    page.wait_for_selector("#editor #edcat", timeout=10000)
+    page.click("#editor #edcat")
+    page.wait_for_selector("#cataddlg[open]", timeout=5000)
+    prefix = page.inner_text("#cataddprefix")
+    size = page.evaluate(f"() => {{ const c = S.job.cabinets.find((c) => c.number === {num}); return `${{c.width}}×${{c.height}}×${{c.depth}}`; }}")
+    check(f"the generated prefix is shown, fixed: <Kind> W×H×D [{prefix}]", bool(prefix.endswith(size) and prefix[0].isupper()), True)
+    page.fill("#cataddauthor", "Rudolf")
+    page.fill("#cataddtext", "grey doors")
+    page.click("#cataddgo")
+    page.wait_for_function("() => !$('cataddlg').open", timeout=10000)
+    cat = os.path.join(here, "cupboards.json")
+    with open(cat, encoding="utf-8") as fh:
+        recs = json.load(fh)["cupboards"]
+    check("the record is in this copy's cupboards.json, named prefix + text", [r["name"] for r in recs], [prefix + " grey doors"])
+    check("  by its author, without the number", (recs[0]["author"], recs[0]["cabinet"]["number"]), ("Rudolf", 0))
+    # the same name again, another case: refused under the field, nothing written
+    page.click("#editor #edcat")
+    page.wait_for_selector("#cataddlg[open]", timeout=5000)
+    page.fill("#cataddtext", "GREY DOORS")
+    page.click("#cataddgo")
+    page.wait_for_function("() => $('cataddmsg').textContent.length > 0", timeout=5000)
+    check("a taken name (another case) is refused under the field",
+          page.inner_text("#cataddmsg"), f"{prefix} GREY DOORS already exists — choose another name")
+    check("  the dialog stays open", page.evaluate("() => $('cataddlg').open"), True)
+    with open(cat, encoding="utf-8") as fh:
+        check("  nothing was written", len(json.load(fh)["cupboards"]), 1)
+    shot(page, "catalogue_add_taken")
+    page.click("#cataddcancel")
+    # on Catalogue -> Cupboards, with its preview
+    page.evaluate("() => openCatalogue('cupboards')")
+    page.wait_for_selector("#cattable [data-catrow]", timeout=15000)
+    rows = page.evaluate("() => [...document.querySelectorAll('#cattable [data-catrow]')].map((r) => r.dataset.catrow)")
+    check("Catalogue -> Cupboards lists it", rows, [prefix + " grey doors"])
+    page.click("#cattable [data-catrow]")
+    page.wait_for_function("() => typeof V3K === 'object' && V3K !== null && V3K.groupIds && Object.keys(V3K.groupIds()).length > 0", timeout=30000)
+    check("clicking it draws the preview in its own 3D view", page.evaluate("() => Object.keys(V3K.groupIds()).length > 0"), True)
+    shot(page, "catalogue_cupboards")
+    # place it into Main.json (Test_Build), which lacks GREY: the mapping dialog
+    page.select_option("#joblist", "Main.json")
+    page.click("#load")
+    page.wait_for_function("() => S.file === 'Main.json' && S.res", timeout=15000)
+    page.click('nav [data-tab="cabinets"]')
+    n_before = page.evaluate("() => S.job.cabinets.length")
+    check("Main.json does not carry GREY", page.evaluate("() => S.job.boards.includes('GREY')"), False)
+    page.click("#placecat")
+    page.wait_for_selector("#catpickdlg[open]", timeout=5000)
+    page.click("#catpickgo")
+    page.wait_for_selector("#catmapdlg[open]", timeout=10000)
+    sel = page.evaluate("() => [...document.querySelectorAll('#catmaplist [data-catmap=\"board\"]')].map((s) => [s.dataset.id, s.value, s.options.length])")
+    check(f"the mapping dialog asks for GREY, defaulted to a project board of the same thickness [{sel}]",
+          bool(sel and sel[0][0] == "GREY" and sel[0][1] in ("BROOKHILL", "MEL", "WHITEMEL")), True)
+    shot(page, "catalogue_map")
+    page.click("#catmapgo")
+    page.wait_for_function(f"() => S.job.cabinets.length > {n_before}", timeout=15000)
+    new = page.evaluate(f"() => S.job.cabinets[{n_before}]")          # the head; its attached panel follows it
+    nums = page.evaluate("() => S.job.cabinets.map((c) => c.number)")
+    check("placed: the next free number, unplaced",
+          (nums.count(new["number"]), page.evaluate(f"() => S.job.placements.some((p) => p.cabinet === {new['number']})")), (1, False))
+    tail = page.evaluate(f"() => S.job.cabinets.slice({n_before}).map((c) => [c.kind, c.panel ? c.panel.attached_to : null])")
+    check("  its attached panel came with it, attached to the copy", tail[1:], [["panel", new["number"]]] if len(tail) > 1 else [])
+    check("  the copy names the mapped board and no GREY",
+          ("GREY" in json.dumps(new), new["door_boards"] and new["door_boards"][0] in ("BROOKHILL", "MEL", "WHITEMEL") or new["exterior_board"] in ("BROOKHILL", "MEL", "WHITEMEL")),
+          (False, True))
+    check("  it is selected and in the editor", page.evaluate(f"() => S.job.cabinets[S.sel].number"), new["number"])
+    check("  the catalogue file is unchanged by placing", len(json.load(open(cat, encoding="utf-8"))["cupboards"]), 1)
+
+
 def main() -> int:
     top = tempfile.mkdtemp(prefix="ui_check_import_")
     proc = None
@@ -330,6 +415,8 @@ def main() -> int:
                 stage_rename(page, here)
             if args.stage in ("", "shipped"):
                 stage_shipped(page, top)
+            if args.stage in ("", "catalogue"):
+                stage_catalogue(page, here)
             check("no script errors in the page", errors, [])
             browser.close()
     finally:
