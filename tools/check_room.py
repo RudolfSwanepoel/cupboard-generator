@@ -58,6 +58,7 @@ from cabinetgen.room import flip_face as room_flip_face                    # noq
 from cabinetgen.room import renumber_walls, delete_wall, wall_height       # noqa: E402
 from cabinetgen.room import closure                                       # noqa: E402
 from cabinetgen.room import corner_move as room_corner_move, wall_move as room_wall_move, room_snaps  # noqa: E402
+from cabinetgen.room import split_wall as room_split_wall                  # noqa: E402
 from cabinetgen.scene import build as scene_build                         # noqa: E402
 from cabinetgen.render import _plan_room_side                             # noqa: E402
 from cabinetgen.store import job_from_dict, job_to_dict, room_from_dict    # noqa: E402
@@ -331,6 +332,7 @@ def main() -> int:
     corner_move()
     wall_move()
     snaps()
+    split()
 
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0
@@ -1045,6 +1047,43 @@ def snaps():
           (4, ["A", "B", "C", "D"], [2000, 1000], "in line with the last wall"))
     check("  a drawing's own earlier corners line up too",
           any(l["why"] == "in line with drawn corner 1" for l in sn["lines"]), True)
+
+def split():
+    """Ruling 6: a wall split in two; the first keeps its letter, the second
+    takes the next; records follow by x; one spanning the split is reported."""
+    print("\nsplit_wall: letters, records follow by x, a spanning item reported")
+    job = Job(name="split", room=rectangular(4000, 3000),
+              cabinets=[Cabinet(number=n, width=600, height=720, depth=560, kind="base") for n in (1, 2, 3)],
+              placements=[Placement(1, "A", 200), Placement(2, "A", 1200), Placement(3, "A", 2600)],
+              gaps=[GapChoice("A", after=2, before=3, treatment="open")],
+              plinths=[PlinthChoice("A", first=3)])
+    job.room.walls[0].openings.append(Opening("window", 2200, 1200, 900, 2100))
+    job.room.walls[0].obstructions.append(Obstruction("plug", 3500, 300))
+    rep = room_split_wall(job, "A", 1500)
+    check("A keeps its letter to the split; E runs on to A's old end",
+          pts(job.room)[0::4], [("A", 0, 0, 1500, 0), ("E", 1500, 0, 4000, 0)])
+    check("  the loop still closes, walked A, E, B, C, D",
+          (closure(job.room)["text"], walk_order(job.room)), ("closed room", ["A", "E", "B", "C", "D"]))
+    check("  cabinet 1 stays on A, 3 goes to E re-measured, 2 spans the split: stays on A, reported",
+          ([[p.cabinet, p.wall, p.x] for p in job.placements], rep["spanning"]),
+          ([[1, "A", 200], [2, "A", 1200], [3, "E", 1100]], [2]))
+    e = [w for w in job.room.walls if w.id == "E"][0]
+    check("  the window and the plug follow by x", ([(o.kind, o.x) for o in e.openings],
+          [(o.kind, o.x) for o in e.obstructions], job.room.walls[0].openings), ([("window", 700)], [("plug", 2000)], []))
+    check("  the plinth decision follows its cabinet", [c.wall for c in job.plinths], ["E"])
+    t = Job(name="t", room=rectangular(4000, 3000))
+    room_split_wall(t, "A", 1500)
+    new = walls_from_points(t.room, [(1500, 0), (1500, 1200)], False)
+    check("a wall drawn from the split point is a T-wall: free at its far end, the loop intact",
+          ([w.id for w in new], closure(t.room)["text"], crossing_walls(t.room),
+           next_wall(t.room, "A"), prev_wall(t.room, new[0].id)),
+          (["F"], "closed room", [], "E", None))
+    try:
+        room_split_wall(job, "A", 0)
+        check("a split at an end is refused", False, True)
+    except ValueError:
+        check("a split at an end is refused", True, True)
+
 
 
 if __name__ == "__main__":

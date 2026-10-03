@@ -889,6 +889,82 @@ def wall_move(job, wall_id: str, offset: int, std: Standard = STANDARD) -> dict:
     return rep
 
 
+def _part_of(cut: int, x: int, width: int) -> Optional[int]:
+    """Which part of a wall split at `cut` an item from x to x + width lies on:
+    0 the first, 1 the second, None spanning the cut."""
+    if x + width <= cut:
+        return 0
+    if x >= cut:
+        return 1
+    return None
+
+
+def split_wall(job, wall_id: str, at: int, std: Standard = STANDARD) -> dict:
+    """Split a wall in two at `at` mm from its start (ruling 6, 3 October
+    2026): the first part keeps its letter and runs to the split, the second
+    takes the next free letter and runs on to the old end, the same height,
+    thickness and drawn state. Each record goes to the part that holds it by
+    x — placements, openings and obstructions (x re-measured from the second
+    part's start), gap and plinth decisions with the cabinets that bound them;
+    an item spanning the split stays on the first part and is reported. The
+    wall that met the old end now meets the second part. That is how a T-wall
+    is made: a wall drawn from a point on another. Says
+    `{"first", "second", "spanning": [numbers], "openings": [kinds]}`."""
+    rm = job.room
+    w = _wall(rm, wall_id)
+    L = w.length
+    cut = int(round(at))
+    if not 0 < cut < L:
+        raise ValueError(f"a split falls inside wall {wall_id}: between 0 and {L} mm")
+    d = wall_dir(w)
+    sx, sy = int(round(w.x0 + d[0] * cut)), int(round(w.y0 + d[1] * cut))
+    second = Wall(next_wall_id(rm), sx, sy, w.x1, w.y1, height=w.height,
+                  thickness=w.thickness, drawn=w.drawn)
+    w.x1, w.y1 = sx, sy
+    rm.walls.append(second)
+    rep = {"first": w.id, "second": second.id, "spanning": [], "openings": []}
+    by = {c.number: c for c in job.cabinets}
+    moved = set()
+    for p in job.placements:
+        cab = by.get(p.cabinet)
+        if p.wall != wall_id or cab is None or cab.is_attached:
+            continue
+        width = geometry(cab, std, job.materials).width
+        part = _part_of(cut, p.x, width)
+        if part == 1:
+            p.wall, p.x = second.id, p.x - cut
+            moved.add(p.cabinet)
+        elif part is None:
+            rep["spanning"].append(p.cabinet)
+    keep_o, keep_b = [], []
+    for o in w.openings:
+        part = _part_of(cut, o.x, o.width)
+        if part == 1:
+            o.x -= cut
+            second.openings.append(o)
+        else:
+            if part is None:
+                rep["openings"].append(o.kind)
+            keep_o.append(o)
+    for ob in w.obstructions:
+        if ob.x >= cut:
+            ob.x -= cut
+            second.obstructions.append(ob)
+        else:
+            keep_b.append(ob)
+    w.openings, w.obstructions = keep_o, keep_b
+    for g in job.gaps:
+        if g.wall != wall_id:
+            continue
+        lead = g.after if g.after is not None else g.before
+        if (lead is not None and lead in moved) or (lead is None and g.after is None and g.before is None):
+            g.wall = second.id
+    for c in job.plinths:
+        if c.wall == wall_id and c.first in moved:
+            c.wall = second.id
+    return rep
+
+
 def corner_name(rm: Room, point, std: Standard = STANDARD) -> str:
     """How a corner is said: "D→E" where wall D ends and E starts on it,
     else "the end of C" / "the start of C"."""

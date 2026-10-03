@@ -54,6 +54,7 @@ from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, 
                              closure_error, corner_angle, corner_points, crossing_walls,
                              closure as room_closure, room_snaps as room_room_snaps,
                              corner_move as room_corner_move, wall_move as room_wall_move,
+                             split_wall as room_split_wall,
                              free_x, gaps as room_gaps, geometry, walls_from_points,
                              is_closed, next_wall, prev_wall, walk_order, wall_height,
                              corner_before, out_of_square, flip_face, renumber_walls,
@@ -2191,6 +2192,20 @@ def room_draw(payload):
     if len(pts) < (3 if closed else 2):
         return {"ok": False, "error": ("a closed room needs at least three walls" if closed
                                        else "draw at least one wall")}
+    sp = payload.get("split")
+    if sp:
+        # Started on a point ON a wall (ruling 6, 3 October 2026): that wall is
+        # split there first — the first part keeps its letter, the second takes
+        # the next — and every record goes to the part that holds it by x.
+        job = _job(payload)
+        if job.room is None:
+            return {"ok": False, "error": "there is no wall to start on"}
+        try:
+            split = room_split_wall(job, str(sp.get("wall") or ""), int(round(float(sp.get("at")))), job.std)
+        except (TypeError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+        new = walls_from_points(job.room, pts, closed, job.std)
+        return dict(_room_reply(job), ok=True, added=[w.id for w in new], split=split)
     rm = (room_from_dict(payload["room"]) if payload.get("room")
           else Room(name=str(payload.get("name") or "room")))
     new = walls_from_points(rm, pts, closed, STANDARD)
@@ -2372,6 +2387,21 @@ def corner_move(payload):
         rep = room_corner_move(job, _point(payload.get("point"), "the corner"),
                                _point(payload.get("to"), "where it goes"), job.std)
     except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return dict(_room_reply(job), ok=True, report=rep)
+
+
+def wall_split(payload):
+    """Split a wall in two at `x` mm from its start (`room.split_wall`): the
+    records follow the part that holds them; one spanning the split stays on
+    the first part and is reported."""
+    job = _job(payload)
+    wid = str(payload.get("wall") or "")
+    if job.room is None or wid not in {w.id for w in job.room.walls}:
+        return {"ok": False, "error": f"the room has no wall {wid!r}"}
+    try:
+        rep = room_split_wall(job, wid, int(round(float(payload.get("x")))), job.std)
+    except (TypeError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
     return dict(_room_reply(job), ok=True, report=rep)
 
@@ -2689,6 +2719,7 @@ ROUTES = {
     "/api/room-snaps": room_snaps,
     "/api/corner-move": corner_move,
     "/api/wall-move": wall_move,
+    "/api/wall-split": wall_split,
 }
 
 

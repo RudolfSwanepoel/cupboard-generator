@@ -984,10 +984,111 @@ def stage_label(pw):
     browser.close()
 
 
+def stage_typedraw(pw):
+    print("\nTyping a length (and an angle) while drawing")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    adopt(page, empty_job("typedraw"))
+    room_plan(page)
+    page.click("#drawwalls")
+    page.wait_for_selector("#plan svg #drawlayer", timeout=5000)
+    click_mm(page, 1000, 1000)
+    cx, cy = at_mm(page, 2500, 1000)
+    page.mouse.move(cx, cy, steps=4)
+    time.sleep(0.1)
+    page.keyboard.press("4")
+    check("a digit opens a length box at the cursor, the digit in it",
+          page.evaluate("() => [!!$('drawtype'), $('drawlen').value, document.activeElement.id]"), [True, "4", "drawlen"])
+    page.keyboard.type("000")
+    page.keyboard.press("Enter")
+    time.sleep(0.2)
+    p0 = page.evaluate("() => DRAW.pts[0]")
+    check("Enter sets the corner at 4000 along the frozen direction",
+          page.evaluate("() => DRAW.pts"), [p0, [p0[0] + 4000, p0[1]]])
+    cx, cy = at_mm(page, 5300, 2000)            # off to the side the room is on
+    page.mouse.move(cx, cy, steps=4)
+    time.sleep(0.1)
+    page.keyboard.press("3")
+    page.keyboard.type("000")
+    page.keyboard.press("Tab")
+    check("Tab moves to the angle box", page.evaluate("() => document.activeElement.id"), "drawang")
+    page.keyboard.type("90")
+    page.keyboard.press("Enter")
+    time.sleep(0.2)
+    check("3000 at a 90 corner to the last wall, whatever the pointer's angle",
+          page.evaluate("() => DRAW.pts[2]"), [p0[0] + 4000, p0[1] + 3000])
+    page.keyboard.press("7")
+    page.keyboard.press("Backspace")
+    page.keyboard.press("Backspace")
+    time.sleep(0.2)
+    check("Backspace in an empty box takes the last corner off",
+          (page.evaluate("() => DRAW.pts.length"), page.evaluate("() => !!$('drawtype')")), (2, False))
+    cx, cy = at_mm(page, 5000, 3500)
+    page.mouse.move(cx, cy, steps=4)
+    time.sleep(0.1)
+    page.keyboard.press("2")
+    page.keyboard.type("500")
+    page.keyboard.press("Enter")
+    time.sleep(0.2)
+    page.keyboard.press("Enter")                 # no box open: Enter finishes the open run
+    page.wait_for_function("() => !DRAW && S.job.room && S.job.room.walls.length === 2", timeout=10000)
+    computed(page)
+    check("two walls, 4000 and 2500, a 90 corner", [(w[0], w[1], w[2]) for w in walls(page)],
+          [("A", 4000, 90), ("B", 2500, None)])
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+def stage_split(pw):
+    print("\nA T-wall: drawing from a point on a wall splits it")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    job = Job(name="split", room=rectangular(4000, 3000, ceiling=2600),
+              cabinets=[Cabinet(number=n, width=600, height=720, depth=560, kind="base") for n in (1, 2)],
+              placements=[Placement(1, "A", 1200), Placement(2, "A", 2600)])
+    adopt(page, job)
+    room_plan(page)
+    page.click("#drawwalls")
+    page.wait_for_selector("#plan svg #drawlayer", timeout=5000)
+    cx, cy = at_mm(page, 1508, 6)
+    page.mouse.move(cx, cy, steps=4)
+    time.sleep(0.4)
+    why = page.evaluate("() => DRAW.why")
+    check("near wall A the snap names it", why.startswith("on wall A at 15"), True)
+    page.mouse.click(cx, cy)
+    at = page.evaluate("() => DRAW.pts[0]")
+    check("  the first corner lands ON wall A", (at[1], abs(at[0] - 1508) <= 12), (0, True))
+    sx = at[0]
+    cx, cy = at_mm(page, 1508, 1200)
+    page.mouse.move(cx, cy, steps=4)
+    page.mouse.dblclick(cx, cy)
+    page.wait_for_function("() => !DRAW && S.job.room.walls.length === 6", timeout=10000)
+    computed(page)
+    pp = points(page)
+    check("A split there: A to the split, E on to the old end, F the T-wall from the split",
+          [q[:5] for q in pp[:5]] + [pp[5][:3]],
+          [["A", 0, 0, sx, 0], ["E", sx, 0, 4000, 0], ["B", 4000, 0, 4000, 3000],
+           ["C", 4000, 3000, 0, 3000], ["D", 0, 3000, 0, 0], ["F", sx, 0]])
+    check("  the loop intact, F free", [page.evaluate("() => S.res.room.closure.text"),
+                                         page.evaluate("() => S.res.room.walls.find((w) => w.id === 'F').free")],
+          ["closed room", True])
+    check("  cabinet 2 went to E re-measured; 1 spans the split, stays on A",
+          page.evaluate("() => S.job.placements.map((p) => [p.cabinet, p.wall, p.x])"), [[1, "A", 1200], [2, "E", 2600 - sx]])
+    check("  and the spanning one was said", "1 spans the split and stays on A" in page.inner_text("#toast"), True)
+    shot(page, "split_twall", "#plancard")
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 STAGES = {"draw": stage_draw, "one": stage_one, "flip": stage_flip, "renumber": stage_renumber,
           "height": stage_height, "input": stage_input, "drag": stage_drag, "3d": stage_3d,
           "closure": stage_closure, "layout": stage_layout, "cornerdrag": stage_cornerdrag,
-          "walldrag": stage_walldrag, "align": stage_align, "angle": stage_angle, "label": stage_label}
+          "walldrag": stage_walldrag, "align": stage_align, "angle": stage_angle, "label": stage_label,
+          "typedraw": stage_typedraw, "split": stage_split}
 
 
 def main() -> int:

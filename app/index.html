@@ -601,6 +601,9 @@
                        background:transparent;box-shadow:none;border-radius:4px;color:inherit}
   #plan .planlen input:hover{border-color:var(--rule);background:var(--panel)}
   #plan .planlen input:focus{border-color:var(--accent);background:var(--panel);box-shadow:var(--focus);outline:none}
+  #drawtype{position:absolute;z-index:6;background:var(--panel);border:1px solid var(--accent);
+            border-radius:var(--r);padding:5px 8px;display:flex;gap:10px;font-size:11.5px;box-shadow:var(--shadow-2)}
+  #drawtype input{width:62px;padding:2px 4px}
   #plan .cornerhandle:hover,#plan .cornerhandle.dragging{fill-opacity:.25;stroke-opacity:1}
   #plan.drawing .cornerhandle{pointer-events:none}
   #plan.drawing,#plan.drawing svg{cursor:crosshair}
@@ -6322,7 +6325,8 @@ function startDraw() {
     Direction snaps to ${drawStd("draw_angle_step", 15)}° — hold <b>Shift</b> for a free angle; length snaps
     to ${drawStd("draw_length_step", 10)} mm. Click the first corner to close the room;
     double-click or <b>Enter</b> finishes an open run. <b>Backspace</b> takes the last
-    corner off, <b>Esc</b> goes back to Select. The walls are added to the room; drawn lengths are a
+    corner off, <b>Esc</b> goes back to Select. Type a figure for an exact length (<b>Tab</b> for the
+    corner's angle); start on a wall to split it; end on any corner. The walls are added to the room; drawn lengths are a
     sketch — measure each wall after.`;
   window.addEventListener("keydown", drawKey);
   drawSnaps();
@@ -6330,6 +6334,7 @@ function startDraw() {
 }
 
 function endDraw() {
+  drawTypeClose();
   DRAW = null;
   window.removeEventListener("keydown", drawKey);
   toolState();
@@ -6471,11 +6476,14 @@ function drawPointer(e) {
       return [fx, fy];
     }
   }
-  // a point on a wall (the split) is ruling 6's, not this one's
-  const model = DRAW.snaps ? Object.assign({}, DRAW.snaps, {segments: []}) : null;
+  // a point on a wall is offered for the FIRST corner only: starting there
+  // splits that wall (ruling 6) — that is how a T-wall is made
+  const model = DRAW.snaps ? Object.assign({}, DRAW.snaps, pts.length ? {segments: []} : {}) : null;
   const sn = pickSnap(model, p, m, e.shiftKey, pts.length ? pts[pts.length - 1] : null);
   DRAW.why = sn.why;
   DRAW.guides = sn.guides;
+  DRAW.onCorner = !!sn.corner;
+  DRAW.split = !pts.length && sn.split ? sn.split : (pts.length ? DRAW.split : null);
   if (!pts.length) {
     DRAW.joined = !!sn.corner;
     if (!sn.why && !e.shiftKey) return [Math.round(p[0] / step) * step, Math.round(p[1] / step) * step];
@@ -6502,6 +6510,8 @@ $("plan").addEventListener("click", (e) => {
   if (last && m && Math.hypot(q[0] - last[0], q[1] - last[1]) <= 12 * mmPerPx(m)) return;
   DRAW.pts.push(q);
   DRAW.at = q;
+  // a later corner set ON an existing corner ends the drawing there (ruling 6)
+  if (DRAW.pts.length >= 2 && DRAW.onCorner) { finishDraw(false); return; }
   drawSnaps();
   drawPaint();
 });
@@ -6512,9 +6522,89 @@ $("plan").addEventListener("dblclick", (e) => {
   finishDraw(false);
 });
 
+/* Typing a length while drawing (ruling 6): a digit opens a length box at the
+   cursor and FREEZES the direction the rubber band had; Enter sets the corner
+   at that length; Tab moves to an angle box — the corner it makes with the
+   previous wall, read inside (for the first wall, degrees on the plan from +X);
+   Backspace in an empty box takes the last corner off; Esc leaves the drawing.
+   The point is a sketch at a typed length, exactly as the length step is. */
+function drawTypeOpen(digit) {
+  const d = DRAW;
+  if (!d || !d.pts.length || d.typing) return;
+  const last = d.pts[d.pts.length - 1];
+  const at = d.at || last;
+  let dir = [at[0] - last[0], at[1] - last[1]];
+  const n = Math.hypot(dir[0], dir[1]);
+  dir = n > 0 ? [dir[0] / n, dir[1] / n] : [1, 0];
+  d.typing = {dir: dir};
+  const box = document.createElement("div");
+  box.id = "drawtype";
+  const sc = mmToScreen(at[0], at[1]) || [0, 0];
+  const pr = $("plan").getBoundingClientRect();
+  box.style.left = (sc[0] - pr.left + $("plan").scrollLeft + 14) + "px";
+  box.style.top = (sc[1] - pr.top + $("plan").scrollTop + 14) + "px";
+  box.innerHTML = `<label>Length <input id="drawlen" inputmode="numeric" value="${digit}"> mm</label>
+    <label>Corner <input id="drawang" inputmode="decimal" placeholder="${d.pts.length >= 2 ? "°" : "° on plan"}"> °</label>`;
+  $("plan").appendChild(box);
+  const inp = $("drawlen");
+  inp.focus();
+  inp.setSelectionRange(inp.value.length, inp.value.length);
+  box.addEventListener("keydown", drawTypeKey);
+}
+
+function drawTypeClose() {
+  const box = $("drawtype");
+  if (box) box.remove();
+  if (DRAW) DRAW.typing = null;
+}
+
+function drawTypeKey(e) {
+  const d = DRAW;
+  if (!d || !d.typing) return;
+  e.stopPropagation();
+  const len = $("drawlen"), ang = $("drawang");
+  if (e.key === "Escape") { e.preventDefault(); drawTypeClose(); endDraw(); return; }
+  if (e.key === "Tab") { e.preventDefault(); (e.target === len ? ang : len).focus(); return; }
+  if (e.key === "Backspace" && e.target.value === "") {
+    e.preventDefault();
+    drawTypeClose();
+    d.pts.pop();
+    drawSnaps();
+    drawPaint();
+    return;
+  }
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const L = parseFloat(len.value);
+  if (!(L > 0)) { drawTypeClose(); return; }
+  let dir = d.typing.dir;
+  const a = parseFloat(ang.value);
+  const last = d.pts[d.pts.length - 1];
+  if (!isNaN(a)) {
+    if (d.pts.length >= 2) {
+      const prev = d.pts[d.pts.length - 2];
+      const pn = Math.hypot(last[0] - prev[0], last[1] - prev[1]) || 1;
+      const pd = [(last[0] - prev[0]) / pn, (last[1] - prev[1]) / pn];
+      // turned towards the side the rubber band was on
+      const side = pd[0] * dir[1] - pd[1] * dir[0] < 0 ? -1 : 1;
+      const t = side * (180 - a) * Math.PI / 180;
+      dir = [pd[0] * Math.cos(t) - pd[1] * Math.sin(t), pd[0] * Math.sin(t) + pd[1] * Math.cos(t)];
+    } else {
+      dir = [Math.cos(a * Math.PI / 180), Math.sin(a * Math.PI / 180)];
+    }
+  }
+  const q = [Math.round(last[0] + L * dir[0]), Math.round(last[1] + L * dir[1])];
+  drawTypeClose();
+  d.pts.push(q);
+  d.at = q;
+  drawSnaps();
+  drawPaint();
+}
+
 function drawKey(e) {
   if (!DRAW || S.tab !== "room" || S.roomSub !== "plan") return;
   if (e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+  if (/^[0-9]$/.test(e.key) && DRAW.pts.length && !DRAW.typing) { e.preventDefault(); drawTypeOpen(e.key); return; }
   if (e.key === "Escape") { e.preventDefault(); endDraw(); }
   else if (e.key === "Enter") { e.preventDefault(); finishDraw(false); }
   else if (e.key === "Backspace") {
@@ -6533,20 +6623,24 @@ async function finishDraw(closed) {
     return;
   }
   d.busy = true;
-  const r = await post("/api/room-draw", {room: S.job.room, points: d.pts, closed: closed,
-                                          name: S.job.name});
+  const r = await post("/api/room-draw", {room: S.job.room, job: S.job, points: d.pts, closed: closed,
+                                          name: S.job.name, split: d.split || null});
   d.busy = false;
   if (!r.ok) { toast(r.error, true); return; }
   if (DRAW !== d) return;
-  S.job.room = r.room;
+  if (r.split) takeRoomReply(r); else S.job.room = r.room;
   places();
   endDraw();
   S.selWall = null;
   renderRoomDock();
   schedule();
   const added = r.added || [];
+  const sp = r.split;
   toast(`Wall${added.length === 1 ? "" : "s"} ${added.join(", ")} drawn and added — ` +
-        `measure each one and type its length.`);
+        `measure each one and type its length.` +
+        (sp ? `\nWall ${sp.first} split at the start: ${sp.second} is its other part.` +
+              (sp.spanning.length ? ` ${sp.spanning.join(", ")} spans the split and stays on ${sp.first}.` : "")
+            : ""), !!(sp && sp.spanning.length));
 }
 
 /* ---------- dragging corners and walls (room redo Phase 2, rulings 3-4) -------
