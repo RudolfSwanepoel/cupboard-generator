@@ -770,8 +770,63 @@ def stage_drawing(pw):
     browser.close()
 
 
+def stage_places_elev(pw):
+    """Ruling 8 of the cabinet round (3 October 2026): the Placements strip
+    shows on Room -> Elevation as well as Plan — the same element, the same
+    collapsed state, the same Z column — and a Z typed there moves the
+    cupboard's underside in the elevation at once. Plan is unchanged."""
+    print("\nplaces_elev — Placements on Room -> Elevation, the Z column live")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    load_job(page, "Test")
+    tab(page, "room")
+    room_sub(page, "plan")
+    check("Plan: the strip is there, collapsed by default", page.evaluate(
+        "() => [!document.getElementById('placescard').hidden, document.getElementById('placescard').classList.contains('closed')]"), [True, True])
+    page.click("#placesopen")
+    page.wait_for_function("() => !document.getElementById('placescard').classList.contains('closed')", timeout=5000)
+    room_sub(page, "elev")
+    page.wait_for_selector("#elevation svg .etrack", state="attached", timeout=15000)   # a zero-size rect: attached, not "visible"
+    check("Elevation: the same strip, still open, the plan's card hidden", page.evaluate(
+        "() => [!document.getElementById('placescard').hidden, getComputedStyle(document.getElementById('placescard')).display !== 'none',"
+        " !document.getElementById('placescard').classList.contains('closed'), document.getElementById('plancard').hidden]"),
+        [True, True, True, True])
+    wall = page.evaluate("() => elevTrack().wall")
+    num = page.evaluate("(w) => (S.job.placements.find((p) => p.wall === w && S.job.cabinets.some((c) => c.number === p.cabinet && c.kind !== 'panel')) || {}).cabinet", wall)
+    check_true(f"a cupboard is placed on the elevation's wall {wall}", num, f"{num}")
+    page.wait_for_selector(f'#places input[data-p="{num}"][data-pk="z"]', timeout=5000)
+    z_before = page.evaluate(f"() => S.job.placements.find((p) => p.cabinet === {num}).z")
+    want = 1500 if z_before != 1500 else 1200
+    page.fill(f'#places input[data-p="{num}"][data-pk="z"]', str(want))
+    page.dispatch_event(f'#places input[data-p="{num}"][data-pk="z"]', "input")
+    computed(page)
+    page.wait_for_function(f"() => S.res && S.res.room && S.res.room.placements['{num}'] && S.res.room.placements['{num}'].z === {want}", timeout=15000)
+    time.sleep(0.3)
+    # the cupboard's underside in the drawing: its rect's bottom edge, read back
+    # through the track the drag reads (z = (y0 - bottom) / scale)
+    z_drawn = page.evaluate(f"""() => {{
+      const t = elevTrack();
+      const r = document.querySelector('#elevation svg .ecab[data-cab="{num}"]');
+      if (!t || !r) return null;
+      const bottom = +r.getAttribute('y') + +r.getAttribute('height');
+      return Math.round((t.y0 - bottom) / t.scale);
+    }}""")
+    check(f"typed Z {want} in the strip: the cupboard's underside in the elevation reads it", z_drawn, want)
+    shot(page, "places_elevation")
+    page.click("#placesclose")
+    room_sub(page, "plan")
+    check("Plan unchanged: the strip, collapsed as left, the plan's card showing", page.evaluate(
+        "() => [!document.getElementById('placescard').hidden, document.getElementById('placescard').classList.contains('closed'), !document.getElementById('plancard').hidden]"),
+        [True, True, True])
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 STAGES = {"tabs": stage_tabs, "plan": stage_plan, "elev": stage_elev, "cab3d": stage_cab3d,
-          "attach": stage_attach, "place": stage_place, "export": stage_export, "drawing": stage_drawing}
+          "attach": stage_attach, "place": stage_place, "export": stage_export, "drawing": stage_drawing,
+          "places_elev": stage_places_elev}
 
 with sync_playwright() as pw:
     for key, fn in STAGES.items():

@@ -1636,7 +1636,11 @@ function showRoomSub() {
     x.classList.toggle("on", x.dataset.roomsub === S.roomSub));
   $("plancard").hidden = !plan;
   $("roomplanonly").hidden = !plan;
-  $("placescard").hidden = !plan;
+  // Placements shows on Elevation as well as Plan (ruling 8 of the cabinet
+  // round, 3 October 2026): the same element, so the same collapsed state and
+  // the same Z column — a height typed there moves the cupboard in the
+  // elevation at once
+  $("placescard").hidden = false;
   $("roomtools").hidden = !plan;
   $("elevcard").hidden = plan;
   if (DRAW && !plan) endDraw();
@@ -6523,8 +6527,10 @@ function placesShow(open) {
 // beside it (Placements filled in, the dock closed) draws it again.
 let planBoxW = 0;
 function fitPlaces() {
-  const h = $("plancard").hidden ? 0
-    : $("plancard").getBoundingClientRect().bottom - $("roommain").getBoundingClientRect().top;
+  // the plan's card on Plan, the elevation's on Elevation (ruling 8)
+  const card = $("plancard").hidden ? $("elevcard") : $("plancard");
+  const h = card.hidden ? 0
+    : card.getBoundingClientRect().bottom - $("roommain").getBoundingClientRect().top;
   $("placescard").style.height = h > 0 ? h + "px" : "";
   const w = $("plan").clientWidth;
   if (w && planBoxW && Math.abs(w - planBoxW) > 2) {
@@ -6540,6 +6546,7 @@ if (window.ResizeObserver) {
   const ro = new ResizeObserver(fitPlaces);
   ro.observe($("roommain"));
   ro.observe($("plancard"));
+  ro.observe($("elevcard"));
 }
 
 // Ctrl+wheel zooms; a plain wheel is left alone and scrolls the page. A plain
@@ -8978,7 +8985,11 @@ function renderTab() {
   else if (S.tab === "cabinets") renderCab3D();
   else if (S.tab === "room") {
     renderUnplaced();
-    if (S.roomSub === "elev") { guarded("elevation", renderElevation, () => {}); return; }
+    if (S.roomSub === "elev") {
+      guarded("elevation", renderElevation, () => {});
+      guarded("places", renderPlaces, () => { placesSig = null; });
+      return;
+    }
     guarded("room", renderRoom, () => { roomSig = null; });
     guarded("places", renderPlaces, () => { placesSig = null; });
     guarded("gaps", renderGaps, () => { gapsSig = null; });
