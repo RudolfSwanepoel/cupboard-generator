@@ -594,6 +594,13 @@
   /* a corner's handle (ruling 3): shown on hover, dragged to move the corner */
   #plan .cornerhandle{fill:var(--accent);fill-opacity:0;stroke:var(--accent);stroke-opacity:0;
                       stroke-width:1.5;cursor:move;pointer-events:all}
+  /* a wall's length on the plan, a text box styled as the label (ruling 5) */
+  #plan .planlen{display:flex;align-items:center;justify-content:center;gap:3px;height:20px;
+                 font:10.5px system-ui,sans-serif;color:var(--ink);white-space:nowrap}
+  #plan .planlen input{width:5.2ch;padding:0 2px;height:17px;font:inherit;text-align:center;border:1px solid transparent;
+                       background:transparent;box-shadow:none;border-radius:4px;color:inherit}
+  #plan .planlen input:hover{border-color:var(--rule);background:var(--panel)}
+  #plan .planlen input:focus{border-color:var(--accent);background:var(--panel);box-shadow:var(--focus);outline:none}
   #plan .cornerhandle:hover,#plan .cornerhandle.dragging{fill-opacity:.25;stroke-opacity:1}
   #plan.drawing .cornerhandle{pointer-events:none}
   #plan.drawing,#plan.drawing svg{cursor:crosshair}
@@ -6149,6 +6156,12 @@ async function renderPlan() {
   // the pill catches up rather than naming a cabinet that has been deleted.
   if (!DRAW && r.isolate !== S.isolate) { S.isolate = r.isolate; renderLayers(); }
   const un = (S.res && S.res.room && S.res.room.unplaced) || [];
+  // a length being typed on the plan survives the redraw (ruling 5)
+  const ae = document.activeElement;
+  if (ae && ae.dataset && ae.dataset.planlen && box.contains(ae) && !S.planLenFocus) {
+    S.planLenFocus = ae.dataset.planlen;
+    S.planLenKeep = {value: ae.value, a: ae.selectionStart, b: ae.selectionEnd};
+  }
   box.innerHTML = r.svg + `<div id="dragreadout"></div>`;
   $("plannote").innerHTML = un.length ? `<div class="note" style="padding:4px 14px 8px">
         Not placed, so not drawn: ${un.join(", ")}</div>` : "";
@@ -6156,7 +6169,78 @@ async function renderPlan() {
   applyZoom("plan");
   markSelected();
   if (DRAW) drawPaint();
+  else planLengths();
 }
+
+/* ---------- lengths typed on the plan (room redo Phase 2, ruling 5) ----------
+   Each wall's length label on the plan is a text box, styled as the label
+   until hovered: click, type, Enter -> /api/wall-set exactly as the Wall card
+   does (`wallEdit`); Esc puts the figure back; Tab moves to the next wall in
+   walk order. The Wall card, the Room card's table and this are the same
+   field. The box sits in the drawing itself (a foreignObject over the label),
+   so it zooms and scrolls with it. The figure is the engine's.               */
+
+S.planLenFocus = null;
+
+function planLengths() {
+  const m = planMap();
+  const info = roomInfo();
+  if (!m || !info) return;
+  const NS = "http://www.w3.org/2000/svg";
+  m.svg.querySelectorAll("text.walllen").forEach((t) => {
+    const wid = t.dataset.wall;
+    const w = info.walls.find((x) => x.id === wid);
+    if (!w) return;
+    const x = +t.getAttribute("x"), y = +t.getAttribute("y");
+    const fo = document.createElementNS(NS, "foreignObject");
+    fo.setAttribute("x", (x - 62).toFixed(1));
+    fo.setAttribute("y", (y - 14).toFixed(1));
+    fo.setAttribute("width", "124");
+    fo.setAttribute("height", "20");
+    fo.setAttribute("class", "planlenfo");
+    fo.innerHTML = `<div xmlns="http://www.w3.org/1999/xhtml" class="planlen"><span>${esc(wid)} ·</span><input
+      type="text" inputmode="numeric" data-planlen="${esc(wid)}" value="${w.length}"
+      title="wall ${esc(wid)}'s length — type the measured figure, Enter"><span>mm</span></div>`;
+    t.replaceWith(fo);
+  });
+  const f = S.planLenFocus;
+  S.planLenFocus = null;
+  const keep = S.planLenKeep;
+  S.planLenKeep = null;
+  const inp = f && m.svg.querySelector(`input[data-planlen="${CSS.escape(f)}"]`);
+  if (inp) {
+    inp.focus();
+    if (keep) { inp.value = keep.value; inp.setSelectionRange(keep.a, keep.b); } else inp.select();
+  }
+}
+
+function planLenNext(wid) {
+  const order = ((roomInfo() || {}).walk) || [];
+  const k = order.indexOf(wid);
+  return order.length ? order[(k + 1) % order.length] : null;
+}
+
+$("plan").addEventListener("keydown", (e) => {
+  const inp = e.target.closest && e.target.closest("input[data-planlen]");
+  if (!inp) return;
+  const wid = inp.dataset.planlen;
+  const w = ((roomInfo() || {}).walls || []).find((x) => x.id === wid);
+  const was = w ? String(w.length) : inp.defaultValue;
+  if (e.key === "Escape") { e.preventDefault(); inp.value = was; inp.blur(); return; }
+  if (e.key === "Enter" || e.key === "Tab") {
+    e.preventDefault();
+    const next = e.key === "Tab" ? planLenNext(wid) : null;
+    const changed = inp.value.trim() !== was;
+    if (next) {
+      S.planLenFocus = next;
+      const n = $("plan").querySelector(`input[data-planlen="${CSS.escape(next)}"]`);
+      if (!changed && n) { S.planLenFocus = null; n.focus(); n.select(); }
+    }
+    if (changed) wallEdit(wid, "length", inp.value);
+    if (!next) inp.blur();
+  }
+});
+
 
 // The plan's own mapping between world millimetres and its SVG units, written
 // on the drawing by the engine (`data-mmx` …). The page converts a pointer with
@@ -6803,6 +6887,7 @@ function svgPoint(evt) {
 $("plan").addEventListener("pointerdown", async (e) => {
   if (DRAW) return;                        // the drawing mode takes its own clicks
   if (e.button !== 0) return;
+  if (e.target.closest(".planlen")) return;       // a length being typed on the plan
   const handle = e.target.closest(".cornerhandle");
   if (handle) { startWallEdit(e, {kind: "corner", from: [+handle.dataset.cx, +handle.dataset.cy], el: handle}); return; }
   const poly = e.target.closest(".cab");

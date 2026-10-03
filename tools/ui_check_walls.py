@@ -933,10 +933,61 @@ def stage_angle(pw):
     browser.close()
 
 
+def stage_label(pw):
+    print("\nLengths typed on the plan: the label is the field")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    adopt(page, box_job("label"))
+    room_plan(page)
+    check("every wall's length on the plan is a text box, in mm",
+          page.evaluate("() => [...document.querySelectorAll('#plan input[data-planlen]')].map((i) => "
+                        "[i.dataset.planlen, i.value, i.parentElement.textContent.trim()])"),
+          [["A", "4000", "A ·mm"], ["B", "3000", "B ·mm"], ["C", "4000", "C ·mm"], ["D", "3000", "D ·mm"]])
+    check("  styled as the label until hovered: no border",
+          page.evaluate("() => getComputedStyle(document.querySelector('#plan input[data-planlen=\"B\"]')).borderTopColor"),
+          "rgba(0, 0, 0, 0)")
+    page.click('#plan input[data-planlen="B"]')
+    page.keyboard.press("Control+A")
+    page.keyboard.type("2800")
+    page.keyboard.press("Escape")
+    time.sleep(0.2)
+    check("Esc puts the figure back", page.evaluate("() => document.querySelector('#plan input[data-planlen=\"B\"]').value"), "3000")
+    page.click('#plan input[data-planlen="B"]')
+    page.keyboard.press("Control+A")
+    page.keyboard.type("2800")
+    page.keyboard.press("Enter")
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'B').y1 === 2800", timeout=10000)
+    settle(page)
+    check("Enter: wall B is 2800, through /api/wall-set as the Wall card does", walls(page)[1][1], 2800)
+    check("  the plan's box and the Room card's table say it",
+          [page.evaluate("() => document.querySelector('#plan input[data-planlen=\"B\"]').value"),
+           page.input_value('#room input[data-wall="B"][data-wk="length"]')], ["2800", "2800"])
+    page.click('#room tr[data-wallrow="B"] td:first-child')
+    page.wait_for_function("() => S.selWall === 'B'", timeout=5000)
+    check("  and the Wall card", page.input_value('#wallcard input[data-wk="length"]'), "2800")
+    check("  the loop opened by the 200, said once", page.evaluate("() => S.res.room.closure.text"),
+          "Loop opens by 200 mm at D→A — type the other walls or drag a corner")
+    page.click('#plan input[data-planlen="D"]')
+    page.keyboard.press("Control+A")
+    page.keyboard.type("2800")
+    page.keyboard.press("Tab")
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'D').y0 === 2800", timeout=10000)
+    settle(page)
+    time.sleep(0.4)
+    check("Tab commits and moves to the next wall in walk order (D → A)",
+          page.evaluate("() => document.activeElement && document.activeElement.dataset.planlen"), "A")
+    check("  D at 2800 closes the loop again", page.evaluate("() => S.res.room.closure.text"), "closed room")
+    shot(page, "label", "#plancard")
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 STAGES = {"draw": stage_draw, "one": stage_one, "flip": stage_flip, "renumber": stage_renumber,
           "height": stage_height, "input": stage_input, "drag": stage_drag, "3d": stage_3d,
           "closure": stage_closure, "layout": stage_layout, "cornerdrag": stage_cornerdrag,
-          "walldrag": stage_walldrag, "align": stage_align, "angle": stage_angle}
+          "walldrag": stage_walldrag, "align": stage_align, "angle": stage_angle, "label": stage_label}
 
 
 def main() -> int:

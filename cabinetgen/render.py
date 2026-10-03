@@ -1367,7 +1367,8 @@ def _plan_walls(rm, corners, T, scale, std: Standard = STANDARD):
         # of the thickness band
         off = max(22, t * scale + 12)
         mx, my = (ax + bx) / 2, (ay + by) / 2
-        out.append(f'<text x="{mx - nx * off:.1f}" y="{my - ny * off + 4:.1f}" font-size="10.5" '
+        out.append(f'<text class="walllen" data-wall="{escape(w.id)}" x="{mx - nx * off:.1f}" '
+                   f'y="{my - ny * off + 4:.1f}" font-size="10.5" '
                    f'text-anchor="middle" fill="{INK}">{escape(w.id)} · {w.length}</text>')
     return out
 
