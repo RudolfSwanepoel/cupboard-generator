@@ -269,6 +269,7 @@ class Usage:
 # holds the two together: a board field added to the dataclass and not here
 # would let a board be deleted from the library out from under a saved job.
 CABINET_BOARD_FIELDS = ("carcass_board", "exterior_board", "back_board",
+                        "solid_back_board", "solid_back_edge_board",
                         "drawer_carcass_board", "drawer_face_board",
                         "drawer_box_edge_board", "door_edge_board", "drawer_edge_board", "blind_board",
                         "decor")          # the pre-library name for the exterior

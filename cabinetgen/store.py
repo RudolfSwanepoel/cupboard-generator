@@ -33,6 +33,9 @@ LATE_CABINET_FIELDS = (
     "arm_shelves", "arm_shelf_arm", "arm_shelf_depth", "mitred_shelves",
     "corner_door_width", "runner",
     "drawer_box_edge_board", "drawer_box_edge_kind", "drawer_base",
+    # the solid back (3 October 2026)
+    "solid_back_board", "solid_back_edge_kind", "solid_back_edge_board",
+    "solid_back_long", "solid_back_short",
 )
 
 

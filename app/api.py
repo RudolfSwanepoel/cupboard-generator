@@ -221,7 +221,7 @@ def defaults(payload):
         # the bottom always flush at the back. It is not offered for a new
         # cabinet; a job that carries it still reads and cuts exactly as it did,
         # and the editor shows the stored value beside the two that are offered.
-        "backs": ["four", "none"],
+        "backs": ["four", "none", "solid"],
         "backs_legacy": ["three"],
         "support_types": list(SUPPORT_TYPES),
         "support_type_label": dict(SUPPORT_TYPE_LABEL),
@@ -349,6 +349,15 @@ def _geometry_info(job, cab, std):
             # whether anything is cut from the back board: a back, or a drawer
             # whose bottom (its own, else the section's) is the grooved sheet
             "needs_back_board": cab.needs_back_board,
+            # the solid back as the engine reads it (3 October 2026): the
+            # board it is cut from, its edging kind and colour board, and the
+            # tape it orders ('' while unedged) — shown, never worked out, in
+            # the editor
+            "solid_back": {"on": cab.solid_back,
+                           "cut_board": cab.solid_back_cut_board,
+                           "kind": cab.solid_back_kind(job.materials),
+                           "edge_board": cab.solid_back_edge_colour_board,
+                           "tape": cab.solid_back_tape(job.materials)},
             # The runner the drawers hang on, as the engine reads it: the
             # length it picks, what is left behind, how far it pulls out. The
             # editor shows these and works out none of them.

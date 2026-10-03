@@ -2482,6 +2482,20 @@ def back_part(cab, std: Standard = STANDARD, materials: dict = None) -> Optional
     g = geometry(cab, std, mats)
     xs = [x for x, _ in g.footprint]
     W, H, t = max(xs) - min(xs), g.height, std.board_t
+    if cab.solid_back:
+        # A SOLID back (3 October 2026): role 'solid_back', between the sides
+        # (x t..W-t), its rear face flush with their back edges (y 0..t off the
+        # wall), standing on the bottom panel up to the underside of the top
+        # (z t..H-t) or to the top of the sides on a base unit (z t..H) —
+        # exactly `Standard.solid_back_size`, which is what the engine cuts.
+        # Grain up the board where its board is grained (its Length is its
+        # height); the longer way otherwise.
+        has_top = any(q.role == "top" for q in parts)
+        bw, bh = std.solid_back_size(W, H, has_top)
+        from .engine import grain_of                  # engine imports this module
+        grained = bool(grain_of(mats, resolve_board(mats, cab.solid_back_cut_board)))
+        return _box("solid_back", cab.solid_back_cut_board, t, t + bw, 0, t, t, t + bh,
+                    "z" if grained or bh >= bw else "x")
     bw, bh = std.back_size(W, H, cab.back)
     inset = t - std.groove_engage
     y0 = std.back_cavity
@@ -2830,7 +2844,7 @@ def shelf_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List[
         fixed = k < n_fixed
         z0 = t + gap * (k + 1) + t * k
         out.append(dict(fixed=fixed, z0=round(z0, 1), z1=round(z0 + t, 1),
-                        depth=std.shelf_depth(D, fixed=fixed),
+                        depth=std.shelf_depth(D, fixed=fixed, back=cab.back),
                         width=cab.shelf_width or std.internal_width(W)))
     return out
 

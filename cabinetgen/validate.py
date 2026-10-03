@@ -310,7 +310,9 @@ def _shelf_clears_back(cabinets, panels, std):
         sides = [p.width for p in mine[c.number] if p.role == "Side"]
         if not sides:
             continue
-        limit = std.back_face_from_front(max(sides))
+        # the back actually chosen: a backing in its slot, or a solid back
+        # flush with the sides' back edges (3 October 2026)
+        limit = std.back_face_from_front(max(sides), c.back)
         for p in mine[c.number]:
             if p.role == "Shelve" and p.width > limit:
                 out.append(Issue(CRITICAL, p.label,
@@ -715,6 +717,10 @@ def _boards_and_tapes(job: Job):
                   (c.exterior_board, "exterior board")]
         if c.needs_back_board:
             chosen.append((c.back_board, "back board"))
+        if c.solid_back:
+            chosen.append((c.solid_back_cut_board, "solid back board"))
+            if c.solid_back_edge_board:
+                chosen.append((c.solid_back_edge_board, "solid back edging board"))
         # The drawer box and face, and any leaf cut from a board of its own, are
         # selections in their own right now, so they are checked like the rest.
         if c.drawer_list:
@@ -777,6 +783,12 @@ def _boards_and_tapes(job: Job):
                           c.door_edge_board or c.exterior_board,
                           c.door_edge_kind or c.exterior_tape,
                           "its doors and exposed panels"))
+        # A solid back with an edge counted asks the same question of its
+        # edging board and kind (3 October 2026); with none counted it is
+        # unedged and asks nothing.
+        if c.solid_back and (c.solid_back_long or c.solid_back_short) and c.solid_back_kind(mats):
+            wants.append(("solid_back_edge", c.solid_back_edge_colour_board,
+                          c.solid_back_kind(mats), "its solid back"))
         if c.drawer_list:
             wants.append(("drawer_face_edge",
                           c.drawer_edge_board or c.door_edge_board or c.exterior_board,
@@ -865,6 +877,16 @@ def _thin_boards(job: Job):
                              f"is {material_thickness(job.materials, c.back_board)} mm — "
                              f"the back is grooved for a 3 mm sheet. Choose the backing "
                              f"board, or change the back fixing"))
+        # The other way round for a SOLID back (3 October 2026): it is cut from
+        # any board the project carries EXCEPT a thin one. The editor offers no
+        # thin board for it; this is the backstop for a job file that names one.
+        if (c.solid_back and c.solid_back_cut_board in (job.materials or {})
+                and is_thin(job.materials, c.solid_back_cut_board)):
+            out.append(Issue(WARNING, str(c.number),
+                             f"solid back board {material_board(job.materials, c.solid_back_cut_board)!r} "
+                             f"is {material_thickness(job.materials, c.solid_back_cut_board)} mm — "
+                             f"a solid back is a full board, not a backing sheet. Choose a "
+                             f"board of full thickness for it"))
     return out
 
 
@@ -961,6 +983,10 @@ def _support_layout(job: Job):
             continue
         offered = c.support_types_offered
         for row in c.support_rows:
+            # Under a solid back the Top Rear and Back rows are replaced, not
+            # wrong: the Supports section says so on the row (3 October 2026).
+            if c.solid_back and row.type in ("top_rear", "back"):
+                continue
             if row.qty > 0 and row.type not in offered:
                 out.append(Issue(WARNING, str(c.number),
                                  f"a {SUPPORT_TYPE_LABEL.get(row.type, row.type)} support "
@@ -991,7 +1017,8 @@ def _support_layout(job: Job):
             rear = [u for u in flats if u["type"] == "top_rear"]
             if front and rear and front[0]["y1"] > rear[0]["y0"]:
                 need = front[0]["y1"] + (rear[0]["y1"] - rear[0]["y0"]) + (
-                    std.back_cavity + std.back_t if c.back != "none" else 0)
+                    0 if c.back == "none" else
+                    std.board_t if c.solid_back else std.back_cavity + std.back_t)
                 out.append(Issue(CRITICAL, str(c.number),
                                  f"the Top Front and Top Rear supports overlap in depth — "
                                  f"the Top Rear starts {rear[0]['y0']} from the front and "

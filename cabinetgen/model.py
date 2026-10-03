@@ -1,6 +1,6 @@
 """Data model: panels, drawers, cabinets, jobs."""
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional, List
 
 from .standard import Standard, STANDARD
@@ -487,16 +487,24 @@ def default_support_kind(materials: dict, board: str) -> str:
     return offered[0] if offered else ""
 
 
-def support_types_for(kind: str, corner_kind: str = "") -> List[str]:
+def support_types_for(kind: str, corner_kind: str = "", solid_back: bool = False) -> List[str]:
     """Which support types a carcass of this kind may carry, in cut-list order.
 
     A base unit (no top panel): Front, Top Rear and Back. Anything with a top —
     tall, upper, and whatever else the engine gives a top — Back only. A blind
     corner is a straight carcass and goes by its kind; a mitre or an ell takes
-    none.
+    none. A SOLID back (3 October 2026) replaces the Top Rear and the Backs: a
+    base unit keeps only its Top Front, anything with a top takes none.
+
+    >>> support_types_for("base", solid_back=True)
+    ['front']
+    >>> support_types_for("tall", solid_back=True)
+    []
     """
     if corner_kind in ("mitre", "ell"):
         return []
+    if solid_back:
+        return ["front"] if kind == "base" else []
     if kind == "base":
         return list(SUPPORT_TYPES)
     return ["back"]
@@ -619,7 +627,7 @@ class Cabinet:
     # 'tall' | 'upper' | 'base' ('base' has no top panel) | 'panel' (not a
     # cupboard at all: an independent panel, see `is_panel` and PanelSpec)
     kind: str = "tall"
-    back: str = "four"           # 'four' | 'three' | 'none'
+    back: str = "four"           # 'four' | 'three' | 'none' | 'solid'
     # 'standard' | 'none' (bespoke only — generate nothing)
     # A panel is NOT a template: see `is_panel`, which reads `kind`. This field
     # is never rewritten when an item's kind changes, so switching to Panel and
@@ -701,6 +709,19 @@ class Cabinet:
     # board the engine always reached for, so every job written before this
     # names the board it was already using.
     back_board: str = "BACK"
+
+    # A SOLID back (ruled 3 October 2026): `back == "solid"`, cut from any
+    # full-thickness board the project carries — blank means the carcass board —
+    # sitting inside the carcass flush with the sides' back edges. Unedged by
+    # default; `solid_back_long` / `solid_back_short` count its banded edges
+    # like Panel design, in `solid_back_edge_kind` (None: the board's own first
+    # kind) and the colour of `solid_back_edge_board` (None: the board it is
+    # cut from). All five are written only when set (store.LATE_CABINET_FIELDS).
+    solid_back_board: str = ""
+    solid_back_edge_kind: Optional[str] = None
+    solid_back_edge_board: Optional[str] = None
+    solid_back_long: int = 0
+    solid_back_short: int = 0
 
     # Which exterior tape this cabinet takes, 1 mm or 2 mm. It changes the tape
     # ordered and what it costs, and nothing else: we supply finished sizes and
@@ -966,6 +987,8 @@ class Cabinet:
         simple("carcass_board", "carcass board")
         simple("exterior_board", "exterior board")
         simple("back_board", "backing board")
+        simple("solid_back_board", "solid back board")
+        simple("solid_back_edge_board", "solid back edging board")
         simple("blind_board", "blind panel board")
         simple("drawer_carcass_board", "drawer carcass board")
         simple("drawer_face_board", "drawer face board")
@@ -1180,15 +1203,35 @@ class Cabinet:
         if self.support_rows:
             offered = self.support_types_offered
             # A typed row of a type this carcass does not take — a Front left on
-            # a cabinet since made tall — stays in the file and cuts nothing,
-            # the tickbox bargain; the editor shows it greyed and the validator
-            # names it. A legacy row (no type) is cut wherever it is.
-            return [r for r in self.support_rows
+            # a cabinet since made tall, a Back or Top Rear under a solid back —
+            # stays in the file and cuts nothing, the tickbox bargain; the editor
+            # shows it greyed and the validator names it. A legacy row (no type)
+            # is cut wherever it is — except under a solid back, below.
+            rows = [r for r in self.support_rows
                     if r.qty > 0 and (not r.type or r.type in offered)]
+            return self._solid_back_legacy(rows) if self.solid_back else rows
         plain = self.supports - self.edged_supports - self.white_supports
         rows = [Support("none", plain), Support("front", self.edged_supports),
                 Support("white", self.white_supports)]
-        return [r for r in rows if r.qty > 0]
+        rows = [r for r in rows if r.qty > 0]
+        return self._solid_back_legacy(rows) if self.solid_back else rows
+
+    def _solid_back_legacy(self, rows: List[Support]) -> List[Support]:
+        """What a LEGACY (untyped) support row cuts under a solid back: placed by
+        the rule `room.support_layout` already draws them by — on a base unit
+        the first front-edged rail is the Top Front and is cut, the rest are
+        Backs and are replaced by the solid back; on a carcass with a top all
+        are Backs and none is cut. A typed row is not touched here (it was
+        filtered by type already). Nothing is converted or renamed."""
+        out = []
+        front_done = self.kind != "base"
+        for r in rows:
+            if r.type:
+                out.append(r)
+            elif not front_done and r.edge == "front":
+                out.append(replace(r, qty=1) if r.qty != 1 else r)
+                front_done = True
+        return out
 
     @property
     def support_total(self) -> int:
@@ -1197,8 +1240,42 @@ class Cabinet:
 
     @property
     def support_types_offered(self) -> List[str]:
-        """Which support types this cabinet may carry (`support_types_for`)."""
-        return support_types_for(self.kind, self.corner_kind)
+        """Which support types this cabinet may carry (`support_types_for`); a
+        solid back takes the place of the Top Rear and the Backs."""
+        return support_types_for(self.kind, self.corner_kind, self.solid_back)
+
+    # ---- the solid back (ruled 3 October 2026) ------------------------------
+
+    @property
+    def solid_back(self) -> bool:
+        """Whether the back is one full-thickness board inside the carcass."""
+        return self.back == "solid"
+
+    @property
+    def solid_back_cut_board(self) -> str:
+        """The board a solid back is cut from: its own, else the carcass board."""
+        return self.solid_back_board or self.carcass_board
+
+    @property
+    def solid_back_edge_colour_board(self) -> str:
+        """The board whose colour its edging is: its own, else the one it is cut from."""
+        return self.solid_back_edge_board or self.solid_back_cut_board
+
+    def solid_back_kind(self, materials: dict) -> str:
+        """Its edging kind: the one chosen, else the edging board's own first
+        kind ('' for a board with no edging) — the same default a support row
+        starts on."""
+        if self.solid_back_edge_kind is not None:
+            return self.solid_back_edge_kind
+        return default_support_kind(materials, self.solid_back_edge_colour_board)
+
+    def solid_back_tape(self, materials: dict) -> str:
+        """The tape a solid back orders: nothing until an edge is counted, then
+        its kind in its edging board's colour (the Boards tab's answer)."""
+        if not (self.solid_back_long or self.solid_back_short):
+            return ""
+        kind = self.solid_back_kind(materials)
+        return tape_for(materials, self.solid_back_edge_colour_board, kind) if kind else ""
 
     @property
     def supports_typed(self) -> bool:
@@ -1468,8 +1545,10 @@ class Cabinet:
     @property
     def needs_back_board(self) -> bool:
         """Whether anything on this cabinet is actually cut from the back board:
-        a back, or a drawer on a grooved 3 mm base."""
-        return self.back != "none" or any(self.base_of(d) == "board" for d in self.drawer_list)
+        a grooved backing (four / three), or a drawer on a grooved 3 mm base. A
+        solid back is cut from `solid_back_cut_board`, not from this."""
+        return (self.back not in ("none", "solid")
+                or any(self.base_of(d) == "board" for d in self.drawer_list))
 
     def tapes(self, materials: dict) -> dict:
         return {"carcass_edge": self.carcass_tape(materials),

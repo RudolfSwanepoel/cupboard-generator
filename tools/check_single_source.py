@@ -100,7 +100,7 @@ def main():
     check("the _board fields", declared,
           ["back_board", "blind_board", "carcass_board", "door_edge_board",
            "drawer_box_edge_board", "drawer_carcass_board", "drawer_edge_board",
-           "drawer_face_board", "exterior_board"])
+           "drawer_face_board", "exterior_board", "solid_back_board", "solid_back_edge_board"])
 
     print("\nand every one of them comes back from board_refs()")
     reported = {key for key, _ in cab.board_refs()}

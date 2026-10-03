@@ -1997,6 +1997,7 @@ const BACK_LABEL = {
   four: "Grooved in all round — sides, top and bottom",
   three: "Grooved into the sides and top — open under the bottom",
   none: "No back panel",
+  solid: "Solid — one full board inside the carcass, flush with the sides' back edges",
 };
 
 // Whether a tickbox is on. An explicit choice wins; failing that the engine's
@@ -2487,6 +2488,13 @@ $("editor").addEventListener("input", (e) => {
         `The number does not change.\n\nMake it a panel?`);
       if (!ok) { e.target.value = c.kind; return; }
     }
+  }
+  if (k === "back" && e.target.value !== c.back) {
+    // Four / None / Solid can take lines off the cut list (the backing, the
+    // Top Rear and Back supports), and that is never silent: the same what-if
+    // the tickboxes ask, with the stored rows kept either way.
+    backChange(c, e.target);
+    return;
   }
   if (k) {
     // The number is applied when the field is finished with, not per keystroke:
@@ -3812,10 +3820,11 @@ const SUPPORT_TYPE_HINT = {
          "flush with their fronts. Not on a carcass with a top panel.",
   top_rear: "Flat, across the top back of a base unit: its rear edge against the " +
             "backing's front face, or flush with the back of the sides where there is " +
-            "no backing. Not on a carcass with a top panel.",
+            "no backing. Not on a carcass with a top panel; a solid back replaces it.",
   back: "Upright in the 16 mm cavity, flush with the back of the sides. Back 1 hangs " +
         "under whatever is at the top back, Back 2 stands on the bottom panel, the " +
-        "rest are spaced evenly between them. One alone is Back 1.",
+        "rest are spaced evenly between them. One alone is Back 1. A solid back " +
+        "replaces them all.",
 };
 const SUPPORT_EDGE_LABEL = {
   front: {front: "Front edge", rear: "Rear edge", left: "Left end", right: "Right end"},
@@ -4038,8 +4047,11 @@ function renderSupports() {
       ${odd}
       ${at ? `<p class="drawn">Drawn at ${esc(at)}.</p>` : ""}` : "";
     const offNote = off
-      ? `<p class="off">Not on this carcass — it has a top panel and takes Back supports
-           only.${on ? " The stored one stays in the job file and is not cut." : ""}</p>`
+      ? (c.back === "solid" && (row.type === "back" || row.type === "top_rear")
+        ? `<p class="off">Replaced by the solid back — not cut. The row stays in the job
+           file and comes back when the back is grooved again.</p>`
+        : `<p class="off">Not on this carcass — it has a top panel and takes Back supports
+           only.${on ? " The stored one stays in the job file and is not cut." : ""}</p>`)
       : "";
     // the Back hint once, over the first Back block, not on every one
     const hint = isBack && backAt - Math.max(row.qty || 0, 0) === 0
@@ -4674,7 +4686,8 @@ function renderStructure() {
                    "the back panel, and a drawer base grooved out of the same sheet",
                    "thin")
         : `<div class="f wide"><label>Backing board</label>
-             <p class="off">Nothing on this cabinet is cut from it — no back, and no
+             <p class="off">Nothing on this cabinet is cut from it — ${c.back === "solid"
+               ? "the back is a solid board (below)" : "no back"}, and no
              drawer on a grooved base.</p></div>`}
       ${boardSel(c, "carcass_board", "Carcass board",
                  "sides, top, bottom, supports and shelves", "thick")}
@@ -4689,8 +4702,9 @@ function renderStructure() {
           `<option value="${esc(b)}"${b === c.back ? " selected" : ""}>${
             esc(BACK_LABEL[b] || b)}${legacyBacks.indexOf(b) >= 0
               ? " (as quoted \u2014 no longer offered)" : ""}</option>`).join("")}</select>
-        <span class="note">what the backing board is grooved into, and whether one
-        is cut at all</span></div>`}
+        <span class="note">what the backing board is grooved into, whether one
+        is cut at all, or a solid back instead</span></div>`}
+      ${!shaped && c.back === "solid" ? solidBackHTML(c, gb) : ""}
       ${shaped
         ? `<div class="f wide"><label>Shelves</label>
              <p class="off">A corner unit's shelves are the arm shelf and the mitred
@@ -4715,6 +4729,85 @@ function renderStructure() {
       ${unavailableField("Divider height", c.divider_height,
         "a divider cannot be positioned yet")}
     </div>`;
+}
+
+// Changing the back fixing: ask the engine what leaves the cut list and say it
+// before it goes. Nothing is emptied — a Top Rear or Back row under a solid back
+// is greyed, kept, and cut again the moment the back is grooved again.
+async function backChange(c, sel) {
+  const to = sel.value;
+  const r = await post("/api/what-if", {job: S.job, cabinet: c.number, set: {back: to}});
+  if (!r.ok) { toast(r.error, true); sel.value = c.back; return; }
+  if (r.removed.length) {
+    const n = r.removed.length;
+    const lines = r.removed.map((x) =>
+      `    ${x.label}   ${x.role}   ${x.length} x ${x.width}  x${x.qty}`).join("\n");
+    const ok = window.confirm(
+      `Changing the back to "${BACK_LABEL[to] || to}" removes ${n} cut-list line${n === 1 ? "" : "s"} ` +
+      `from cabinet ${c.number}:\n\n${lines}\n\n` +
+      `Everything you typed stays in the job file, so changing it back restores these ` +
+      `unchanged. No designation is renamed or reused.\n\nChange it?`);
+    if (!ok) { sel.value = c.back; return; }
+  }
+  c.back = to;
+  renderEditor();
+  schedule();
+}
+
+// The SOLID back's controls (ruled 3 October 2026): the board it is cut from
+// (any full-thickness board; blank follows the carcass — never a 3 mm one),
+// and its edging like Panel design: kind, colour and how many long / short
+// edges, unedged by default. What it resolves to — the board, the kind, the
+// tape name — is the engine's answer off /api/compute (`solid_back`), shown
+// and never worked out here.
+function solidBackHTML(c, gb) {
+  const sb = (gb && gb.solid_back) || {};
+  const mats = (S.res && S.res.materials) || {};
+  const all = (S.res && S.res.boards) || Object.keys(mats);
+  const thick = all.filter((k) => !boardIsThin(k));
+  const pre = S.def.edging_prefix || {};
+  const cut = c.solid_back_board || "";
+  const cutLost = cut && thick.indexOf(cut) < 0;
+  const effCut = sb.cut_board || cut || c.carcass_board || "";
+  const colour = c.solid_back_edge_board || "";
+  const effColour = sb.edge_board || colour || effCut;
+  const kinds = (S.def.edging_kinds || ["pvc", "1mm", "2mm"]).filter((k) => boardOffers(effColour, k));
+  const kind = c.solid_back_edge_kind;          // null: the board's own first kind
+  const effKind = sb.kind || "";
+  const kindLost = kind && kinds.indexOf(kind) < 0;
+  const colourKeys = all.filter((k) => boardOffers(k, effKind || kind || "pvc"));
+  const nSel = (key, v) => `<select data-k="${key}" data-t="int">${
+    [0, 1, 2].map((n) => `<option value="${n}"${n === (+v || 0) ? " selected" : ""}>${n}</option>`).join("")
+    }</select>`;
+  const counted = (+c.solid_back_long || 0) + (+c.solid_back_short || 0);
+  const tapeNote = !counted ? "unedged — count an edge to band it"
+    : sb.tape ? `ordered as ${sb.tape}`
+    : "no edging: this board offers none of that kind — tick it on the Boards tab, or choose another";
+  return `<div class="f wide"><label>Solid back board</label>
+      <select data-k="solid_back_board" data-t="text">
+        <option value=""${cut ? "" : " selected"}>carcass board (${esc(c.carcass_board || "—")})</option>
+        ${cutLost ? `<option value="${esc(cut)}" selected>${esc(cut)} (${all.indexOf(cut) < 0 ? "not selected" : "3 mm — too thin for a solid back"})</option>` : ""}
+        ${thick.map((k) => `<option value="${esc(k)}"${k === cut ? " selected" : ""}>${
+          esc(k)} — ${esc((mats[k] || {}).board || k)}</option>`).join("")}</select>
+      <span class="note">one full board, W − 32 wide, between the top and bottom (or up
+        to the top of the sides on a base unit); it replaces the backing board, the
+        Top Rear and the Back supports. Cut as <b>${esc(effCut)}</b>.</span></div>
+    <div class="tape"><label>Solid back edging</label>
+      <div class="leaf">
+        <select data-k="solid_back_edge_kind" data-t="optext" title="how thick">
+          <option value=""${kind === null || kind === undefined ? " selected" : ""}>${
+            esc(effKind ? (pre[effKind] || effKind) + " (default)" : "board's own")}</option>
+          ${kindLost ? `<option value="${esc(kind)}" selected>${esc(pre[kind] || kind)} (not offered)</option>` : ""}
+          ${kinds.map((k) => `<option value="${esc(k)}"${k === kind ? " selected" : ""}>${esc(pre[k] || k)}</option>`).join("")}</select>
+        <select data-k="solid_back_edge_board" data-t="optext" title="what colour">
+          <option value=""${colour ? "" : " selected"}>same board (${esc(edgeLabel(effCut))})</option>
+          ${colourKeys.map((k) => `<option value="${esc(k)}"${k === colour ? " selected" : ""}>${esc(edgeLabel(k))}</option>`).join("")}</select>
+        <span class="note">long ${nSel("solid_back_long", c.solid_back_long)}
+          short ${nSel("solid_back_short", c.solid_back_short)}</span>
+        <b class="${counted && sb.tape ? "" : counted ? "over" : "off"}">${esc(tapeNote)}</b>
+      </div>
+      <span class="dhelp">Long edges run the back's longer side, short its shorter — as
+        Panel design counts them. Unedged by default.</span></div>`;
 }
 
 // The edging names in force are the engine's answer, so they are re-read rather
@@ -9114,7 +9207,8 @@ function showPartCard(number, part, view) {
   const g = c && S.res && S.res.geometry && S.res.geometry[String(number)];
   const kind = c ? (c.kind === "panel" ? "Panel" : c.kind + (g && g.corner && g.corner.kind ? " · " + g.corner.kind : "")) : "";
   const roleNames = {side: "Side", top: "Top", bottom: "Bottom", door: "Door", drawer: "Drawer face",
-                     blind: "Blind panel", panel: "Panel", back: "Backing", carcass: "Carcass",
+                     blind: "Blind panel", panel: "Panel", back: "Backing", solid_back: "Solid back",
+                     carcass: "Carcass",
                      plinth: "Plinth board", filler: "Filler"};
   let role = part ? (roleNames[part.role] || part.role) : "";
   if (part && (part.role === "door" || part.role === "drawer")) role += " " + (part.index + 1);

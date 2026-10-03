@@ -2117,7 +2117,8 @@ function describe(number, part) {
 
 function roleName(part) {
   const names = {side: "Side", top: "Top", bottom: "Bottom", door: "Door", drawer: "Drawer face",
-                 blind: "Blind panel", panel: "Panel", back: "Backing", carcass: "Carcass (footprint only)",
+                 blind: "Blind panel", panel: "Panel", back: "Backing", solid_back: "Solid back",
+                 carcass: "Carcass (footprint only)",
                  plinth: "Plinth board", filler: "Filler", support: "Support", shelf: "Shelf",
                  drawer_side: "Drawer side", drawer_front: "Drawer front", drawer_back: "Drawer back",
                  drawer_base: "Drawer base", runner_outer: "Runner (outer channel)",

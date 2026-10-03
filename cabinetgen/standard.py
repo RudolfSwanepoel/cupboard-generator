@@ -191,13 +191,52 @@ class Standard:
         return (getattr(self, f"new_{k}_width"), getattr(self, f"new_{k}_height"),
                 getattr(self, f"new_{k}_depth"))
 
-    def back_face_from_front(self, d: int) -> int:
-        """Distance from the cabinet front to the front face of the backing board."""
+    def back_face_from_front(self, d: int, back: str = "four") -> int:
+        """Distance from the cabinet front to the front face of whatever is at
+        the back: the backing board in its slot (D - 16 - 3), or a SOLID back
+        standing flush with the sides' back edges (D - 16, ruled 3 October
+        2026). A cabinet with no back keeps the backing's figure, as it always
+        did, so nothing it cuts moves.
+
+        >>> STANDARD.back_face_from_front(570)
+        551
+        >>> STANDARD.back_face_from_front(570, "solid")
+        554
+        """
+        if back == "solid":
+            return d - self.board_t
         return d - self.back_cavity - self.back_t
 
-    def shelf_depth(self, d: int, fixed: bool = False) -> int:
-        gap = self.shelf_gap_fixed if fixed else self.shelf_gap_adjustable
-        return self.back_face_from_front(d) - gap
+    def shelf_depth(self, d: int, fixed: bool = False, back: str = "four",
+                    clearance: int = None) -> int:
+        """A shelf's depth: from the carcass front to the front face of the back,
+        less its clearance at the FACE — the ruled 4 (adjustable) or 1 (fixed),
+        or the clearance typed on its row (shelves brief, 3 October 2026).
+
+        >>> STANDARD.shelf_depth(570)
+        547
+        >>> STANDARD.shelf_depth(570, back="solid")
+        550
+        >>> STANDARD.shelf_depth(570, back="solid", clearance=3)
+        551
+        """
+        gap = clearance if clearance is not None else (
+            self.shelf_gap_fixed if fixed else self.shelf_gap_adjustable)
+        return self.back_face_from_front(d, back) - gap
+
+    def solid_back_size(self, w: int, h: int, has_top: bool) -> tuple:
+        """(width, height) of a SOLID back (ruled 3 October 2026): inside the
+        carcass between the sides, so W - 2t; between the top and bottom panels
+        where there is a top (H - 2t), or standing on the bottom panel up to
+        the top of the sides on a base unit (H - t).
+
+        >>> STANDARD.solid_back_size(600, 2400, True)
+        (568, 2368)
+        >>> STANDARD.solid_back_size(450, 790, False)
+        (418, 774)
+        """
+        return (w - 2 * self.board_t,
+                h - 2 * self.board_t if has_top else h - self.board_t)
 
     def back_size(self, w: int, h: int, style: str) -> tuple:
         """(length, width) of the backing board.

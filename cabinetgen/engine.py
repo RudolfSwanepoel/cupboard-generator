@@ -282,23 +282,45 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
     # ---- shelves -----------------------------------------------------------
     sw = cab.shelf_width or Wi
     if cab.fixed_shelves > 0:
-        P.append(Panel(n, "05", "Shelve", carc, sw, std.shelf_depth(cab.depth, fixed=True),
+        P.append(Panel(n, "05", "Shelve", carc, sw, std.shelf_depth(cab.depth, fixed=True, back=cab.back),
                        cab.fixed_shelves, edge_l=1, edge_material=carc_tape,
                        grain=carc_grain, note="fixed"))
     if cab.shelves > 0:
-        P.append(Panel(n, "05", "Shelve", carc, sw, std.shelf_depth(cab.depth),
+        P.append(Panel(n, "05", "Shelve", carc, sw, std.shelf_depth(cab.depth, back=cab.back),
                        cab.shelves, edge_l=1, edge_material=carc_tape,
                        grain=carc_grain))
 
     # ---- divider -----------------------------------------------------------
     if cab.divider_count > 0:
         dh = cab.divider_height or (cab.height - 2 * std.board_t)
-        P.append(Panel(n, "09", "Divider", carc, dh, std.shelf_depth(cab.depth),
+        P.append(Panel(n, "09", "Divider", carc, dh, std.shelf_depth(cab.depth, back=cab.back),
                        cab.divider_count, edge_l=1, edge_material=carc_tape,
                        grain=carc_grain))
 
     # ---- back --------------------------------------------------------------
-    if cab.back != "none":
+    if cab.solid_back:
+        # A SOLID back (ruled 3 October 2026): one full board inside the
+        # carcass, code 06, role "Solid back", W - 2t wide and H - 2t high
+        # under a top (H - t on a base unit, standing on the bottom panel).
+        # Its Length is its height — a grained board runs vertical, as the
+        # fronts do; on a plain board the longer dimension is Length, the house
+        # convention. Unedged unless its two counts say otherwise, in which
+        # case they count edges along the longer and shorter finished extents
+        # exactly as Panel design does. It replaces the backing board AND the
+        # Top Rear / Back supports (`support_list` leaves those out).
+        sb = R(cab.solid_back_cut_board)
+        bw, bh = std.solid_back_size(cab.width, cab.height, cab.kind != "base")
+        sgrain = grain_of(mats, sb)
+        length, width = (bh, bw) if sgrain else (max(bw, bh), min(bw, bh))
+        long_edges, short_edges = int(cab.solid_back_long or 0), int(cab.solid_back_short or 0)
+        el, ew = ((long_edges, short_edges) if length >= width
+                  else (short_edges, long_edges))
+        tape = cab.solid_back_tape(mats)
+        if not tape:
+            el = ew = 0
+        P.append(Panel(n, "06", "Solid back", sb, length, width, 1,
+                       edge_l=el, edge_w=ew, edge_material=tape, grain=sgrain))
+    elif cab.back != "none":
         bw, bh = std.back_size(cab.width, cab.height, cab.back)
         # house convention: the longer dimension is always Length
         P.append(Panel(n, "06", "Backing", back, max(bw, bh), min(bw, bh), 1,

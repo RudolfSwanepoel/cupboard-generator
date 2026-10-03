@@ -60,7 +60,8 @@ TAPE_BAND_MM = 2
 # the same board — which is how each solid is tied to its designation.
 ROLE_TO_PANEL = {"side": "Side", "top": "Top", "bottom": "Bottom", "door": "Door",
                  "drawer": "Drawer Face", "blind": "Blind Panel", "panel": "Panel",
-                 "back": "Backing", "plinth": "Plinth", "filler": "Filler",
+                 "back": "Backing", "solid_back": "Solid back",
+                 "plinth": "Plinth", "filler": "Filler",
                  "support": "Support", "shelf": "Shelve",
                  "drawer_side": "Drawer Side", "drawer_front": "Drawer Front",
                  "drawer_back": "Drawer Front", "drawer_base": "Drawer Base"}

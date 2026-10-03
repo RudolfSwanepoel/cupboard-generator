@@ -218,7 +218,7 @@ def main():
           ("width: 600, height: 2400, depth: 500" in src, "newSize(kind)" in src), (False, True))
 
     print("\nback 'three' is legacy: readable, cut as it was, not offered")
-    check("not offered for a new cabinet", d["backs"], ["four", "none"])
+    check("not offered for a new cabinet; Solid is (3 October 2026)", d["backs"], ["four", "none", "solid"])
     check("named as legacy", d["backs_legacy"], ["three"])
     three = box(back="three")
     bk = [p for p in generate_cabinet(three, std, MATERIALS) if p.role == "Backing"]
