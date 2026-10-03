@@ -71,6 +71,10 @@ This demo works until {expiry}.
 4. Needs Windows 10 or 11.
 
 Your jobs and exports are saved inside this folder, so keep it together.
+
+Moving to a new demo: unzip it, start it, and press Import project.
+Pick this old folder (it is only read, never changed).
+Your jobs, boards, runners and pictures come across, even after this demo has expired.
 """
 
 

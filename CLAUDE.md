@@ -43,7 +43,11 @@ inner member sliding), screenshots into
 any angle and Draw walls (stages `draw`, `ell`, `corner`, `input`, `drag`, `3d`),
 screenshots into `output/_checks/ui_check_walls/`, and `python tools/ui_check_undo.py`
 Undo and Redo (four edits undone back to the loaded job and redone, one step
-per edit, Ctrl+Z in a text field left to the field). All six are optional —
+per edit, Ctrl+Z in a text field left to the field), and `python tools/ui_check_import.py`
+Import project and the project Rename (stages `import`, `rename`) — this one STARTS
+ITS OWN COPY of the app in a temp folder on a free port, because Import writes jobs
+and libraries, so it needs no app running and never touches the live files;
+screenshots into `output/_checks/ui_check_import/`. All seven are optional —
 Playwright is the only third-party package anywhere near this app, and only
 those scripts need it — and each says so and exits 0 when it is not installed.
 `ui_check_3d.py --stage look` reads the drawn colour of a board off the canvas
@@ -106,6 +110,12 @@ seen is kept in `output/demo-seen.txt`, and a clock more than 1 day behind it is
 refused. The window is titled `Cupboard App — Demo (until 29 Nov 2026)`.
 Geometry, nesting, costing and export are untouched.
 
+**To move to a new demo: unzip it, start it, Import project, pick the old
+folder** (the outer folder or the `Cupboard App Demo` inside it). It brings the
+old folder's jobs, boards, runners and pictures across and only reads the old
+folder, so an expired demo's work comes across too. See **Import project**
+under Status.
+
 **To extend a demo: build again** — the date is baked in. `Build Demo.bat
 --test-expired` makes a throwaway copy that expired yesterday (a test; the zip
 says TEST-EXPIRED — never send it, and delete it after). Building needs the
@@ -113,6 +123,110 @@ Python that runs the app (it must have pywebview). `build-demo/` and `demo/` are
 gitignored; never commit an .exe or a zip.
 
 ## Status
+
+**Import project, and renaming a project (3 October 2026, brief
+`Claude outputs/import-project-brief-2026-10-03.md`, ruled by Rudolf).**
+Nothing under `cabinetgen/` that cuts, nests or costs moved: benchmark
+unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50), `check_all`
+24 of 24 (`check_import.py` new), `snapshot.py --compare`: identical. One commit
+per ruling group: 3 / 5 / 9 (the importer), 1 / 2 / 4 / 8 (the button, the
+folder, the preview, the report), 6 / 7 (renames, a taken name refused).
+
+1. **Import project** (top bar, beside Delete; the same in the demo —
+   `app/demo.py` does not touch it). The native folder picker
+   (`/api/pick-folder`, pywebview `FileDialog.FOLDER` on the window
+   `api.set_window` holds); with no window (`--no-window`, the browser
+   fallback) the dialog says there is no folder picker and takes a typed path.
+   **`cabinetgen/importer.py` decides everything**: `find_folder` (the picked
+   folder, then `Cupboard App Demo` inside it, then any folder directly inside
+   it, must have `jobs\` with a readable job, or `Cupboard App Demo.exe`
+   beside `jobs\`; this app's own folder is refused), `scan` (the preview,
+   writes nothing: every item `new`, `identical`, `renamed` or `broken`, and a
+   `signature`), `run` (scans again, refuses if the folder changed since the
+   preview, writes pictures, then the libraries, then each job — test-loaded
+   first through the app's own Load path, `api._import_test_load`). Reads the
+   old folder only: `jobs\*.json` (never `_deleted\`), `boards.json`,
+   `hardware.json`, `Pictures\`; never `output\`, `demo-seen.txt` or the app's
+   files.
+2. **A conflict comes in as `<name> (imported)`, `(imported 2)` …**, names
+   compared case-insensitively; every candidate already here is first asked
+   whether it is the SAME thing (a board or runner equal but for id and name, a
+   picture's bytes, a job's text) — which is why importing a folder twice
+   brings nothing. A renamed board gets `boards.next_id`, a renamed runner
+   `hardware.next_id`, never an id any imported job names; every imported job
+   is re-pointed (`rename_board_in_job` — moved to `cabinetgen/boards.py`
+   with `LIVE_FIELDS`, `api` re-exports both) BEFORE it is saved, and its
+   runner copy re-keyed and shown under the new name; a renamed picture
+   re-points every imported board and job copy. **Two things the brief did not
+   spell out, done to keep its rule "costs exactly what it cost there":** (a) a
+   board renamed whose Edging Name was blank (named off its board name) takes
+   the old name as its Edging Name, so the edging on the order does not change
+   with the board's name; (b) a job naming a board the OLD library no longer
+   has, whose own copy differs from THIS library's board of that id, would be
+   refreshed into this library's board on Load: that copy comes in as a board
+   of its own, "(imported)", and the job is re-pointed. A job's captured
+   prices are never touched (its copy is re-keyed only; Load's
+   `refresh_from_library` brings the new name and keeps the price).
+3. **Old jobs through `store.job_from_dict`** (a chain room migrated) and
+   saved in the current format; **a newer version's job** (a field this app
+   does not know — `importer.unknown_fields`, against the dataclasses'
+   fields and the legacy keys migration reads) as it stands: its raw JSON,
+   only the name and the re-pointing changed (`boards.map_cabinet_board_ids`,
+   the raw twin of `rename_board_in_job`, held equal to it in
+   `check_import.py`); the report says so. Every job in the repo's history
+   reads as not newer.
+4. **The report** (copyable): "Imported 4 projects, 3 boards, 2 runners, 2
+   pictures. Skipped 5 identical. Renamed: Test → Test (imported), …", then a
+   line per job not imported (with the reason) and the newer-version jobs.
+5. **Renames.** Project: **Rename** beside the job name → `/api/job-rename`:
+   the file in `jobs\`, `job.name` in it, `output\<_safe_name>\` and every
+   file in it whose name starts with the old safe name (`cutlist\`,
+   `nesting\`, `drawings\`, `snapshots\`, `_previous\`), a move; the job on
+   screen follows (`S.file`, the undo history's snapshots take the new name);
+   a project never saved changes only its name on screen. Picture: **Rename…**
+   on the board's picture field → `/api/picture-rename`: the file in
+   `Pictures\` (its ending kept), every library board and every saved job's
+   copy naming it, and the project on screen. Board: as built (`board_save`
+   with `from`). Runner: its name, as built — **its id stays a key; nothing
+   needs it renamed** (it is never shown where a name is).
+6. **A name taken is an ERROR and nothing is written** (`importer.taken_message`,
+   "<name> already exists — choose another name"), case-insensitively, under
+   the field: the project Rename, a picture rename, a board's or runner's
+   name changed or new (asked only when the name changes, so a library already
+   holding two of a name can still have either edited), and **Save**: the
+   browser sends the file it came from (`open`, `S.file`, set by Load and
+   Save, cleared by New); saving under another saved job's file name is
+   refused, under its own name (any case) it writes its own file as ever.
+7. **The top bar** gained two buttons and is held to one row at 1360 wide with
+   "unsaved changes" showing: gaps 5, button padding 5 / 8, the name box 150,
+   the job list 150.
+
+Playwright: `ui_check_import` (new, both stages), `ui_check_undo`,
+`ui_check_restructure` (all its lines, the three `attach` lines included),
+`ui_check_attached`, `ui_check_drawers` pass; `ui_check_walls` but for
+`--stage labels`' "the nook room: none on another" (`A/G`), and `ui_check_3d`
+but for stage `room` timing out on its plan drag (every other stage passes) —
+both exactly the same on the tree before this work (427f68b, run in a
+worktree): not this brief.
+
+**A real old demo folder, simulated** (the 30 September build's data, run on
+that commit's own code, a job saved, a board added with its own picture, a
+board's price edited, a snapshot taken; then imported into a copy of this
+app): the folder held nothing the brief did not name — `jobs\`, the two
+libraries, `Pictures\`, `output\` (`demo-seen.txt`, the snapshot), the
+app's own `app\` files, the exe. What it showed: **(a)** the jobs the demo
+SHIPPED (Test.json) come back "(imported)" whenever yours have moved on since
+the build — they are not the friend's work; **(b)** a board whose only
+difference is its Last price comes in as "<name> (imported)", and the
+friend's jobs on it are re-pointed to it (the record differs, ruling 5) —
+their cost does not move, the price is captured in the job; **(c)** the
+friend's job, saved by the 30 September code as a wall chain, is migrated
+and loads.
+
+**For Rudolf:** (a) and (b) above — whether a price-only difference should
+count as identical (the library keeping its own price), and whether the jobs
+a demo ships should be left out of an import, are yours to rule; built as
+the brief says.
 
 **Room touch-ups round 2, and Undo (3 October 2026, brief
 `Claude outputs/room-touchups-2-and-undo-brief-2026-10-03.md`, ruled by
@@ -1442,6 +1556,11 @@ dirty. Nothing else about either changed.
 | Placements (open / collapsed) | always open in the left column | **collapses** to a slim strip (chevron, "Placements" down its side), collapsed by default, remembered per viewer (`cupboard.places`) (round 2, 3 Oct 2026) |
 | Room card / Wall card width | the editor's width (560, or as dragged) | **compact, 360**, always shown (the dock's collapse is the editor's); the Room card's fields on one row, small buttons, Wall · Length · Corner · Height · Flip · ×, Op. / Obs. in the row's tooltip, the help behind a **?**; the editor's width when a cabinet is selected (round 2) |
 | A wall's length on the plan | outside along the normal, level whatever the wall's direction, clipped at the edge of an exported plan | **outside on the wall's back, turned to read along it** (a wall up the page reads upwards); the plan's bounds take every label in with `render.PLAN_LABEL_MARGIN` (150 mm) round it; a white backing (`rect.lenback`, 0.85) where it lies over a cabinet, panel, face, wall or gap mark (round 2, 3 Oct 2026) |
+| Bringing another folder's work in (an old demo, the other laptop) | copied by hand | **Import project** in the top bar: pick the folder (or type its path without a window), a preview of every item, Import, a report (3 Oct 2026) |
+| Renaming a project | Save under a new name, delete the old (output folder left behind) | **Rename** beside the job name: the file, `job.name`, `output\<job>\` and its files (3 Oct 2026) |
+| Renaming a board picture's file | — | **Rename…** on the board's picture field: the file, every library board and saved job naming it (3 Oct 2026) |
+| A name already taken (project, board, runner, picture; Save onto another job's file) | Save overwrote the other job; boards / runners took a duplicate name | refused, "<name> already exists — choose another name", under the field (3 Oct 2026) |
+| `rename_board_in_job`, `LIVE_FIELDS` | `app/api.py` | `cabinetgen/boards.py` (api re-exports both) |
 | Undo / Redo | — (none; a mistake was put right by hand) | **Undo · Redo** beside Save in the top bar, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z (not while typing in a field); 50 steps of the job on screen; Save, Load, New, Delete project, Export, snapshots and library edits are not undone (round 2, 3 Oct 2026) |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
@@ -2467,6 +2586,9 @@ cabinetgen/room.py         walls as positioned segments (2 Oct 2026): connection
                            keep_on_walls, room_snaps, split_wall, wall_nook, add_back_face,
                            flip_room. The only trigonometry.
 cabinetgen/store.py        job files: JSON save / load
+cabinetgen/importer.py     Import project: which folder is an app folder, the preview (scan),
+                           identical / renamed "(imported n)" / broken, the re-pointing, and
+                           writing it (run). Reads the old folder only
 cabinetgen/export_plaza.py Plazaboard CSV + costing off the real rate card
 run_app.py                 starts the local server, opens the window (maximised); under
                            pythonw logs to output/app.log and says in a message box
@@ -2550,6 +2672,13 @@ tools/ui_check_3d.py       the 3D view in the running app, with a real mouse (Pl
 tools/ui_shots_3d.py       the four 3D screenshots the realism brief compares, before and after
                            (Playwright), into Claude outputs/3d-realism-screenshots/
 tools/ui_check_attached.py attached panels in the running app (Playwright)
+tools/check_import.py      Import project and the renames, on temp folders only: a fake old demo
+                           (identical / conflicting / chain-room / broken / newer jobs, boards,
+                           runners, pictures), preview writes nothing, exactly what is written,
+                           the cost loaded there and here, twice brings nothing, every rename
+                           and every taken name
+tools/ui_check_import.py   Import project and Rename in the running app (Playwright) — starts its
+                           OWN copy of the app in a temp folder; stages import, rename
 tools/ui_check_undo.py     Undo and Redo in the running app (Playwright): a plan drag, a typed wall
                            length, a delete, a drawer face, undone back to the loaded job and redone;
                            a new edit clears Redo; Ctrl+Z in a field is the field's; the Placements pick
