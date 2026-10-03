@@ -771,12 +771,31 @@ def stage_layout(pw):
                     under: c.getBoundingClientRect().top > $('plancard').getBoundingClientRect().bottom - 1}; }""")
         check(f"{w}: Gaps the full width under the plan, every column visible, no sideways scroll",
               [g["full"], g["noScroll"], g["cols"], g["under"]], [True, True, True, True])
-        sb = page.evaluate("""() => { const a = $('plinthcard').getBoundingClientRect(), b = $('placescard').getBoundingClientRect(),
+        sb = page.evaluate("""() => { const a = $('plinthcard').getBoundingClientRect(),
             gp = $('gapscard').getBoundingClientRect();
             const nat = (id) => { const c = $(id), t = c.querySelector('table'); return t ? t.getBoundingClientRect().width <= c.clientWidth + 1 : true; };
-            return [Math.abs(a.top - b.top) < 2, a.right <= b.left, a.top > gp.bottom - 1, nat('plinthcard'), nat('placescard')]; }""")
-        check(f"{w}: Plinth and Placements side by side under Gaps, each table whole",
-              sb, [True, True, True, True, True])
+            return [a.top > gp.bottom - 1, a.left - gp.left < 2, nat('plinthcard')]; }""")
+        check(f"{w}: Plinth under Gaps (no longer sharing a row), its table whole", sb, [True, True, True])
+        tb = page.evaluate("""() => { const t = $('roomtools').getBoundingClientRect(), s = $('roomsubs').getBoundingClientRect(),
+            p = $('plancard').getBoundingClientRect();
+            return [Math.abs((t.top + t.bottom) / 2 - (s.top + s.bottom) / 2) < 2, t.left > s.right, t.bottom < p.top,
+                    [...$('roomtools').querySelectorAll('[data-tool]')].map((b) => b.textContent.trim())]; }""")
+        check(f"{w}: the tools in the strip, on the sub-tabs' line, to their right, above the plan",
+              tb, [True, True, True, ["Select", "Draw walls", "Wall nook"]])
+        pl = page.evaluate("""() => { const c = $('placescard'), r = c.getBoundingClientRect(), m = $('roommain').getBoundingClientRect(),
+            p = $('plancard').getBoundingClientRect(), box = $('places'), t = box.querySelector('table');
+            const ths = [...t.querySelectorAll('th')].map((x) => x.textContent.trim());
+            const fit5 = [...box.querySelectorAll('input[type=number]')].every((i) => {
+                const v = i.value; i.value = '99999'; const ok = i.scrollWidth <= i.clientWidth + 1; i.value = v; return ok; });
+            return [r.right <= p.left, Math.abs(r.top - m.top) < 2, Math.abs(r.bottom - p.bottom) < 2,
+                    t.getBoundingClientRect().width <= box.clientWidth + 1, ths, fit5,
+                    r.top > gpTop() ? 'below' : 'beside'];
+            function gpTop() { return $('gapscard').getBoundingClientRect().top; } }""")
+        check(f"{w}: Placements the left column, the plan's full height, its narrowed table whole, inputs hold five digits",
+              pl, [True, True, True, True, ["Item", "Wall", "X", "Z", "Y", "Layer"], True, "beside"])
+        many = page.evaluate("""() => { const box = $('places'); return [box.scrollHeight > box.clientHeight,
+            getComputedStyle(box).overflowY, $('placescard').getBoundingClientRect().bottom <= $('plancard').getBoundingClientRect().bottom + 2]; }""")
+        check(f"{w}:   more items than fit scroll within the card", many, [many[0], "auto", True])
         check(f"{w}: the notes are behind a '?', hidden",
               page.evaluate("() => ['gapshelp', 'plinthhelp', 'placeshelp'].map((id) => $(id).hidden)"), [True, True, True])
         page.click('#placescard .qhelp')
@@ -786,8 +805,12 @@ def stage_layout(pw):
               page.evaluate("() => $('unplaced-room').getBoundingClientRect().bottom <= $('plancard').getBoundingClientRect().top + 1 "
                             "&& $('unplaced-room').querySelectorAll('.upchip').length"), 1)
         os.makedirs(SHOTS, exist_ok=True)
-        page.screenshot(path=os.path.join(SHOTS, f"layout_after_{w}x{h}.png"), full_page=True)
-        print(f"      screenshot output/_checks/ui_check_walls/layout_after_{w}x{h}.png")
+        page.screenshot(path=os.path.join(SHOTS, f"touchup_layout_{w}x{h}.png"), full_page=True)
+        print(f"      screenshot output/_checks/ui_check_walls/touchup_layout_{w}x{h}.png")
+        room_sub = page.evaluate("() => { $('roomsubs').querySelector('[data-roomsub=\"elev\"]').click(); "
+                                 "return [$('roomtools').offsetParent === null, $('placescard').offsetParent === null]; }")
+        check(f"{w}: on Elevation the tools and Placements are hidden", room_sub, [True, True])
+        page.evaluate("() => $('roomsubs').querySelector('[data-roomsub=\"plan\"]').click()")
         check(f"{w}: no console errors", errors, [])
         ctx.close()
     browser.close()

@@ -624,11 +624,23 @@
   #gaps table{width:100%}
   #gaps td.note{white-space:normal}
   #gaps select{width:auto;min-width:132px}
-  .roomlow{flex-wrap:wrap;margin-top:16px}
-  .roomlow>.card{flex:none;max-width:100%;min-width:0}
+  #plinthcard{margin-top:16px;width:max-content;max-width:100%}
   #places table,#plinth table{width:auto}
-  #places input{width:76px}
-  #places select{width:auto}
+  /* Placements in the left column (touch-ups, 3 October 2026): as wide as its
+     narrowed table, as tall as the plan beside it (`fitPlaces`), scrolled within;
+     its "?" notes wrap to the card rather than widening it */
+  #placescard{flex:none;width:max-content;display:flex;flex-direction:column;margin:0;min-height:0}
+  #placescard[hidden]{display:none}
+  #placescard>h2{flex:none}
+  #placescard .cardhelp{contain:inline-size;flex:none;max-height:40%;overflow:auto}
+  #places{flex:1 1 auto;min-height:0;overflow:auto}
+  #places .body{padding:4px 6px}
+  #places table{font-size:11.5px}
+  #places th,#places td{padding:3px 3px;letter-spacing:0}
+  #places td .note{font-size:10px}
+  #places input{width:calc(5ch + 10px);padding:2px 4px;font-variant-numeric:tabular-nums;-moz-appearance:textfield}
+  #places input::-webkit-inner-spin-button,#places input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+  #places select{width:auto;padding:2px 2px}
   .qhelp{width:20px;height:20px;padding:0;border-radius:50%;font-size:11px;line-height:1;
          margin-left:6px;vertical-align:middle;text-transform:none}
   .qhelp.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
@@ -768,6 +780,26 @@
           title="click a wall, then type the recess's width, depth and distance from the wall's start">Wall nook</button>
       </div></div>
     <div id="roomwrap">
+      <!-- Placements, in the left column beside the plan (touch-ups, 3 October
+           2026): the plan's height, its table narrowed, scrolled within. -->
+      <div class="card" id="placescard">
+        <h2>Placements <button class="qhelp" data-help="placeshelp" title="what this table is">?</button></h2>
+        <div class="cardhelp" id="placeshelp" hidden>
+          <p>X is from the wall's start corner to the item's left edge, facing the
+          wall. Z is 0 for anything standing on the floor — it stands on its legs,
+          which the engine allows for, plinth board or not. Set Z only for a hung
+          unit, to its underside; a panel stands on no legs, so its Z is its
+          underside exactly as typed. Layer is read from the cabinet's kind and its
+          Z. Pick a wall to place an item, or “—” to take it out; it lands clear of
+          whatever is already on that wall.</p>
+          <p>Y is out from the wall face to the back of an independent PANEL — 0 is
+          flush against the wall, and it is what puts a bulkhead underside out over
+          the units below it. A cabinet is against its wall, so it has no Y.
+          A panel attached to a cabinet stands where the cabinet puts it: its
+          offsets are typed in Panel design, and it moves with the cabinet.</p>
+        </div>
+        <div id="places"></div>
+      </div>
       <div id="roommain" style="flex:1;min-width:0">
         <div class="unplaced" id="unplaced-room"></div>
         <div class="card" id="plancard">
@@ -801,39 +833,19 @@
         <div class="dockcard card" id="wallcard" hidden></div>
       </div>
     </div>
-    <!-- Under the plan (ruling 11, 3 October 2026): Gaps the full width, every
-         column visible; Plinth and Placements side by side under it, each at its
-         natural width; each card's notes behind a "?" beside its title. -->
+    <!-- Under the plan (ruling 11; touch-ups, 3 October 2026): Gaps the full
+         width, every column visible; Plinth under it at its natural width; each
+         card's notes behind a "?" beside its title. -->
     <div id="roomplanonly">
       <div class="card" id="gapscard">
         <h2>Gaps <button class="qhelp" data-help="gapshelp" title="what this table is">?</button></h2>
         <div class="cardhelp" id="gapshelp" hidden></div>
         <div id="gaps"></div>
       </div>
-      <div class="split roomlow">
-        <div class="card" id="plinthcard">
-          <h2>Plinth <button class="qhelp" data-help="plinthhelp" title="what this table is">?</button></h2>
-          <div class="cardhelp" id="plinthhelp" hidden></div>
-          <div id="plinth"></div>
-        </div>
-        <div class="card" id="placescard">
-          <h2>Placements <button class="qhelp" data-help="placeshelp" title="what this table is">?</button></h2>
-          <div class="cardhelp" id="placeshelp" hidden>
-            <p>X is from the wall's start corner to the item's left edge, facing the
-            wall. Z is 0 for anything standing on the floor — it stands on its legs,
-            which the engine allows for, plinth board or not. Set Z only for a hung
-            unit, to its underside; a panel stands on no legs, so its Z is its
-            underside exactly as typed. Layer is read from the cabinet's kind and its
-            Z. Pick a wall to place an item, or “—” to take it out; it lands clear of
-            whatever is already on that wall.</p>
-            <p>Y is out from the wall face to the back of an independent PANEL — 0 is
-            flush against the wall, and it is what puts a bulkhead underside out over
-            the units below it. A cabinet is against its wall, so it has no Y.
-            A panel attached to a cabinet stands where the cabinet puts it: its
-            offsets are typed in Panel design, and it moves with the cabinet.</p>
-          </div>
-          <div id="places"></div>
-        </div>
+      <div class="card" id="plinthcard">
+        <h2>Plinth <button class="qhelp" data-help="plinthhelp" title="what this table is">?</button></h2>
+        <div class="cardhelp" id="plinthhelp" hidden></div>
+        <div id="plinth"></div>
       </div>
     </div>
   </section>
@@ -1330,6 +1342,7 @@ function showRoomSub() {
     x.classList.toggle("on", x.dataset.roomsub === S.roomSub));
   $("plancard").hidden = !plan;
   $("roomplanonly").hidden = !plan;
+  $("placescard").hidden = !plan;
   $("roomtools").hidden = !plan;
   $("elevcard").hidden = plan;
   if (DRAW && !plan) endDraw();
@@ -5842,6 +5855,28 @@ window.addEventListener("resize", () => {
   clearTimeout(planResizeTimer);
   planResizeTimer = setTimeout(() => { if (S.tab === "room" && S.roomSub === "plan") renderPlan(); }, 200);
 });
+
+// Placements stands beside the plan, as tall as it (the unplaced strip and the
+// plan card), and scrolls within itself (touch-ups, 3 October 2026).
+// And the plan is drawn at its card's size, so a column that changes width
+// beside it (Placements filled in, the dock closed) draws it again.
+let planBoxW = 0;
+function fitPlaces() {
+  const h = $("plancard").hidden ? 0
+    : $("plancard").getBoundingClientRect().bottom - $("roommain").getBoundingClientRect().top;
+  $("placescard").style.height = h > 0 ? h + "px" : "";
+  const w = $("plan").clientWidth;
+  if (w && planBoxW && Math.abs(w - planBoxW) > 2) {
+    clearTimeout(planResizeTimer);
+    planResizeTimer = setTimeout(() => { if (S.tab === "room" && S.roomSub === "plan") renderPlan(); }, 120);
+  }
+  planBoxW = w;
+}
+if (window.ResizeObserver) {
+  const ro = new ResizeObserver(fitPlaces);
+  ro.observe($("roommain"));
+  ro.observe($("plancard"));
+}
 
 // Ctrl+wheel zooms; a plain wheel is left alone and scrolls the page. A plain
 // two-finger trackpad scroll arrives as a wheel event too, so zooming on every
