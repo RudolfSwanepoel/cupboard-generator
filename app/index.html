@@ -729,6 +729,12 @@
   <input id="jobname" placeholder="job name" title="job name">
   <button id="new">New</button>
   <button id="save">Save</button>
+  <button id="undo" disabled title="Undo the last change to this job (Ctrl+Z).
+Not undone: Save, Load, New, Delete project, Export, snapshots, and edits to the
+libraries (Catalogue → Boards / Runners, pictures) — those write files at once.">Undo</button>
+  <button id="redo" disabled title="Redo what was undone (Ctrl+Y or Ctrl+Shift+Z).
+Not undone: Save, Load, New, Delete project, Export, snapshots, and edits to the
+libraries (Catalogue → Boards / Runners, pictures) — those write files at once.">Redo</button>
   <select id="joblist" title="saved jobs"></select>
   <button id="load">Load</button>
   <button id="jobdel" title="move the selected job to jobs/_deleted/">Delete</button>
@@ -1060,7 +1066,184 @@ function markDirty(on) {
   S.dirty = !!on;
   const el = $("dirty");
   if (el) el.hidden = !S.dirty;
+  if (on) pushUndo();
+  else { S.savedKey = undoKey(); undoButtons(); }   // what is on disk, to undo back to
 }
+
+/* ---------- Undo and Redo (round 2, 3 October 2026) ------------------------
+   A job-level undo in the browser: a stack of job snapshots, 50 deep. Every
+   committed edit reaches `markDirty(true)` (or is a field's `change`), and
+   that calls `pushUndo()`, which puts the job as it was BEFORE the edit — the
+   base kept since the last one — on the stack. One step per committed edit:
+   while a text field has focus the step waits for it to lose focus, and a
+   pointer move or a keystroke never makes one. What the page writes back on
+   the engine's say-so (the drawer solver's heights, an acceptance that
+   lapsed) is not an edit: `S.noUndo` keeps it from making a step, and it goes
+   with the edit it followed. A write to a shared LIBRARY that changes the job
+   on screen (a board renamed, a runner record saved) is folded into the base
+   (`undoRebase`): it is not undone. Load and New clear the history. Undo
+   restores the snapshot and runs the ordinary compute; the selection is kept
+   when the item still exists.                                               */
+
+const UNDO_DEPTH = 50;
+S.undo = [];
+S.redo = [];
+S.undoBase = null;       // {key, job}: the job as of the last committed edit
+S.savedKey = null;       // the job as on disk
+S.noUndo = false;
+let undoWait = null;     // a text field whose edit commits when it loses focus
+const UNDO_FOLLOW_MS = 3000;
+S.undoPushAt = 0;        // when the last step was made
+S.userAt = 0;            // when the operator last pressed or typed anything
+["pointerdown", "keydown"].forEach((ev) =>
+  document.addEventListener(ev, () => { S.userAt = Date.now(); }, true));
+
+// The job as one comparable string. `places()` and `acceptances()` add an
+// empty list when they are read, which is no edit.
+function undoKey(job) {
+  const top = job || S.job;
+  return JSON.stringify(top, function (k, v) {
+    return this === top && (k === "placements" || k === "acceptances")
+      && Array.isArray(v) && !v.length ? undefined : v;
+  });
+}
+
+function typingIn(el) {
+  if (!el || !el.tagName) return false;
+  if (el.isContentEditable || el.tagName === "TEXTAREA") return true;
+  return el.tagName === "INPUT" && !/^(checkbox|radio|button|submit|reset|file|range|color)$/.test(el.type);
+}
+
+function pushUndo(force) {
+  if (S.noUndo || S.undoing) return;
+  if (S.undoBase === null) { undoRebase(); return; }
+  // Typed into, or a pointer moving: not a step yet. A dropdown's or a tick
+  // box's `input` IS the choice made — and its table may be redrawn under it
+  // before its `change` can reach the document — so that commits now.
+  const ev = window.event;
+  if (!force && ev && (/^(pointermove|mousemove|wheel)$/.test(ev.type)
+                       || (ev.type === "input" && typingIn(ev.target)))) {
+    holdUndo(document.activeElement);
+    return;
+  }
+  const key = undoKey();
+  if (key === S.undoBase.key) return;
+  // The server's answer to an edit just made — a placement's free x, a kind's
+  // support rows, a room field's reply, arriving after the field's `change`
+  // already made the step — is part of that step: written asynchronously,
+  // soon after, with nothing pressed or typed between. A wall's typed length
+  // is not caught by this: its `change` found nothing yet, so its reply makes
+  // the step.
+  if (!force && !window.event && Date.now() - S.undoPushAt < UNDO_FOLLOW_MS && S.userAt <= S.undoPushAt) {
+    S.undoBase = {key: key, job: structuredClone(S.job)};
+    return;
+  }
+  if (!force && typingIn(document.activeElement)) { holdUndo(document.activeElement); return; }
+  S.undo.push(S.undoBase.job);
+  if (S.undo.length > UNDO_DEPTH) S.undo.shift();
+  S.redo = [];
+  S.undoBase = {key: key, job: structuredClone(S.job)};
+  S.undoPushAt = Date.now();
+  undoButtons();
+}
+
+// What the page writes back on the engine's say-so goes with the step it
+// followed — unless a field is still being typed in, whose step is to come.
+function undoAbsorb() {
+  if (S.undoing || S.undoBase === null) return;
+  // a field being typed in may have written the job without saying so (a
+  // drawer face re-solves as it is typed): that edit is a step to come
+  if (typingIn(document.activeElement) && S.userAt > S.undoPushAt) {
+    holdUndo(document.activeElement);
+    return;
+  }
+  if (!undoWait) undoRebase();
+}
+
+function holdUndo(el) {
+  if (!typingIn(el) || undoWait === el) return;
+  if (undoWait) undoWait.removeEventListener("focusout", undoLeave);
+  undoWait = el;
+  el.addEventListener("focusout", undoLeave);
+}
+
+function undoLeave() {
+  if (undoWait) undoWait.removeEventListener("focusout", undoLeave);
+  undoWait = null;
+  pushUndo(true);
+}
+
+// The job on screen becomes the base without a step: a load, a new job, a
+// library write the job follows.
+function undoRebase() {
+  S.undoBase = {key: undoKey(), job: structuredClone(S.job)};
+}
+
+function undoReset() {
+  S.undo = [];
+  S.redo = [];
+  undoRebase();
+  undoButtons();
+}
+
+function undoButtons() {
+  const u = $("undo"), r = $("redo");
+  if (u) u.disabled = !S.undo.length;
+  if (r) r.disabled = !S.redo.length;
+}
+
+function undoRestore(snap) {
+  const cur = S.job.cabinets[S.sel];
+  const num = cur ? cur.number : null;
+  S.undoing = true;
+  if (DRAW) endDraw();
+  if (NOOK) endNook();
+  S.job = structuredClone(snap);
+  places();
+  const i = num === null ? -1 : S.job.cabinets.findIndex((c) => c.number === num);
+  S.sel = i >= 0 ? i : null;
+  if (S.selWall !== null && !(S.job.room && S.job.room.walls.some((w) => w.id === S.selWall))) S.selWall = null;
+  if (S.isolate !== null && !S.job.cabinets.some((c) => c.number === S.isolate)) S.isolate = null;
+  S.selRendered = -2;
+  roomSig = null;
+  placesSig = null;
+  gapsSig = null;
+  plinthSig = null;
+  $("jobname").value = S.job.name || "untitled";
+  undoRebase();
+  S.dirty = S.undoBase.key !== S.savedKey;     // back to what is on disk: saved
+  $("dirty").hidden = !S.dirty;
+  S.undoing = false;
+  undoButtons();
+  renderList();
+  compute();
+}
+
+function undo() {
+  if (undoWait) undoLeave();                   // a field still being typed in commits first
+  if (!S.undo.length) return;
+  S.redo.push(structuredClone(S.job));
+  undoRestore(S.undo.pop());
+}
+
+function redo() {
+  if (undoWait) undoLeave();
+  if (!S.redo.length) return;
+  S.undo.push(structuredClone(S.job));
+  undoRestore(S.redo.pop());
+}
+
+// a field's `change` is a committed edit, whatever its handler went on to do
+document.addEventListener("change", () => { if (!S.undoing) pushUndo(true); });
+
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k !== "z" && k !== "y") return;
+  if (typingIn(e.target)) return;              // the field's own undo applies
+  e.preventDefault();
+  if (k === "y" || e.shiftKey) redo(); else undo();
+});
 
 window.addEventListener("beforeunload", (e) => {
   if (!S.dirty) return;
@@ -1138,7 +1321,10 @@ function dropLapsed(lapsed) {
   lapsed.forEach((l) => S.lapsedNotes.push(
     `Acceptance for ${l.where} (${l.check}) was cleared because the cabinet or the ` +
     `ceiling changed — it blocks again until it is looked at afresh.`));
+  S.noUndo = true;           // a consequence of the edit before it, not a step (Undo)
   markDirty(true);
+  S.noUndo = false;
+  undoAbsorb();
   toast(S.lapsedNotes.slice(-lapsed.length).join("\n"), true);
 }
 
@@ -3530,7 +3716,8 @@ async function solveStack() {
       (over ? `<span class="over">the fixed faces over-run the opening —
                export is blocked until they fit</span>` : "");
   }
-  if (moved) schedule();
+  // the engine's heights, written back: not an edit of its own (Undo)
+  if (moved) { S.noUndo = true; schedule(); S.noUndo = false; undoAbsorb(); }
 }
 
 async function applyPreset(which) {
@@ -3539,6 +3726,7 @@ async function applyPreset(which) {
   const r = await post("/api/drawer-preset", {count: c.drawers.length, preset: which});
   if (!r.ok) { toast(r.error, true); return; }
   c.drawers.forEach((d, i) => { d.mode = "share"; d.share = r.shares[i]; });
+  markDirty(true);           // a button: one step (Undo)
   renderDrawers();
 }
 
@@ -5075,6 +5263,7 @@ $("boards").addEventListener("click", async (e) => {
   if (r.job) {
     S.job = r.job;
     S.selRendered = -2;
+    undoRebase();            // a library write the job follows: not undone
     await compute();
   }
   toast((r.renamed
@@ -5102,6 +5291,7 @@ $("boards").addEventListener("change", async (e) => {
     return;
   }
   S.job = r.job;
+  markDirty(true);           // a project edit: unsaved, and one Undo step
   await compute();
   drawBoards();
 });
@@ -5312,7 +5502,11 @@ $("runners").addEventListener("click", async (e) => {
       return;
     }
     S.rMissing = [];
-    if (r.job) { S.job = r.job; markDirty(true); }
+    if (r.job) {
+      S.job = r.job;
+      S.noUndo = true; markDirty(true); S.noUndo = false;
+      undoRebase();          // a library write the job follows: not undone
+    }
     toast(`Saved ${r.id} to the library` + (r.project_follows
       ? " — this project's copy follows it (its captured price is kept); saved jobs keep theirs." : "."));
     S.rEdit = null;
@@ -5516,6 +5710,7 @@ async function swapBoard(fromId, to) {
   if (!done.ok) { toast(done.error, true); return; }
   S.job = done.job;
   S.selRendered = -2;
+  markDirty(true);           // a project edit: unsaved, and one Undo step
   await compute();
   drawBoards();
 }
@@ -8835,8 +9030,14 @@ function adopt(job) {
   gapsSig = null;
   plinthSig = null;
   $("jobname").value = job.name || "untitled";
+  S.job.name = job.name || "untitled";
+  undoReset();               // Load and New clear the history
+  S.savedKey = undoKey();
   compute();
 }
+
+$("undo").addEventListener("click", undo);
+$("redo").addEventListener("click", redo);
 
 $("new").addEventListener("click", () => {
   if (!okToDiscard("Starting a new job")) return;

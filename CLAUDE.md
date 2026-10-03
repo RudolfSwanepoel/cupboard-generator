@@ -41,7 +41,9 @@ section redo (stages `layout`, `lock`, `auto`; `3d` measures the runner's
 inner member sliding), screenshots into
 `output/_checks/ui_check_drawers/`, and `python tools/ui_check_walls.py` walls at
 any angle and Draw walls (stages `draw`, `ell`, `corner`, `input`, `drag`, `3d`),
-screenshots into `output/_checks/ui_check_walls/`. All five are optional —
+screenshots into `output/_checks/ui_check_walls/`, and `python tools/ui_check_undo.py`
+Undo and Redo (four edits undone back to the loaded job and redone, one step
+per edit, Ctrl+Z in a text field left to the field). All six are optional —
 Playwright is the only third-party package anywhere near this app, and only
 those scripts need it — and each says so and exits 0 when it is not installed.
 `ui_check_3d.py --stage look` reads the drawn colour of a board off the canvas
@@ -111,6 +113,61 @@ Python that runs the app (it must have pywebview). `build-demo/` and `demo/` are
 gitignored; never commit an .exe or a zip.
 
 ## Status
+
+**Room touch-ups round 2, and Undo (3 October 2026, brief
+`Claude outputs/room-touchups-2-and-undo-brief-2026-10-03.md`, ruled by
+Rudolf).** One commit per part; nothing that cuts, nests or costs moved:
+benchmark unchanged (272 / 59 / 30, 92 pot holes, 18 / 9 / 6, R28,363.50),
+`check_all` 23 of 23, `snapshot.py --compare`: panels, issues and totals
+identical, Test.json's plan SVG moved (its labels, and their backing).
+
+1. **The plan has the screen.** Placements collapses to a slim strip (the
+   dock's pattern, "Placements" down its side), collapsed by default,
+   remembered per viewer (`cupboard.places`, `placesShow`). The Room card and
+   the Wall card are **compact, 360 wide** and always shown — the dock's
+   collapse is the editor's (`.dock.cardmode`): Name · Ceiling · Offset depth
+   on one row, the pill and counts on one line, small buttons, the table Wall
+   · Length · Corner · Height · Flip · × with the openings / obstructions in
+   the row's tooltip, the help behind "?" (`S.helpOpen` keeps a "?" open
+   across repaints). A cabinet selected: the editor's width, as before. At
+   1360 x 900 the plan's card went from about 450 px to 890.
+2. **Wall lengths outside, turned along the wall, inside the drawing, backed
+   over anything.** On the wall's back beyond the thickness band, rotated to
+   read along it (a wall up the page reads upwards; `data-cx`, `data-cy`,
+   `data-rot`; the field the page lays over it turned to match); the
+   collision step moves one further out on a leader. `plan_svg` draws again
+   with every placed label's box in its bounds and `render.PLAN_LABEL_MARGIN`
+   (150 mm) round it when one would be past the edge (`_grow`), so the
+   exported plan clips none. Over a cabinet, panel, face, wall or gap mark a
+   label sits on a white rounded backing (`rect.lenback`, 0.85, no pointer
+   events); over nothing it has none. `check_room.py` `plan_labels()` (every
+   fixture room, a nook, an open L, one wall, a hexagon, a partition) and
+   `ui_check_walls.py --stage labels` (the nook room, Test.json's room, a
+   partition; the exported plan's viewBox measured in the page).
+3. **Undo and Redo.** See **Undo** under The UI. `ui_check_undo.py` (new).
+   **Edit paths that did not reach `pushUndo()`, and how each was fixed:** (a)
+   ticking a board into the project (`/api/board-select`) and the board swap
+   (`/api/board-swap`) never called `markDirty` at all — so they never lit
+   "unsaved changes" either: both do now; (b) Equal / Graduated (`applyPreset`)
+   wrote the shares and reached the job only through the drawer solver's
+   compute: it marks the job dirty itself now; (c) a drawer face typed
+   re-solves the stack on every keystroke without `markDirty`, and the
+   solver's write-back would have folded the typed figure into the base:
+   while a field typed into has focus the step is held for it; (d) the
+   Placements table's wall dropdown redraws the table in its `input`
+   handler, so its `change` never reached the document: a dropdown's or tick
+   box's `input` commits; (e) the server's answer that lands after a field's
+   `change` already made the step (a placement's free x, a room field's
+   reply) is folded into that step, not made a second. Not undone, by the
+   brief: the board and runner LIBRARY saves that change the job on screen
+   (`undoRebase`).
+
+Playwright: `ui_check_undo` (new), `ui_check_walls`, `ui_check_attached`,
+`ui_check_drawers` pass; `ui_check_restructure` but for its three
+pre-existing `attach` lines (its Room line re-pointed at the Placements
+strip); `ui_check_3d` but for f6's "nothing was recomputed for it" (Esc in
+a 3D drag), which failed 1 run in 3 here and 1 in 4 on the tree before
+Undo (run in a worktree) — the known flake, not this brief.
 
 **Room tab touch-ups after Phase 2 (3 October 2026, brief
 `Claude outputs/room-layout-touchups-brief-2026-10-03.md`, ruled by Rudolf).**
@@ -1385,6 +1442,7 @@ dirty. Nothing else about either changed.
 | Placements (open / collapsed) | always open in the left column | **collapses** to a slim strip (chevron, "Placements" down its side), collapsed by default, remembered per viewer (`cupboard.places`) (round 2, 3 Oct 2026) |
 | Room card / Wall card width | the editor's width (560, or as dragged) | **compact, 360**, always shown (the dock's collapse is the editor's); the Room card's fields on one row, small buttons, Wall · Length · Corner · Height · Flip · ×, Op. / Obs. in the row's tooltip, the help behind a **?**; the editor's width when a cabinet is selected (round 2) |
 | A wall's length on the plan | outside along the normal, level whatever the wall's direction, clipped at the edge of an exported plan | **outside on the wall's back, turned to read along it** (a wall up the page reads upwards); the plan's bounds take every label in with `render.PLAN_LABEL_MARGIN` (150 mm) round it; a white backing (`rect.lenback`, 0.85) where it lies over a cabinet, panel, face, wall or gap mark (round 2, 3 Oct 2026) |
+| Undo / Redo | — (none; a mistake was put right by hand) | **Undo · Redo** beside Save in the top bar, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z (not while typing in a field); 50 steps of the job on screen; Save, Load, New, Delete project, Export, snapshots and library edits are not undone (round 2, 3 Oct 2026) |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**
@@ -2492,6 +2550,9 @@ tools/ui_check_3d.py       the 3D view in the running app, with a real mouse (Pl
 tools/ui_shots_3d.py       the four 3D screenshots the realism brief compares, before and after
                            (Playwright), into Claude outputs/3d-realism-screenshots/
 tools/ui_check_attached.py attached panels in the running app (Playwright)
+tools/ui_check_undo.py     Undo and Redo in the running app (Playwright): a plan drag, a typed wall
+                           length, a delete, a drawer face, undone back to the loaded job and redone;
+                           a new edit clears Redo; Ctrl+Z in a field is the field's; the Placements pick
 tools/ui_check_walls.py    the Room tab on positioned walls (Playwright): the toolbar, the Room
                            and Wall cards, Draw walls ON the plan, a one-wall room, Flip face,
                            Renumber, wall height, refused inputs, a drag onto a 45-degree wall,
@@ -3903,6 +3964,25 @@ cabinet alone in 3D over the cabinet list, in the left column; the **settings
 panel is a column of its own**, starting level with the top of the 3D view. The
 wall elevations are in Room -> Elevation. See the Status entry and **The
 Cabinets tab's 3D**.
+
+**Undo** (round 2, 3 October 2026): **Undo · Redo** beside Save, Ctrl+Z /
+Ctrl+Y / Ctrl+Shift+Z (in a text field the field's own undo applies). A stack
+of job snapshots (`structuredClone`), 50 deep, pushed by `pushUndo()` from
+`markDirty(true)` and every field's `change`: the job as it was before the
+edit (`S.undoBase`, kept since the last step) goes on the stack, and a new
+step clears Redo. One step per committed edit — a typed field commits when it
+loses focus, never per keystroke; a pointer move never makes one; what the
+page writes back on the engine's say-so (`S.noUndo`, `undoAbsorb`: the drawer
+solver, a lapsed acceptance) and the server's answer just after a step
+(`UNDO_FOLLOW_MS` 3000, with nothing pressed between) go with the step they
+followed. Undo restores the snapshot and runs the ordinary compute, keeping
+the selection when the item still exists; back at the saved job the unsaved
+marker clears (`S.savedKey`). Load and New clear the history (`undoReset` in
+`adopt`). Not undone, and the tooltip says so: Save, Load, New, Delete
+project, Export, snapshots, and the libraries (Catalogue → Boards / Runners,
+pictures), which write files at once — a library write the job follows is
+folded into the base (`undoRebase`). Every new edit path must reach
+`markDirty(true)` or a `change` event.
 
 **Room -> Plan since the room redo (2 October 2026)**: a slim toolbar on the
 left (Select, the default; Draw walls; Wall nook (Phase 2); Esc returns to
