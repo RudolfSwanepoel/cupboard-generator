@@ -20,9 +20,11 @@ from urllib.parse import unquote
 
 from app import demo
 from cabinetgen import boards as B
+from cabinetgen.boards import rename_board_in_job  # noqa: F401  (moved there for Import project)
 from cabinetgen import nest as N
 from cabinetgen import pictures as PIC
 from cabinetgen import hardware as H
+from cabinetgen import importer as IMP
 from cabinetgen.drawers import (divide, equal_shares, graduated_shares,
                                 opening_for, remainder, split_pair, stack)
 from cabinetgen.engine import generate_job, mitre_door_width, panel_of
@@ -664,32 +666,6 @@ def clean_board_id(raw) -> str:
     return out[:12]
 
 
-def rename_board_in_job(job, old_id: str, new_id: str) -> list:
-    """Point everything in one job at a board's new id, and say what moved.
-
-    A job normally keeps its own copy of a board under the id it was selected
-    with — that is the price capture, and a saved job is never touched. This is
-    for the project open on screen, where the rename is part of the same edit.
-    Panel designations are not involved: a panel keeps its name and changes what
-    it is cut from.
-    """
-    moved = []
-    if old_id in (job.materials or {}):
-        job.materials = {(new_id if k == old_id else k): v
-                         for k, v in job.materials.items()}
-    job.boards = [new_id if b == old_id else b for b in job.board_ids]
-    # Every field a cabinet names a board in comes from `Cabinet.board_refs`,
-    # so this and `board_swap` cannot remember different lists.
-    for cab in job.cabinets:
-        hit = cab.map_board_refs(lambda b: new_id if b == old_id else b)
-        if hit:
-            moved.append({"cabinet": cab.number, "fields": sorted(set(hit))})
-    for p in job.loose:
-        if p.material == old_id:
-            p.material = new_id
-    return moved
-
-
 def board_save(payload):
     """Add or edit one board in the library, including changing its id.
 
@@ -779,9 +755,9 @@ def board_save(payload):
 
 
 # What the library decides for a board in the project on screen. Price is not on
-# the list: a job keeps the price it was quoted at ("Price capture").
-LIVE_FIELDS = ("name", "board", "tape", "thickness", "grain", "picture",
-               "has_edging", "edging_kinds", "colour")
+# the list: a job keeps the price it was quoted at ("Price capture"). Stated in
+# `boards`, beside `rename_board_in_job`, so Import project asks the same question.
+LIVE_FIELDS = B.LIVE_FIELDS
 
 
 def refresh_from_library(job, lib=None, only=None) -> list:
@@ -1923,6 +1899,69 @@ def job_load(payload):
             "refreshed": refreshed}
 
 
+# --- Import project (3 October 2026) -------------------------------------------
+#
+# A whole old Cupboard App folder's work — a demo's, or another laptop's —
+# brought into this one. Every decision is `cabinetgen.importer`'s; this only
+# hands it the folder and where this app keeps things, and gives it the app's
+# own Load path to test each job through. It only ever READS the old folder.
+
+def _import_target():
+    """Where this app keeps jobs, pictures and the two libraries — asked at call
+    time, so a check can point every one of them at a temp folder."""
+    return IMP.Target(root=ROOT, jobs_dir=JOBS_DIR, pictures_dir=PICTURES_DIR,
+                      boards_path=B.LIBRARY, hardware_path=H.LIBRARY)
+
+
+def _import_test_load(text: str):
+    """Load an imported job exactly as Load does (`job_load`): the file's
+    migration, former ids, the library's details. Raises if it will not."""
+    job = job_from_dict(json.loads(text))
+    upgrade_former_ids(job)
+    refresh_from_library(job)
+    job.bind_runners()
+    job_to_dict(job)
+
+
+def pick_folder(payload):
+    """The native folder picker (ruling 2), on the window `run_app.py` handed
+    over — as Browse… is for pictures. With no window (`--no-window`, the
+    browser fallback) there is no picker: `no_window`, and the page offers a
+    typed path instead."""
+    win = WINDOW
+    if win is None:
+        return {"ok": False, "no_window": True,
+                "error": "there is no desktop window to open a folder picker on — "
+                         "type the folder's path instead"}
+    try:
+        import webview
+        chosen = win.create_file_dialog(webview.FileDialog.FOLDER)
+    except Exception as exc:                       # a GUI that will not co-operate
+        return {"ok": False, "error": f"the folder picker would not open: {exc}"}
+    if not chosen:
+        return {"ok": False, "cancelled": True}
+    path = chosen[0] if isinstance(chosen, (list, tuple)) else chosen
+    return {"ok": True, "path": str(path)}
+
+
+def import_scan(payload):
+    """The preview (ruling 4): every item in the old folder and what Import
+    would do with it. Writes nothing."""
+    got = IMP.scan(str(payload.get("path") or ""), _import_target())
+    if not got["ok"]:
+        return got
+    return dict(got["plan"].as_dict(), ok=True)
+
+
+def import_run(payload):
+    """Import what the preview listed (ruling 4), and the report (ruling 8).
+    Refused, writing nothing, when the folder no longer gives the preview's
+    list (`signature`)."""
+    return IMP.run(str(payload.get("path") or ""), _import_target(),
+                   signature=str(payload.get("signature") or ""),
+                   test_load=_import_test_load)
+
+
 def job_fixture(payload):
     """The October 2025 wardrobe, as JSON. The regression fixture, openable in the UI."""
     from jobs.wardrobe_oct2025 import JOB
@@ -2732,6 +2771,9 @@ ROUTES = {
     "/api/pick-picture": pick_picture,
     "/api/drop-picture": drop_picture,
     "/api/picture-grain": picture_grain,
+    "/api/pick-folder": pick_folder,
+    "/api/import-scan": import_scan,
+    "/api/import-run": import_run,
     "/api/export": export,
     "/api/accept": accept,
     "/api/jobs": job_list,

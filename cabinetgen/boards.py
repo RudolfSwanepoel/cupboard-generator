@@ -211,6 +211,43 @@ def to_material(board: Board) -> dict:
             "edging_kinds": list(board.edging_kinds), "colour": board.colour}
 
 
+# --- a board's id moving inside one job --------------------------------------
+
+# What the library decides for a board in a project: everything about what the
+# board IS, and not its price — a job keeps the price it was quoted at ("Price
+# capture"). `api.refresh_from_library` brings a job's copy up to these on Load;
+# Import project asks the same question of a job it brings in.
+LIVE_FIELDS = ("name", "board", "tape", "thickness", "grain", "picture",
+               "has_edging", "edging_kinds", "colour")
+
+
+def rename_board_in_job(job, old_id: str, new_id: str) -> list:
+    """Point everything in one job at a board's new id, and say what moved.
+
+    A job normally keeps its own copy of a board under the id it was selected
+    with — that is the price capture, and a saved job is never touched. This is
+    for the project open on screen, where the rename is part of the same edit,
+    and for a job Import project brings in under a board renamed "(imported)".
+    Panel designations are not involved: a panel keeps its name and changes what
+    it is cut from.
+    """
+    moved = []
+    if old_id in (job.materials or {}):
+        job.materials = {(new_id if k == old_id else k): v
+                         for k, v in job.materials.items()}
+    job.boards = [new_id if b == old_id else b for b in job.board_ids]
+    # Every field a cabinet names a board in comes from `Cabinet.board_refs`,
+    # so this and `board_swap` cannot remember different lists.
+    for cab in job.cabinets:
+        hit = cab.map_board_refs(lambda b: new_id if b == old_id else b)
+        if hit:
+            moved.append({"cabinet": cab.number, "fields": sorted(set(hit))})
+    for p in job.loose:
+        if p.material == old_id:
+            p.material = new_id
+    return moved
+
+
 # --- which jobs use which board ---------------------------------------------
 
 @dataclass
@@ -268,6 +305,37 @@ def cabinet_board_ids(cab: dict) -> set:
             if p.get(f):
                 keys.add(p[f])
     return keys
+
+
+def map_cabinet_board_ids(cab: dict, fn) -> None:
+    """Rewrite every board id one cabinet DICT names through `fn`, in place.
+
+    The raw-JSON twin of `Cabinet.map_board_refs`, over exactly the fields
+    `cabinet_board_ids` reads. Import project uses it on a job written by a
+    NEWER version of the app, which is brought in as it stands rather than
+    through the dataclasses (they would drop the fields this app does not know).
+    `tools/check_import.py` holds it equal to `rename_board_in_job`.
+    """
+    if not isinstance(cab, dict):
+        return
+
+    def put(d, k):
+        if isinstance(d, dict) and d.get(k):
+            d[k] = fn(d[k])
+    for f in CABINET_BOARD_FIELDS:
+        put(cab, f)
+    if isinstance(cab.get("door_boards"), list):
+        cab["door_boards"] = [fn(b) if b else b for b in cab["door_boards"]]
+    for d in cab.get("drawers") or []:
+        for f in DRAWER_BOARD_FIELDS:
+            put(d, f)
+    for r in cab.get("support_rows") or []:
+        for f in ("board", "cut_board"):
+            put(r, f)
+    for p in cab.get("bespoke") or []:
+        put(p, "material")
+    for f in ("board", "edge_board"):
+        put(cab.get("panel"), f)
 
 
 def scan_jobs(jobs_dir: str) -> Usage:
