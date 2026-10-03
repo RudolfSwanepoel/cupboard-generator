@@ -87,7 +87,14 @@ class Standard:
 
     # ---- room --------------------------------------------------------------
     closure_warn: int = 5       # mm the wall chain may miss closing by before it is queried
-    closure_block: int = 20     # a chain missing by more than this is simply an open run
+    closure_block: int = 20     # a loop missing by more than this blocks the export (remeasure)
+    # A loop that a typed figure has opened (room redo Phase 2, ruled 3 October
+    # 2026, ruling 1): the main chain's last end missing its first start by up to
+    # this is a LOOP THAT OPENS, said "Loop opens by n mm at D→A" everywhere;
+    # beyond it the walls are an open run on purpose (a U kitchen's open side is
+    # at least two cabinet depths and a passage, some 2100). Display only, and
+    # for Rudolf to confirm.
+    loop_miss_max: int = 1000
     # Walls are positioned segments (room redo Phase 1, 2 October 2026). Two
     # wall ends within `join_tolerance` of each other meet: that is a corner.
     # `wall_thickness` is drawing only — the band on the back of the face line;

@@ -3020,8 +3020,13 @@ function update(payload, opts) {
   applyGhosting();
   buildOverlays();
   updateLegend();
-  say(payload.banner || (payload.room && !payload.ceiling_measured
-    ? "The ceiling is not measured: the walls stop a drawing margin above the tallest item." : ""));
+  // a loop that opened is said in `room.closure`'s own words (ruling 2, 3 October
+  // 2026): the same text the Room card and the toast show, decided on the server
+  const loop = payload.room && payload.room.closure && payload.room.closure.miss
+    ? payload.room.closure.text : "";
+  say([payload.banner || (payload.room && !payload.ceiling_measured
+    ? "The ceiling is not measured: the walls stop a drawing margin above the tallest item." : ""), loop]
+    .filter(Boolean).join(" · "));
   if (fresh) { V.hidden.clear(); if (V.openFor) V.openFor.clear(); setProjection(false, false); viewHome(false); }
   applyFronts(true);                       // rebuilt parts take the open/closed state as it stands
   buildList();

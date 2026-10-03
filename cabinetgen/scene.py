@@ -36,7 +36,7 @@ from .model import Job, Placement, resolve_board, material_thickness
 from .render import PICTURE_TILE_MM, Fills, board_look, run_layout
 from .room import (DRAWER_MOVING, RUNNER_ROLES, Part, _from_plan, _placed_frame, _to_plan, back_part,
                    carcass_z, drawer_layout, clashes, corner_points, door_hinges,
-                   filler_solids, geometry, interior_parts, is_closed, layer_of, overlaps,
+                   filler_solids, geometry, interior_parts, is_closed, closure, layer_of, overlaps,
                    placed, placed_panels, placement_for, plinth_solids,
                    pullout_envelope, solid_parts, swing_envelopes, tape_solids,
                    wall_frames, wall_height)
@@ -249,7 +249,8 @@ def _room_payload(job: Job, top: float) -> Optional[dict]:
                               "centre": [round(sx + dx * ob.x, 1), round(sy + dy * ob.x, 1)]}
                              for ob in w.obstructions],
         })
-    return {"name": rm.name, "closed": is_closed(rm), "ceiling": rm.ceiling,
+    cl = closure(rm)
+    return {"name": rm.name, "closed": cl["closed"], "closure": cl, "ceiling": rm.ceiling,
             "top": round(top, 1),
             "floor": [[round(x, 1), round(y, 1)] for x, y in corners],
             "walls": walls}

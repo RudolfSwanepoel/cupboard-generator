@@ -17,7 +17,7 @@ from .room import (above_ceiling, arm_shelf_depth, arm_shelf_max_depth,
                    attached_carcass_overlaps, cabinet_by_number, host_of,
                    blind_door_width, blind_opening, blocked_openings,
                    cab_corner_outline, corner_angle, corner_shadow,
-                   clashes as room_clashes, closure_error, above_wall,
+                   clashes as room_clashes, closure as room_closure, above_wall,
                    crossing_walls, low_openings, unit_corner,
                    gaps as room_gaps, geometry, overlaps as room_overlaps,
                    panel_clashes as room_panel_clashes, placed,
@@ -1065,16 +1065,15 @@ def _room(job: Job, std):
     if dupes:
         return out          # every record names a wall by id; nothing below can be trusted
 
-    # A chain that NEARLY closes and misses (2 October 2026): the walls are
-    # positioned, so a miss within `closure_block` is measurements that
-    # disagree; a bigger miss is simply an open run, and nothing is said.
-    err = closure_error(rm, std)
-    if err > std.closure_block:
-        out.append(Issue(CRITICAL, rm.name,
-                         f"walls miss closing by {err} mm — the measurements "
-                         f"contradict each other, remeasure before placing anything", check="room-closure"))
-    elif err > std.closure_warn:
-        out.append(Issue(WARNING, rm.name, f"walls miss closing by {err} mm", check="room-closure"))
+    # A loop that a typed figure opened (ruling 1, 3 October 2026): the miss is
+    # left where it is and said, in `room.closure`'s own words — the one text
+    # every display shows. Over `closure_block` it blocks: the measurements
+    # contradict each other. An open run on purpose says nothing.
+    cl = room_closure(rm, std)
+    if cl["miss"] > std.closure_block:
+        out.append(Issue(CRITICAL, rm.name, cl["text"], check="room-closure"))
+    elif cl["miss"] > std.closure_warn:
+        out.append(Issue(WARNING, rm.name, cl["text"], check="room-closure"))
 
     # Walls that cross each other in plan cannot be built as drawn. Meeting at
     # an end, or an end on another wall (a T-wall), is legal geometry. Not

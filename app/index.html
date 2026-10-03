@@ -989,6 +989,7 @@ async function compute() {
   if (seq !== computeSeq) return;   // a newer job is already being computed
   S.res = res;
   if (!res.ok) toast(res.error, true);
+  else closureToast(res.room);
   dropLapsed(res.lapsed || []);
   renderStrip();
   if (S.tab === "catalogue" && S.catSub === "boards" && S.lib) drawBoards();
@@ -5781,7 +5782,9 @@ function renderRoom() {
     <td><input type="number" step="1" min="0" data-wall="${esc(w.id)}" data-wk="length" value="${w.length}"
       title="length, mm — the walls after it follow"></td>
     <td>${w.after.angle === null
-      ? `<span class="note" title="nothing meets this wall's end">—</span>`
+      ? (loopAt(w.id, "after") ? `<span class="pill ${loopAt(w.id, "after").level === "crit" ? "crit" : "warn"}" data-loopgap="${esc(w.id)}"
+           title="${esc(loopAt(w.id, "after").text)}">— opens ${loopAt(w.id, "after").miss} mm</span>`
+         : `<span class="note" title="nothing meets this wall's end">—</span>`)
       : `<input type="number" step="any" min="0" max="360" data-wall="${esc(w.id)}" data-wk="angle_after"
            value="${w.after.angle}" title="interior angle at the ${esc(w.id)}→${esc(w.after.wall)} corner, degrees${
            w.after.square === null ? "" : ` (${w.after.square > 0 ? "+" : ""}${w.after.square} mm out of square at ${rm.offset_depth})`}">`}</td>
@@ -5818,6 +5821,16 @@ function renderRoom() {
   renderClosure();
 }
 
+// The open end of a loop that opened, if this wall's end ("after") or start
+// ("before") is it: `room.closure` names the gap "D→A". Read, not decided.
+function loopAt(wid, key) {
+  const info = roomInfo();
+  const cl = info && info.closure;
+  if (!cl || cl.closed || !cl.miss || !cl.at) return null;
+  const [last, first] = cl.at.split("\u2192");
+  return (key === "after" ? last === wid : first === wid) ? cl : null;
+}
+
 function renderWallCard(id) {
   const rm = S.job.room;
   const box = $("wallcard");
@@ -5831,7 +5844,8 @@ function renderWallCard(id) {
   const corner = (c, key, label) => `<div class="f"><label>${label} (°)${
       c.wall ? ` · with ${esc(c.wall)}` : ""}</label>
     ${c.angle === null || c.angle === undefined
-      ? `<span class="note">— meets no wall</span>`
+      ? (loopAt(id, key) ? `<span class="pill ${loopAt(id, key).level === "crit" ? "crit" : "warn"}" data-loopgap="${esc(id)}"
+           >${esc(loopAt(id, key).text)}</span>` : `<span class="note">— meets no wall</span>`)
       : `<div style="display:flex;gap:6px;align-items:center;white-space:nowrap">
           <input type="number" step="any" min="0" max="360" data-wall="${esc(id)}" data-wk="angle_${key}"
             value="${c.angle}" style="width:80px" title="interior angle, degrees">
@@ -5909,25 +5923,34 @@ function selectRoom() {
   renderRoomDock();
 }
 
+// Open or closed, said in `room.closure`'s own words and at its own level (ruling
+// 2, 3 October 2026): the browser decides nothing about it.
 function renderClosure() {
   const box = $("closure");
   if (!box) return;
   const info = roomInfo();
   if (!info) { box.innerHTML = ""; return; }
-  const std = S.def.standard || {};
-  const e = info.closure_error;
-  let pill;
-  if (info.closed) pill = `<span class="pill ok">closed room</span>`;
-  else if (e > (std.closure_block || 20))
-    pill = `<span class="pill crit">misses closing by ${e} mm — remeasure</span>`;
-  else if (e > (std.closure_warn || 5))
-    pill = `<span class="pill warn">misses closing by ${e} mm</span>`;
-  else if (e) pill = `<span class="pill ok">walls close within ${e} mm</span>`;
-  else pill = `<span class="pill ok">open run</span>`;
+  const cl = info.closure || {level: "ok", text: info.closed ? "closed room" : "open run"};
+  const pill = `<span class="pill ${cl.level === "crit" ? "crit" : cl.level === "warn" ? "warn" : cl.level === "info" ? "info" : "ok"}"
+    data-closure="${cl.closed ? "closed" : cl.miss ? "loop" : "open"}">${esc(cl.text)}</span>`;
   const crossing = (info.crossing || []).map((pr) => pr.join("/"));
   box.innerHTML = `${pill} <span class="note">${info.walls.length} wall${info.walls.length === 1 ? "" : "s"},
     ${info.placed} cabinet${info.placed === 1 ? "" : "s"} placed</span>` +
     (crossing.length ? ` <span class="pill crit">walls cross: ${esc(crossing.join(", "))}</span>` : "");
+}
+
+// The toast when the room stops closing, or starts again — said off the COMPUTE
+// (the same `closure` the Room card reads), never off the edit's own reply, so
+// it cannot disagree with anything else on screen. `S.closureWas` is what the
+// previous compute said.
+function closureToast(info) {
+  const cl = info && info.closure;
+  if (!cl) return;
+  const was = S.closureWas;
+  S.closureWas = {closed: cl.closed, miss: cl.miss, job: S.job};
+  if (!was || was.job !== S.job) return;           // a job just loaded: nothing changed
+  if (was.closed && !cl.closed) toast(cl.miss ? cl.text : "The room no longer closes — its walls are an open run now", true);
+  else if (!was.closed && was.miss && cl.closed) toast("The loop closes again.");
 }
 
 /* ---------- plan view ----------------------------------------------------- */
@@ -6982,11 +7005,7 @@ async function wallEdit(wid, wk, raw) {
   if (!r.ok) { wallNote(r.error); return; }
   wallNote("");
   S.job.room = r.room;
-  if (r.was_closed && !r.closed) {
-    toast(r.closure_error ? `The room no longer closes — it misses by ${r.closure_error} mm`
-                          : "The room no longer closes — its walls are an open run now", true);
-  }
-  schedule();
+  schedule();          // the compute says whether the loop opened (closureToast)
 }
 
 $("roomdock").addEventListener("click", async (e) => {

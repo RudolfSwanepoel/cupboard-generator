@@ -616,8 +616,101 @@ def stage_3d(pw):
     browser.close()
 
 
+def closure_job():
+    """Test.json as frozen (tools/fixtures/Test_3d.json), its L closed into a
+    rectangle with walls C and D, and a cabinet 99 on D in the D→A corner so
+    the elevation of A has a neighbour to show — built here, never saved."""
+    from cabinetgen.store import job_from_dict
+    with open(os.path.join(ROOT, "tools", "fixtures", "Test_3d.json"), encoding="utf-8") as f:
+        job = job_from_dict(json.load(f))
+    job.name = "closure"
+    job.room.walls += [Wall("C", 4000, 3000, 0, 3000), Wall("D", 0, 3000, 0, 0)]
+    job.cabinets.append(Cabinet(number=99, width=600, height=720, depth=560, kind="base"))
+    job.placements.append(Placement(99, "D", 2400))
+    return job
+
+
+def displays(page):
+    """Every place open / closed is shown, read off the page (ruling 2)."""
+    out = {}
+    out["room"] = page.evaluate("() => S.res.room.closure")
+    out["pill"] = page.evaluate("() => { const p = document.querySelector('#closure .pill'); "
+                                "return p ? [p.dataset.closure, p.textContent.trim()] : null; }")
+    out["table"] = page.evaluate("() => [...document.querySelectorAll('#room [data-loopgap]')]"
+                                 ".map((e) => [e.dataset.loopgap, e.textContent.trim()])")
+    out["tint"] = page.evaluate("() => [document.querySelectorAll('#plan polygon.roomside:not([data-wall])').length, "
+                                "document.querySelectorAll('#plan polygon.roomside[data-wall]').length]")
+    out["issue"] = issues(page, "room-closure")
+    sc = page.evaluate("async () => await post('/api/scene', {job: S.job})")
+    out["scene"] = sc["room"]["closure"]
+    el = page.evaluate("async () => (await post('/api/elevation', {job: S.job, wall: 'A'})).svg")
+    out["elev_D"] = "D: 99" in el
+    return out
+
+
+def stage_closure(pw):
+    print("\nOpen / closed: ONE source, every display says the same (ruling 2)")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    adopt(page, closure_job())
+    room_plan(page)
+    d = displays(page)
+    check("closed: the engine says closed room", d["room"]["text"], "closed room")
+    check("  the Room card pill", d["pill"], ["closed", "closed room"])
+    check("  no open gap in the walls table", d["table"], [])
+    check("  the plan tints the floor, no face bands", d["tint"], [1, 0])
+    check("  no room-closure issue", d["issue"], [])
+    check("  the 3D scene says closed", d["scene"]["closed"], True)
+    check("  the elevation of A sees the run on D round the corner", d["elev_D"], True)
+    page.fill('#room input[data-wall="A"][data-wk="length"]', "4100")
+    page.press('#room input[data-wall="A"][data-wk="length"]', "Enter")
+    page.wait_for_function("() => S.res.room.closure && !S.res.room.closure.closed", timeout=10000)
+    computed(page)
+    text = "Loop opens by 100 mm at D\u2192A \u2014 type the other walls or drag a corner"
+    d = displays(page)
+    check("A typed 4100: the engine says the loop opens by 100 at D→A", d["room"]["text"], text)
+    check("  the toast, off the compute, in the same words", page.inner_text("#toast"), text)
+    check("  the Room card pill", d["pill"], ["loop", text])
+    check("  the walls table's D corner: open by the same 100", d["table"], [["D", "— opens 100 mm"]])
+    check("  the plan: no floor tint, a face band per wall", d["tint"], [0, 4])
+    check("  Validation: the same words, critical", d["issue"], [text])
+    check("  the 3D scene: the same closure", d["scene"], d["room"])
+    check("  the elevation of A no longer sees D round a corner", d["elev_D"], False)
+    page.click('#room tr[data-wallrow="D"] td:first-child')
+    page.wait_for_function("() => S.selWall === 'D'", timeout=5000)
+    check("  wall D's card: its corner after reads the same text",
+          page.evaluate("() => document.querySelector('#wallcard [data-loopgap]').textContent.trim()"), text)
+    shot(page, "closure_open", None)
+    page.click('nav [data-tab="view3d"]')
+    page.wait_for_function("() => typeof V3D === 'object' && V3D !== null", timeout=30000)
+    page.wait_for_function("() => !S.sceneStale && V3D.memory().groups > 0", timeout=30000)
+    check("  the 3D view says it too", text in page.inner_text("#v3dview"), True)
+    page.click('nav [data-tab="room"]')
+    page.wait_for_function("() => S.tab === 'room'", timeout=5000)
+    page.click("#wallback")
+    time.sleep(0.2)
+    page.fill('#room input[data-wall="A"][data-wk="length"]', "4000")
+    page.press('#room input[data-wall="A"][data-wk="length"]', "Enter")
+    page.wait_for_function("() => S.res.room.closure && S.res.room.closure.closed", timeout=10000)
+    computed(page)
+    d = displays(page)
+    check("typed back: every display says closed",
+          [d["room"]["text"], d["pill"], d["table"], d["tint"], d["issue"], d["scene"]["closed"], d["elev_D"]],
+          ["closed room", ["closed", "closed room"], [], [1, 0], [], True, True])
+    check("  and the toast says it closed", page.inner_text("#toast"), "The loop closes again.")
+    page.click('nav [data-tab="view3d"]')
+    page.wait_for_function("() => S.tab === 'view3d' && !S.sceneStale", timeout=30000)
+    time.sleep(0.3)
+    check("  the 3D view's note is gone once it catches up", text in page.inner_text("#v3dview"), False)
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 STAGES = {"draw": stage_draw, "one": stage_one, "flip": stage_flip, "renumber": stage_renumber,
-          "height": stage_height, "input": stage_input, "drag": stage_drag, "3d": stage_3d}
+          "height": stage_height, "input": stage_input, "drag": stage_drag, "3d": stage_3d,
+          "closure": stage_closure}
 
 
 def main() -> int:

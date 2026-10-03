@@ -56,10 +56,14 @@ from cabinetgen.room import (add_wall, cabinet_footprint, chain_walls,     # noq
                              walls_from_points, _legacy_frames)
 from cabinetgen.room import flip_face as room_flip_face                    # noqa: E402
 from cabinetgen.room import renumber_walls, delete_wall, wall_height       # noqa: E402
+from cabinetgen.room import closure                                       # noqa: E402
+from cabinetgen.scene import build as scene_build                         # noqa: E402
+from cabinetgen.render import _plan_room_side                             # noqa: E402
 from cabinetgen.store import job_from_dict, job_to_dict, room_from_dict    # noqa: E402
 from cabinetgen.validate import validate                                   # noqa: E402
 
 FAILS = []
+from cabinetgen.standard import STANDARD as STD_                          # noqa: E402
 
 
 def check(name, got, want):
@@ -95,8 +99,8 @@ def main() -> int:
     set_length(bad, "C", 4150)
     check("C's end moved 150 along C, and D was carried with it",
           pts(bad)[2:], [("C", 4000, 3000, -150, 3000), ("D", -150, 3000, -150, 0)])
-    check("so the chain no longer closes: an open run of four walls, nothing to report",
-          (is_closed(bad), closure_error(bad), walk_order(bad)), (False, 0, ["A", "B", "C", "D"]))
+    check("so the loop opens by the 150, left where it is and reported (ruling 1, 3 Oct 2026)",
+          (is_closed(bad), closure_error(bad), walk_order(bad)), (False, 150, ["A", "B", "C", "D"]))
     near = rectangular(4000, 3000)
     set_length(near, "C", 4010)
     check("a 10 mm miss is a near miss, reported", (is_closed(near), closure_error(near)), (False, 10))
@@ -322,6 +326,7 @@ def main() -> int:
     touching()
     delete()
     angled()
+    closure_text()
 
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0
@@ -894,6 +899,45 @@ def angled():
     aj.room.ceiling = 2400
     check("above the ceiling on the diagonal wall, as anywhere",
           [n for n, *_ in above_ceiling(aj)], [1])
+
+
+
+def closure_text():
+    """Ruling 1 and 2 (3 October 2026): a typed figure leaves the loop open by
+    the miss; ONE answer, `room.closure`, names it and every reader agrees."""
+    print("\nclosure: one miss, one corner, one text — and every reader agrees")
+    r = rectangular(4000, 3000)
+    set_length(r, "A", 4100)
+    cl = closure(r)
+    check("A typed 4100: the loop opens by 100 at D→A, in the ruled words",
+          cl, {"closed": False, "miss": 100, "at": "D\u2192A", "level": "crit",
+               "text": "Loop opens by 100 mm at D\u2192A \u2014 type the other walls or drag a corner"})
+    job = Job(name="cl", room=r, cabinets=[], placements=[])
+    iss = _issues(job, "room-closure")
+    check("  the Validation tab says the same words, a critical over closure_block",
+          [(i.level, i.message) for i in iss], [("critical", cl["text"])])
+    sc = scene_build(job)
+    check("  the 3D scene carries the same closure", (sc["room"]["closed"], sc["room"]["closure"]), (False, cl))
+    check("  the plan draws the face bands, not the floor tint",
+          sum('data-wall=' in x for x in _plan_room_side(r, lambda q: q, STD_)) > 0 and
+          not any('data-wall=' not in x and "roomside" in x for x in _plan_room_side(r, lambda q: q, STD_)), True)
+    small = rectangular(4000, 3000)
+    set_length(small, "A", 4003)
+    check("3 mm: said (info), and nothing in Validation", (closure(small)["level"], closure(small)["miss"],
+          _issues(Job(name="s", room=small), "room-closure")), ("info", 3, []))
+    w12 = rectangular(4000, 3000)
+    set_length(w12, "A", 4012)
+    check("12 mm: a warning in the same words", [(i.level, i.message) for i in _issues(Job(name="w", room=w12), "room-closure")],
+          [("warning", closure(w12)["text"])])
+    set_length(r, "A", 4000)
+    check("typed back: closed again, all by itself", closure(r)["text"], "closed room")
+    set_length(r, "A", 4001)
+    check("within join_tolerance it still closes", closure(r)["closed"], True)
+    u = Room(name="U", walls=chain_walls([("A", 3000), ("B", 4000), ("C", 3000)], closed=False))
+    check("a U is an open run on purpose (its open side is beyond loop_miss_max): nothing said",
+          (closure(u)["text"], closure(u)["miss"]), ("open run", 0))
+    ell = Room(name="L", walls=chain_walls([("A", 3000), ("B", 2000)], closed=False))
+    check("two walls never make a loop", closure(ell)["text"], "open run")
 
 
 if __name__ == "__main__":

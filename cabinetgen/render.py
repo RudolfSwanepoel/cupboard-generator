@@ -1251,8 +1251,9 @@ def _plan_room_side(rm, T, std):
     the face side of each wall is tinted, fading out into the room. The line
     is the inside face and the room is on its right (`wall_normal`)."""
     out = []
-    from .room import main_chain
-    ids, closed = main_chain(rm, std)
+    from .room import closure, main_chain
+    ids, _c = main_chain(rm, std)
+    closed = closure(rm, std)["closed"]      # the one answer (ruling 2)
     if closed:
         pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in (T(q) for q in corner_points(rm, std)[:-1]))
         out.append(f'<polygon class="roomside" points="{pts}" fill="{ROOM_TINT}" '

@@ -26,8 +26,8 @@ Everything a room used to store is DERIVED here, one function each: a wall's
 length and direction, which wall end meets which (`connections`, end points
 within `Standard.join_tolerance`), the walk round the room (`walk_order`),
 whether it closes (`is_closed`), each corner's interior angle
-(`corner_angle`), the corner chain (`corner_points`) and a near miss
-(`closure_error`). A wall that meets nothing at either end is FREE: its run
+(`corner_angle`), the corner chain (`corner_points`) and a loop that opened
+(`closure`, the one answer every display reads). A wall that meets nothing at either end is FREE: its run
 ends there with no corner, no butt, no shadow and nothing returned beside it.
 Typed lengths and angles are edits that move end points (`set_length`,
 `set_corner`); the old chain arithmetic survives only as `_legacy_frames`,
@@ -386,20 +386,48 @@ def corner_points(rm: Room, std: Standard = STANDARD) -> List[Point]:
     return pts
 
 
+def closure(rm: Room, std: Standard = STANDARD) -> dict:
+    """Whether the room closes, and if not by how much — THE one answer (room
+    redo Phase 2, ruling 2, 3 October 2026). The Room card, the toast, the
+    plan's tint, the 3D view, the Validation tab and every check read this and
+    nothing else; the browser decides none of it.
+
+    `{"closed", "miss", "at", "level", "text"}`. A closed room: miss 0, level
+    "ok", text "closed room". A main chain of three or more walls whose last end
+    misses its first start by no more than `loop_miss_max` is a LOOP THAT OPENS
+    (ruling 1: a typed figure leaves the miss where it is rather than absorbing
+    it into a wall): `at` names the gap ("D→A"), the level is "crit" over
+    `closure_block`, "warn" over `closure_warn`, else "info", and the text is
+    "Loop opens by n mm at D→A — type the other walls or drag a corner". It
+    closes again by itself once the ends come within `join_tolerance`. Anything
+    else is an open run: miss 0, text "open run".
+
+        closure(EXAMPLE_ROOM)["text"]  ->  'closed room'
+    """
+    ids, closed = main_chain(rm, std)
+    if closed:
+        return {"closed": True, "miss": 0, "at": "", "level": "ok", "text": "closed room"}
+    if len(ids) >= 3:
+        first, last = _wall(rm, ids[0]), _wall(rm, ids[-1])
+        miss = math.dist((last.x1, last.y1), (first.x0, first.y0))
+        if miss <= std.loop_miss_max:
+            mm = max(1, int(round(miss)))
+            at = f"{last.id}\u2192{first.id}"
+            level = ("crit" if mm > std.closure_block else
+                     "warn" if mm > std.closure_warn else "info")
+            return {"closed": False, "miss": mm, "at": at, "level": level,
+                    "text": f"Loop opens by {mm} mm at {at} \u2014 type the other walls "
+                            f"or drag a corner"}
+    return {"closed": False, "miss": 0, "at": "", "level": "ok", "text": "open run"}
+
+
 def closure_error(rm: Room, std: Standard = STANDARD) -> int:
-    """How far a chain that NEARLY closes misses, in mm: the last wall's end to
-    the first wall's start, when that is within `closure_block`. A closed room
-    reports 0; a chain missing by more is simply an open run, and nothing is
-    said.
+    """How far a loop that opened misses closing, in mm (`closure`'s `miss`):
+    0 for a closed room and for an open run.
 
         closure_error(EXAMPLE_ROOM)  ->  0
     """
-    ids, closed = main_chain(rm, std)
-    if closed or len(ids) < 3:
-        return 0
-    first, last = _wall(rm, ids[0]), _wall(rm, ids[-1])
-    miss = math.dist((last.x1, last.y1), (first.x0, first.y0))
-    return round(miss) if miss <= std.closure_block else 0
+    return closure(rm, std)["miss"]
 
 
 def crossing_walls(rm: Room) -> List[Tuple[str, str]]:

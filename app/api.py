@@ -52,6 +52,7 @@ from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, 
                              blind_panel_height, blind_spans, carcass_z,
                              clashes as room_clashes,
                              closure_error, corner_angle, corner_points, crossing_walls,
+                             closure as room_closure,
                              free_x, gaps as room_gaps, geometry, walls_from_points,
                              is_closed, next_wall, prev_wall, walk_order, wall_height,
                              corner_before, out_of_square, flip_face, renumber_walls,
@@ -1396,6 +1397,7 @@ def _room_info(job):
     unplaced = []
     places = {}
     panels = 0
+    cl = room_closure(rm, job.std)
     for cab in job.cabinets:
         p = placement_for(job, cab.number)
         if cab.is_panel:
@@ -1419,9 +1421,14 @@ def _room_info(job):
     return {
         "name": rm.name,
         "walls": _wall_info(rm, job.std),
-        "closed": is_closed(rm, job.std),
+        # open / closed: ONE source (ruling 2, 3 October 2026). `closed` and
+        # `closure_error` are `closure`'s own figures; `closure` itself carries
+        # the miss, the corner it opens at, the level and the one text every
+        # display shows. The browser decides none of it.
+        "closure": cl,
+        "closed": cl["closed"],
         "walk": walk_order(rm, job.std),
-        "closure_error": closure_error(rm, job.std),
+        "closure_error": cl["miss"],
         # the room's corner chain in world plan mm, for the Draw walls canvas
         "corners": [[round(x), round(y)] for x, y in corner_points(rm, job.std)],
         "crossing": [list(pr) for pr in crossing_walls(rm)],
@@ -2249,9 +2256,11 @@ def wall_set(payload):
             w.drawn = bool(payload["drawn"])
     except (TypeError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
-    now = is_closed(rm, STANDARD)
-    return {"ok": True, "room": room_to_dict(rm), "was_closed": was, "closed": now,
-            "closure_error": closure_error(rm, STANDARD)}
+    # what the room now is, off `closure` — the same answer the compute gives;
+    # the browser says it from the compute, not from here
+    cl = room_closure(rm, STANDARD)
+    return {"ok": True, "room": room_to_dict(rm), "was_closed": was, "closed": cl["closed"],
+            "closure_error": cl["miss"], "closure": cl}
 
 
 def wall_add(payload):
