@@ -1384,6 +1384,7 @@ dirty. Nothing else about either changed.
 | Placements card; Plinth's row | Placements beside Plinth under Gaps | **Placements** the left column beside the plan, the plan's height, its table narrowed (Item · Wall · X · Z · Y · Layer, five-digit inputs), scrolled within, Plan only; **Plinth** under Gaps on its own (touch-ups, 3 Oct 2026) |
 | Placements (open / collapsed) | always open in the left column | **collapses** to a slim strip (chevron, "Placements" down its side), collapsed by default, remembered per viewer (`cupboard.places`) (round 2, 3 Oct 2026) |
 | Room card / Wall card width | the editor's width (560, or as dragged) | **compact, 360**, always shown (the dock's collapse is the editor's); the Room card's fields on one row, small buttons, Wall · Length · Corner · Height · Flip · ×, Op. / Obs. in the row's tooltip, the help behind a **?**; the editor's width when a cabinet is selected (round 2) |
+| A wall's length on the plan | outside along the normal, level whatever the wall's direction, clipped at the edge of an exported plan | **outside on the wall's back, turned to read along it** (a wall up the page reads upwards); the plan's bounds take every label in with `render.PLAN_LABEL_MARGIN` (150 mm) round it; a white backing (`rect.lenback`, 0.85) where it lies over a cabinet, panel, face, wall or gap mark (round 2, 3 Oct 2026) |
 
 **Attached panels, and a new cabinet's supports by its kind (28 September 2026,
 spec `Claude outputs/attached-panels-spec-2026-09-28.md`, agreed with Rudolf).**
@@ -2269,6 +2270,12 @@ only out along its wall's normal (`LENGTH_STEP` 8 px, up to `LENGTH_STEPS`
 16) and is never dropped; its box is the field the page lays over it
 (`planLengths`, `planLenFit`: the input as wide as its figure, the label as
 wide as its content, at every zoom).
+Since round 2 (3 Oct 2026) it sits outside the wall, on its back, turned
+to read along it (`data-cx` / `data-cy` / `data-rot` on the text, the field
+turned to match); `plan_svg` draws again with the label boxes in its bounds
+(`_grow`, `PLAN_LABEL_MARGIN`) when one would be past the edge; and one
+lying over a cabinet, panel, face, wall or gap mark is on a white backing
+(`rect.lenback`, `LABEL_BACKING_OPACITY`).
 
 **A drawing is a read-only view of the model. Nothing reads one back.** The
 colours, the grain lines and the legend are output; no check, no cut list and

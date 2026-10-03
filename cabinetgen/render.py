@@ -4,6 +4,7 @@ Cabinets are drawn side by side to scale, with doors, drawer faces and shelf
 lines shown. It is a sanity check, not a working drawing: if a cabinet looks
 wrong here it is wrong in the cut list too.
 """
+import math
 from html import escape
 from typing import List
 
@@ -16,7 +17,8 @@ from .room import (LAYERS, cabinet_footprint, carcass_z, clashes, corner_points,
                    panel_clashes, placed, placed_panels, plinth_choice_for,
                    plinth_lengths, pullout_envelope, return_profiles, run_key,
                    runs, swing_envelopes, to_world, wall_frames, wall_height,
-                   is_closed, blind_spans, front_outlines, return_faces)
+                   is_closed, blind_spans, front_outlines, return_faces,
+                   polygons_overlap)
 from .standard import Standard, STANDARD
 
 INK = "#191c1a"
@@ -1104,7 +1106,7 @@ EMPTY_PLAN_MM = (6000, 4000)
 
 
 def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
-             max_height: int = 620, isolate=None, margin: int = 0) -> str:
+             max_height: int = 620, isolate=None, margin: int = 0, _grow=None) -> str:
     """Plan of the room, looking down. Read-only.
 
     `show` is the layers drawn solid; `ghost` those drawn faint. A layer in
@@ -1161,6 +1163,9 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
         pts += cabinet_footprint(rm, p, cab)
     for cab, p in pans:
         pts += cabinet_footprint(rm, p, cab, std, job.materials)
+    # the labels' own boxes, in mm, from the pass before (see the end): the
+    # drawing makes room for them rather than clipping them
+    pts += list(_grow or ())
     xs = [q[0] for q in pts]
     ys = [q[1] for q in pts]
     if margin:
@@ -1202,7 +1207,7 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     out += _plan_room_side(rm, T, std)
     walls_out, lengths = _plan_walls(rm, corners, T, scale, std)
     out += walls_out
-    gap_shapes, labels = _plan_gaps(job, show, T)
+    gap_shapes, labels, gap_polys = _plan_gaps(job, show, T)
     labels = lengths + labels      # a wall's length first: it is never dropped
     out += gap_shapes
     # a wall is selected by a click on it: a fat invisible line under the
@@ -1259,13 +1264,43 @@ def plan_svg(job: Job, show=None, ghost=None, max_width: int = 1100,
     for cab, p in pans:
         if (cab.number == isolate if isolate is not None else "panels" in show):
             labels += _plan_label(rm, cab, p, T, std, job.materials)
-    out += _place_labels(labels)
+    # what a wall's length may sit over, and then wants a backing to read
+    # (round 2): cabinets, panels, faces, walls, gap marks — in drawing units
+    under = [[T(q) for q in cabinet_footprint(rm, p, cab)] for cab, p, _l in items]
+    under += [[T(q) for q in cabinet_footprint(rm, p, cab, std, job.materials)] for cab, p in pans]
+    for cab, p, _l in items:
+        under += [[T(q) for q in o] for _part, o in front_outlines(job, cab, p, std)]
+    under += gap_polys
+    for w in rm.walls:
+        (ax, ay), (bx, by) = T((w.x0, w.y0)), T((w.x1, w.y1))
+        L = math.hypot(bx - ax, by - ay)
+        if L > 0:
+            ux, uy = (by - ay) / L * 1.5, -(bx - ax) / L * 1.5
+            under.append([(ax + ux, ay + uy), (bx + ux, by + uy), (bx - ux, by - uy), (ax - ux, ay - uy)])
+    boxes = []
+    out += _place_labels(labels, boxes=boxes, under=under)
     out += _plan_plinths(job, show, T)
     out += _plan_obstructions(rm, T)
     out += _plan_tracks(rm, corners, T)
     if margin:
         out += _plan_corner_handles(rm, T, std)
     out += _legend_svg(rows, pad, H - leg + 2)
+
+    # Every label inside the drawing (round 2, 3 October 2026): a box past the
+    # edge — a wall's length outside a wall at the edge, moved out further on
+    # a leader — is taken into the bounds with PLAN_LABEL_MARGIN round it and
+    # the plan drawn again, a few percent smaller. The exported plan too.
+    past = [b for b in boxes if b[0] < 0 or b[1] < 0 or b[2] > W or b[3] > H - leg]
+    if past and len(_grow or ()) < 200:
+        def mm(x, y):
+            return ((x - pad) / scale + min(xs), (y - pad) / scale + min(ys))
+        m = PLAN_LABEL_MARGIN
+        more = []
+        for x0, y0, x1, y1 in past:
+            (a, b), (c, d) = mm(x0, y0), mm(x1, y1)
+            more += [(a - m, b - m), (c + m, d + m)]
+        return plan_svg(job, show, ghost, max_width, max_height, isolate, margin,
+                        _grow=list(_grow or ()) + more)
 
     out.append("</svg>")
     return "\n".join(out)
@@ -1372,12 +1407,21 @@ def _plan_walls(rm, corners, T, scale, std: Standard = STANDARD):
         # along the same normal on a short leader — never dropped (touch-ups,
         # 3 October 2026). Its box is the one the page draws over it: the
         # figure in a text box and "mm" beside it (`planLengths`).
-        off = max(22, t * scale + 12)
+        # Round 2 (3 October 2026): always OUTSIDE — on the back, beyond the
+        # thickness band — and turned to read along the wall, a wall up the
+        # page included (reading upwards). `off` is to the label's middle.
+        off = t * scale + 4 + 10
         mx, my = (ax + bx) / 2, (ay + by) / 2
+        rot = math.degrees(math.atan2(by - ay, bx - ax))
+        if rot >= 90:
+            rot -= 180
+        elif rot < -90:
+            rot += 180
         text = f"{w.id} · {w.length}"
         lb = _label(mx - nx * off, my - ny * off + 4, text, 10.5, INK, prio=0)
         lb["w"] = len(f"{text} mm") * 10.5 * 0.58 + 12
         lb["top"], lb["bottom"] = 14, 6      # the field the page lays over it
+        lb["rot"] = round(rot, 1)
         lb["steps"] = [(-nx * LENGTH_STEP * k, -ny * LENGTH_STEP * k) for k in range(1, LENGTH_STEPS + 1)]
         lb["attrs"] = f' class="walllen" data-wall="{escape(w.id)}"'
         lengths.append(lb)
@@ -1393,7 +1437,7 @@ def _plan_gaps(job, show, T):
     proposes and the user decides, so an undecided gap is the thing that wants
     attention regardless of its size.
     """
-    out, labels = [], []
+    out, labels, polys = [], [], []
     shown = {run_key(lay) for lay in show}
     for g in gaps(job, job.std):
         if g.layer not in shown:
@@ -1402,6 +1446,8 @@ def _plan_gaps(job, show, T):
         poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
         cx = sum(x for x, _ in pts) / 4
         cy = sum(y for _, y in pts) / 4
+        if g.treatment != "open":
+            polys.append(pts)
         if g.treatment == "filler":
             out.append(f'<polygon class="gap" points="{poly}" fill="url(#hatch)" '
                        f'stroke="{INK}" stroke-width="{WEIGHT["panel"]}"/>')
@@ -1415,7 +1461,7 @@ def _plan_gaps(job, show, T):
             out.append(f'<polygon class="gap" points="{poly}" fill="none" stroke="{CRIT}" '
                        f'stroke-width="1.2" stroke-dasharray="4 3"/>')
             labels.append(_label(cx, cy + 3, str(g.width), 8.5, CRIT, prio=4, leader=True))
-    return out, labels
+    return out, labels, polys
 
 
 def _plan_plinths(job, show, T):
@@ -1689,6 +1735,12 @@ LEADER_STEPS = ((0, -13), (0, 13), (16, 0), (-16, 0), (14, -13), (-14, -13),
 # far a step, up to this many steps: pixels, read by `_plan_walls` alone.
 LENGTH_STEP = 8
 LENGTH_STEPS = 16
+# Room the plan keeps round every label's box, mm (round 2, 3 October 2026):
+# the bounds take the labels in, so none is past the drawing's edge.
+PLAN_LABEL_MARGIN = 150
+# A wall's length over something is drawn on this (round 2): white, a little
+# see-through, no border, 2 px round the field.
+LABEL_BACKING_OPACITY = 0.85
 
 
 def _label(x, y, text, size, fill, anchor="middle", prio=1, drop=False,
@@ -1704,13 +1756,30 @@ def _label(x, y, text, size, fill, anchor="middle", prio=1, drop=False,
 def _label_box(lb, dx=0.0, dy=0.0):
     w = lb.get("w") or len(lb["text"]) * lb["size"] * 0.58
     x0 = lb["x"] + dx - (w / 2 if lb["anchor"] == "middle" else 0)
+    if lb.get("rot") is not None:   # turned along its wall
+        cx, cy = lb["x"] + dx, lb["y"] + dy - (lb["top"] - lb["bottom"]) / 2
+        a = math.radians(lb["rot"])
+        hw, hh = w / 2 + 1, (lb["top"] + lb["bottom"]) / 2
+        ex = abs(math.cos(a)) * hw + abs(math.sin(a)) * hh
+        ey = abs(math.sin(a)) * hw + abs(math.cos(a)) * hh
+        return (cx - ex, cy - ey, cx + ex, cy + ey)
     if "top" in lb:          # a box of its own: a wall length's field, 20 high
         return (x0 - 1, lb["y"] + dy - lb["top"], x0 + w + 1, lb["y"] + dy + lb["bottom"])
     y1 = lb["y"] + dy + lb["size"] * 0.2
     return (x0 - 1, y1 - lb["size"] * 0.95, x0 + w + 1, y1)
 
 
-def _place_labels(labels) -> list:
+def _turned_field(lb, dx, dy, grow=0.0):
+    """A turned wall-length label's field as its four corners, drawing units."""
+    cx, cy = lb["x"] + dx, lb["y"] + dy - (lb["top"] - lb["bottom"]) / 2
+    a = math.radians(lb["rot"])
+    c, s = math.cos(a), math.sin(a)
+    hw, hh = lb["w"] / 2 + grow, (lb["top"] + lb["bottom"]) / 2 + grow
+    return [(cx + c * u - s * v, cy + s * u + c * v)
+            for u, v in ((-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh))]
+
+
+def _place_labels(labels, boxes=None, under=()) -> list:
     """Plan labels, placed so none sits on another (23 September 2026).
 
     Most important first: cabinet numbers, then panel numbers, then sizes, then
@@ -1719,6 +1788,12 @@ def _place_labels(labels) -> list:
     there with a leader back to its spot, and a size is simply left out — the
     number is what matters. A label that fits nowhere is drawn where it was
     asked for: a number on top of another beats a number missing.
+
+    A wall's length (round 2, 3 October 2026) is turned along its wall, and
+    where its field lies over anything in `under` — a cabinet, a panel, a
+    face, a wall, a gap mark — it is drawn on a quiet white backing so it
+    reads; over nothing it has none. `boxes`, when given, collects every
+    placed label's box, for the drawing to make room for.
     """
     placed, out = [], []
 
@@ -1739,6 +1814,8 @@ def _place_labels(labels) -> list:
         lb["at"] = at
         box = _label_box(lb, *at)
         placed.append(box)
+        if boxes is not None:
+            boxes.append(box)
         dx, dy = at
         if at != (0, 0):
             # from the label's own spot to the nearest edge of where it went
@@ -1749,7 +1826,21 @@ def _place_labels(labels) -> list:
                        f'x2="{ex:.1f}" y2="{ey:.1f}" stroke="{MUTED}" '
                        f'stroke-width="{WEIGHT["dim"]}" pointer-events="none"/>')
         anchor = "" if lb["anchor"] == "start" else f' text-anchor="{lb["anchor"]}"'
-        out.append(f'<text{lb.get("attrs", "")} x="{lb["x"] + dx:.1f}" y="{lb["y"] + dy:.1f}" '
+        turn = ""
+        if lb.get("rot") is not None:
+            cx, cy = lb["x"] + dx, lb["y"] + dy - (lb["top"] - lb["bottom"]) / 2
+            turn = (f' data-cx="{cx:.1f}" data-cy="{cy:.1f}" data-rot="{lb["rot"]}"'
+                    + (f' transform="rotate({lb["rot"]} {cx:.1f} {cy:.1f})"' if lb["rot"] else ""))
+            field = _turned_field(lb, dx, dy)
+            if any(polygons_overlap(field, u) for u in under if len(u) >= 3):
+                h = lb["top"] + lb["bottom"] - 4
+                out.append(f'<rect class="lenback" data-wall="{escape(lb["text"].split(" ")[0])}" '
+                           f'x="{cx - lb["w"] / 2 - 2:.1f}" y="{cy - h / 2 - 2:.1f}" '
+                           f'width="{lb["w"] + 4:.1f}" height="{h + 4:.1f}" rx="4" fill="#ffffff" '
+                           f'fill-opacity="{LABEL_BACKING_OPACITY}" stroke="none" pointer-events="none"'
+                           + (f' transform="rotate({lb["rot"]} {cx:.1f} {cy:.1f})"' if lb["rot"] else "")
+                           + '/>')
+        out.append(f'<text{lb.get("attrs", "")}{turn} x="{lb["x"] + dx:.1f}" y="{lb["y"] + dy:.1f}" '
                    f'font-size="{lb["size"]}"{anchor} fill="{lb["fill"]}">'
                    f'{escape(lb["text"])}</text>')
     return out

@@ -341,6 +341,7 @@ def main() -> int:
     nook()
     backface()
     flip_all()
+    plan_labels()
 
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0
@@ -1122,6 +1123,68 @@ def nook():
             check(f"refused: {bad}", False, True)
         except ValueError:
             check(f"refused: {bad}", True, True)
+
+
+def plan_labels():
+    """Round 2 (3 October 2026): every wall's length OUTSIDE — on its wall's
+    back — turned along it, and inside the exported plan's viewBox, on every
+    fixture room and a few built here; a label over a cabinet on a backing,
+    one over nothing without."""
+    print("\nplan labels: outside, turned along the wall, inside the drawing, backed where they sit on something")
+    import glob
+    from cabinetgen.render import _label, _label_box
+    jobs = []
+    for f in sorted(glob.glob(os.path.join(os.path.dirname(__file__), "fixtures", "*.json"))):
+        with open(f, encoding="utf-8") as fh:
+            j = job_from_dict(json.load(fh))
+        if j.room is not None and j.room.walls:
+            jobs.append((os.path.basename(f), j))
+    nk = Job(name="nook", room=rectangular(4000, 3000))
+    room_nook(nk, "A", 1000, 355, 560)
+    jobs.append(("a nook", nk))
+    jobs.append(("an open L", Job(name="L", room=Room(name="L", walls=chain_walls([("A", 3000), ("B", 2000)])))))
+    jobs.append(("one wall", Job(name="w", room=Room(name="w", walls=[Wall("A", 0, 0, 2500, 0)]))))
+    hexa = Job(name="hex", room=Room(name="hex", walls=[]))
+    walls_from_points(hexa.room, [(0, 0), (2000, 0), (3000, 1500), (2000, 3000), (0, 3000), (-1000, 1500)], closed=True)
+    jobs.append(("a hexagon", hexa))
+    for name, j in jobs:
+        svg = plan_svg(j)
+        W, H = (float(v) for v in re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', svg).groups())
+        mmx, mmy, pad, sc = (float(re.search(rf'data-{k}="([-\d.]+)"', svg).group(1)) for k in ("mmx", "mmy", "pad", "scale"))
+        frames = wall_frames(j.room)
+        inside, outside, turned, n = True, True, True, 0
+        for m in re.finditer(r'<text class="walllen" data-wall="([^"]+)" data-cx="([-\d.]+)" data-cy="([-\d.]+)" '
+                             r'data-rot="([-\d.]+)"[^>]* x="([-\d.]+)" y="([-\d.]+)"[^>]*>([^<]*)</text>', svg):
+            wid, cx, cy, rot, x, y, text = m.groups()
+            cx, cy, rot, x, y = float(cx), float(cy), float(rot), float(x), float(y)
+            n += 1
+            lb = _label(x, y, text, 10.5, "")
+            lb["w"] = len(f"{text} mm") * 10.5 * 0.58 + 12
+            lb["top"], lb["bottom"], lb["rot"] = 14, 6, rot
+            b = _label_box(lb)
+            inside &= b[0] >= 0 and b[1] >= 0 and b[2] <= W and b[3] <= H
+            w = next(q for q in j.room.walls if q.id == wid)
+            mx, my = pad + ((w.x0 + w.x1) / 2 - mmx) * sc, pad + ((w.y0 + w.y1) / 2 - mmy) * sc
+            nx, ny = frames[wid][2]
+            outside &= (cx - mx) * nx + (cy - my) * ny < 0
+            want = math.degrees(math.atan2(w.y1 - w.y0, w.x1 - w.x0))
+            turned &= any(abs(((rot - want + k) + 180) % 360 - 180) < 0.2 for k in (0, 180))
+        check(f"{name}: every wall's length on the plan, outside its wall, turned along it, inside the viewBox",
+              (n, outside, turned, inside), (len(j.room.walls), True, True, True))
+    # backed only where the label lies over something: a partition (A, and its
+    # back face B) with a cabinet on each side puts each wall's length over the
+    # other side's cabinet
+    pj = Job(name="part", room=Room(name="part", walls=[Wall("A", 0, 0, 3000, 0)]),
+             cabinets=[Cabinet(number=1, width=3000, height=720, depth=560, kind="base"),
+                       Cabinet(number=2, width=3000, height=720, depth=560, kind="base")],
+             placements=[Placement(1, "A", 0)])
+    room_back_face(pj.room, "A")
+    pj.placements.append(Placement(2, "B", 0))
+    svg = plan_svg(pj)
+    check("a length over a cabinet carries a white backing, no pointer events",
+          sorted(re.findall(r'<rect class="lenback" data-wall="([^"]+)"[^>]*fill="#ffffff" fill-opacity="0.85"[^>]*pointer-events="none"', svg)),
+          ["A", "B"])
+    check("  a length over nothing has none", "lenback" in plan_svg(Job(name="r", room=rectangular(4000, 3000))), False)
 
 
 def backface():

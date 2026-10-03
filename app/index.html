@@ -6393,13 +6393,19 @@ function planLengths() {
     const wid = t.dataset.wall;
     const w = info.walls.find((x) => x.id === wid);
     if (!w) return;
-    const x = +t.getAttribute("x"), y = +t.getAttribute("y");
+    // the field's middle and its turn are the engine's (round 2: outside the
+    // wall, turned to read along it)
+    const x = t.dataset.cx !== undefined ? +t.dataset.cx : +t.getAttribute("x");
+    const y = t.dataset.cy !== undefined ? +t.dataset.cy : +t.getAttribute("y") - 4;
+    const rot = +(t.dataset.rot || 0);
     const fo = document.createElementNS(NS, "foreignObject");
     fo.setAttribute("x", (x - 100).toFixed(1));
-    fo.setAttribute("y", (y - 14).toFixed(1));
+    fo.setAttribute("y", (y - 10).toFixed(1));
     fo.setAttribute("width", "200");
     fo.setAttribute("height", "20");
     fo.setAttribute("class", "planlenfo");
+    if (rot) fo.setAttribute("transform", `rotate(${rot} ${x} ${y})`);
+    fo.dataset.wall = wid;
     fo.dataset.cx = x;
     fo.innerHTML = `<div xmlns="http://www.w3.org/1999/xhtml" class="planlen"><span>${esc(wid)} ·</span><input
       type="text" inputmode="numeric" data-planlen="${esc(wid)}" value="${w.length}"

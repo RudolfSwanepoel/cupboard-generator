@@ -1226,9 +1226,82 @@ def stage_labels(pw):
                         "return i.scrollWidth <= i.clientWidth && i.parentElement.scrollWidth <= +i.closest('foreignObject').getAttribute('width'); }"),
           True)
     page.keyboard.press("Escape")
+    time.sleep(0.2)
+    label_rules(page, "the nook room")
+    # Test.json's room (frozen: Test_3d.json), its cabinets standing on the walls
+    from cabinetgen.store import job_from_dict
+    with open(os.path.join(ROOT, "tools", "fixtures", "Test_3d.json"), encoding="utf-8") as f:
+        tj = job_from_dict(json.load(f))
+    tj.name = "labels-test"
+    adopt(page, tj)
+    room_plan(page)
+    label_rules(page, "Test.json's room")
+    shot(page, "touchup_labels_test", "#plancard")
+    # a partition with a cabinet each side: each wall's length lies over the
+    # other side's cabinet, so both carry the backing
+    adopt(page, Job(name="labels-part", room=Room(name="p", walls=[Wall("A", 0, 0, 3000, 0), Wall("B", 3000, -110, 0, -110)]),
+                    cabinets=[Cabinet(number=1, width=3000, height=720, depth=560, kind="base"),
+                              Cabinet(number=2, width=3000, height=720, depth=560, kind="base")],
+                    placements=[Placement(1, "A", 0), Placement(2, "B", 0)]))
+    room_plan(page)
+    over = label_rules(page, "a partition")
+    check("  a partition: both lengths lie over a cabinet, so both are backed", over, ["A", "B"])
+    shot(page, "touchup_labels_backed", "#plancard")
     check("no console errors", errors, [])
     ctx.close()
     browser.close()
+
+
+def label_rules(page, name):
+    """Round 2's rules for the plan's length labels, read off the page: every
+    label OUTSIDE its wall (on the side away from the room), none on another,
+    a label over a cabinet (found by asking the page what is under its field)
+    on a backing; and the plan as EXPORTED — no margin, its own size — holds
+    every label inside its viewBox. Returns the walls whose label is over a
+    cabinet."""
+    r = page.evaluate("""() => {
+        const m = planMap(), info = roomInfo();
+        const labs = [...document.querySelectorAll('#plan foreignObject.planlenfo')].map((fo) => {
+            const div = fo.firstElementChild, a = div.getBoundingClientRect();
+            const w = info.walls.find((x) => x.id === fo.dataset.wall);
+            const p0 = mmToScreen(w.x0, w.y0), p1 = mmToScreen(w.x1, w.y1);
+            const fr = S.job.room.walls.find((x) => x.id === w.id);
+            const L = Math.hypot(fr.x1 - fr.x0, fr.y1 - fr.y0), nx = -(fr.y1 - fr.y0) / L, ny = (fr.x1 - fr.x0) / L;
+            const cx = (a.left + a.right) / 2 - (p0[0] + p1[0]) / 2, cy = (a.top + a.bottom) / 2 - (p0[1] + p1[1]) / 2;
+            // what lies under the field: cabinets and panels take the pointer, so the page can say
+            const fo2 = fo.style.pointerEvents; fo.style.pointerEvents = 'none';
+            let onCab = false;
+            for (let i = 1; i < 6; i++) for (let j = 1; j < 4; j++) {
+                const px = a.left + a.width * i / 6, py = a.top + a.height * j / 4;
+                if (document.elementsFromPoint(px, py).some((e) => e.matches && e.matches('#plan .cab'))) onCab = true; }
+            fo.style.pointerEvents = fo2;
+            return {wall: w.id, out: cx * nx + cy * ny < 0, r: [a.left, a.top, a.right, a.bottom], onCab: onCab,
+                    backed: !!document.querySelector(`#plan rect.lenback[data-wall="${w.id}"]`)}; });
+        const over = [];
+        for (let i = 0; i < labs.length; i++) for (let j = i + 1; j < labs.length; j++) {
+            const p = labs[i].r, q = labs[j].r;
+            if (p[0] < q[2] - 0.5 && q[0] < p[2] - 0.5 && p[1] < q[3] - 0.5 && q[1] < p[3] - 0.5) over.push(labs[i].wall + '/' + labs[j].wall); }
+        return {n: labs.length, walls: info.walls.length, inside: labs.filter((l) => !l.out).map((l) => l.wall), over: over,
+                onCab: labs.filter((l) => l.onCab).map((l) => l.wall).sort(),
+                unbacked: labs.filter((l) => l.onCab && !l.backed).map((l) => l.wall)}; }""")
+    check(f"{name}: every wall's length on the plan, each OUTSIDE its wall", [r["n"] == r["walls"], r["inside"]], [True, []])
+    check(f"{name}:   none on another", r["over"], [])
+    check(f"{name}:   each over a cabinet carries the backing", r["unbacked"], [])
+    ex = page.evaluate("""async () => {
+        const r = await post('/api/plan', {job: S.job});
+        const host = document.createElement('div');
+        host.style.cssText = 'position:absolute;left:0;top:0;visibility:hidden';
+        host.innerHTML = r.svg; document.body.appendChild(host);
+        const svg = host.querySelector('svg'), b = svg.getBoundingClientRect();
+        const out = [...svg.querySelectorAll('text.walllen')].filter((t) => {
+            const a = t.getBoundingClientRect();
+            return a.left < b.left - 0.5 || a.top < b.top - 0.5 || a.right > b.right + 0.5 || a.bottom > b.bottom + 0.5; })
+          .map((t) => t.dataset.wall);
+        const n = svg.querySelectorAll('text.walllen').length;
+        host.remove();
+        return [n, out]; }""")
+    check(f"{name}:   the exported plan's viewBox holds every length label", [ex[0] == r["walls"], ex[1]], [True, []])
+    return r["onCab"]
 
 
 def stage_flipall(pw):
