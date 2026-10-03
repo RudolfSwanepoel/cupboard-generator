@@ -34,7 +34,7 @@ from . import pictures as PIC
 from .engine import generate_cabinet, generate_job, resolved
 from .model import Job, Placement, resolve_board, material_thickness
 from .render import PICTURE_TILE_MM, Fills, board_look, run_layout
-from .room import (DRAWER_MOVING, RUNNER_ROLES, Part, _from_plan, _placed_frame, _to_plan, back_part,
+from .room import (DRAWER_MOVING, RUNNER_ROLES, Part, _from_plan, _placed_frame, _to_plan, back_part, banded_parts,
                    carcass_z, drawer_layout, clashes, corner_points, door_hinges,
                    filler_solids, geometry, interior_parts, is_closed, closure, layer_of, overlaps,
                    placed, placed_panels, placement_for, plinth_solids,
@@ -133,15 +133,14 @@ def _rounded(pts):
 def _parts_for(job: Job, cab, p, frame, z: int, std: Standard, mats: dict) -> List[dict]:
     """Every solid of one cabinet or panel, in world plan coordinates."""
     g = geometry(cab, std, mats)
-    parts = list(solid_parts(cab, std, mats))
-    back = back_part(cab, std, mats)
-    if back is not None:
-        parts.append(back)
-    # the supports and shelves, each with the bands its banded edges are drawn
-    # as — a colour on a face, inside the finished size (27 September 2026)
+    # every solid with the bands its banded edges are drawn as — a colour on a
+    # face, inside the finished size: the carcass, the fronts and the back
+    # (`banded_parts`, ruling 6 of the cabinet round, 3 October 2026) and the
+    # supports, shelves and drawer boxes (`interior_parts`, 27 September 2026)
+    outer = banded_parts(cab, std, mats)
     inside = interior_parts(cab, std, mats)
-    parts += [q for q, _tapes in inside]
-    bands = {id(q): tape_solids(q, tapes, TAPE_BAND_MM) for q, tapes in inside}
+    parts = [q for q, _tapes in outer] + [q for q, _tapes in inside]
+    bands = {id(q): tape_solids(q, tapes, TAPE_BAND_MM) for q, tapes in outer + inside}
     panels = generate_cabinet(cab, std, mats) if not cab.is_panel else \
         [generate_cabinet(cab, std, mats)[0]]
     hinges = door_hinges(cab, g, p) if g.door_widths and not cab.is_panel else []

@@ -43,7 +43,7 @@ sys.path.insert(0, ROOT)
 from app import api                                                         # noqa: E402
 from cabinetgen import scene as SC                                          # noqa: E402
 from cabinetgen.engine import generate_cabinet, generate_job                # noqa: E402
-from cabinetgen.model import (Cabinet, GapChoice, Job, Placement,           # noqa: E402
+from cabinetgen.model import (Cabinet, GapChoice, Job, Placement, resolve_board,  # noqa: E402
                               PlinthChoice, Room, Wall, hinge_side)
 from cabinetgen.render import RUN_GAP, run_layout, PICTURE_TILE_MM          # noqa: E402
 from cabinetgen.room import (EXAMPLE_MITRE, geometry, rectangular,          # noqa: E402
@@ -107,7 +107,7 @@ def main():
                          and any(it["number"] == c.number for it in s1["items"]))
         check(f"{name}: one drawer box (base) per drawer", boxes, want_boxes)
         inside = [q for it in s1["items"] for q in it["parts"] if q["role"] in ("support", "shelf")]
-        want_inside = sum(c.support_total + (c.shelves or 0) + (c.fixed_shelves or 0)
+        want_inside = sum(c.support_total + len(c.shelf_list)
                           for c in job.cabinets
                           if not c.is_panel and c.template != "none"
                           and c.corner_kind not in ("mitre", "ell")
@@ -138,6 +138,57 @@ def main():
             if has_back != want:
                 bad.append((it["number"], "back", has_back, want))
         check(f"{name}: a backing board exactly where the engine cuts one", bad, [])
+
+    print("\nevery banded edge of every part has its band (ruling 6, 3 October 2026)")
+    # A part tied to a cut-list line carries as many bands as that line records
+    # banded edges (edge_l + edge_w): doors and drawer faces four, a side / top /
+    # bottom / shelf its front, a support its counts, a backing none, a solid
+    # back and a Panel their counts, a mitre's boards one each and its door four.
+    # Each band lies inside its part, in the edging board the engine names, and
+    # `tape_mm` deep. Checked on every job on disk, the October fixture and the
+    # corner-unit fixture (a mitre), in both scene calls.
+    for name, job in jobs.items():
+        s1 = SC.build(job)
+        cabs = {c.number: c for c in job.cabinets}
+        off, outside, wrong_board = [], [], []
+        counted = 0
+        for it in s1["items"]:
+            c = cabs[it["number"]]
+            lines = {p.label: p for p in generate_cabinet(c, std, job.materials)}
+            for q in it["parts"]:
+                p = lines.get(q["line"]) if q["line"] else None
+                if p is None:
+                    if q["tapes"]:
+                        off.append((it["number"], q["role"], "bands with no line"))
+                    continue
+                want = (p.edge_l + p.edge_w) if p.edge_material else 0
+                if len(q["tapes"]) != want:
+                    off.append((it["number"], q["id"], len(q["tapes"]), want))
+                counted += len(q["tapes"])
+                xs = [x for x, _ in q["outline"]]; ys = [y for _, y in q["outline"]]
+                for b in q["tapes"]:
+                    bx = [x for x, _ in b["outline"]]; by = [y for _, y in b["outline"]]
+                    if (min(bx) < min(xs) - 0.05 or max(bx) > max(xs) + 0.05 or
+                            min(by) < min(ys) - 0.05 or max(by) > max(ys) + 0.05 or
+                            b["z0"] < q["z0"] - 0.05 or b["z1"] > q["z1"] + 0.05):
+                        outside.append((it["number"], q["id"]))
+                    if q["role"] in ("side", "top", "bottom", "shelf") and b["board"] != resolve_board(job.materials, c.exterior_board):
+                        wrong_board.append((it["number"], q["id"], b["board"]))
+                    if q["role"] == "door" and b["board"] != resolve_board(job.materials, c.door_edge_colour_board):
+                        wrong_board.append((it["number"], q["id"], b["board"]))
+        check(f"{name}: bands == banded edges on every part with a line ({counted} bands)", off, [])
+        check(f"{name}: every band lies inside its part", outside, [])
+        check(f"{name}: carcass and shelf bands in the exterior board's edging, doors in theirs", wrong_board, [])
+        check(f"{name}: tape_mm is the band depth", s1["tape_mm"], SC.TAPE_BAND_MM)
+    # the two 3D views share one source: the single-cabinet scene carries the
+    # same bands per part as the room scene
+    for name, job in jobs.items():
+        s1 = SC.build(job)
+        for it in [x for x in s1["items"] if x["placed"]][:3]:     # an unplaced item has no parts in the room scene
+            one = SC.build_cabinet(job, it["number"])["items"][0]
+            a = [(q["role"], len(q["tapes"])) for q in it["parts"]]
+            b = [(q["role"], len(q["tapes"])) for q in one["parts"]]
+            check(f"{name} {it['number']}: the Cabinets tab's scene bands the same parts", b, a)
 
     print("\ncarcass parts back in their own frame are room.geometry's footprint and height")
     for name, job in jobs.items():

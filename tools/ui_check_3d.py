@@ -1491,8 +1491,85 @@ def viewport_origin_of(page, selector):
     return page.evaluate("(s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.top]; }", selector)
 
 
+def stage_bands(pw):
+    """Ruling 6 of the cabinet round (3 October 2026): edging bands on EVERY
+    part, in both 3D views. On cabinet 11 a carcass side's front edge reads the
+    exterior board's edging colour — the band's material is that board's
+    swatch, and a pixel on the band, seen from 80 mm in front of it, is within
+    8 per channel of the swatch — in the Cabinets tab's 3D and in the 3D tab.
+    The counts come off the scene: a side one band, a door four."""
+    print("\nbands — edging on every part: a side's front edge reads the exterior board's edging colour, both views")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors = []
+    ctx, page = new_page(browser, errors)
+    page.goto(URL)
+    load_fixture(page, "Test_3d")
+    cab = page.evaluate("() => S.job.cabinets.find((c) => c.number === 11)")
+    ext = cab["exterior_board"]
+
+    def band_read(view, canvas_sel, item, looks):
+        sides = [p for p in item["parts"] if p["role"] == "side"]
+        check(f"{view}: cabinet 11's two sides carry one band each", [len(p["tapes"]) for p in sides], [1, 1])
+        check(f"{view}: in the exterior board's edging, PVC",
+              sorted({(b["board"], b["kind"]) for p in sides for b in p["tapes"]}), [(ext, "pvc")])
+        by_role = {}
+        for p in item["parts"]:
+            by_role.setdefault(p["role"], []).append(len(p["tapes"]))
+        check(f"{view}: a door four bands, the top and bottom one, the backing none",
+              (by_role.get("door", [None])[0], by_role.get("top"), by_role.get("bottom"), by_role.get("back")),
+              (4, [1], [1], [0]))
+        side = sides[0]
+        band = side["tapes"][0]
+        want_hex = looks[ext]["colour"]
+        info = page.evaluate(f"() => {view}.bandInfo({json.dumps(side['id'])})")
+        check(f"{view}: the band's material is the exterior board's swatch {want_hex}",
+              [(b["board"], b["colour"]) for b in info], [(ext, want_hex)])
+        # the band's centre, and the way out of the carcass through it (it is on
+        # the side's front face), so the camera stands 80 mm in front of it
+        bx = [q[0] for q in band["outline"]]; by = [q[1] for q in band["outline"]]
+        cx, cy, cz = (min(bx) + max(bx)) / 2, (min(by) + max(by)) / 2, (band["z0"] + band["z1"]) / 2
+        sx = [q[0] for q in side["outline"]]; sy = [q[1] for q in side["outline"]]
+        mx, my = (min(sx) + max(sx)) / 2, (min(sy) + max(sy)) / 2
+        dx, dy = cx - mx, cy - my
+        L = math.hypot(dx, dy) or 1.0
+        dx, dy = dx / L, dy / L
+        page.evaluate(f"() => {view}.cameraAt([{cx + dx * 80}, {cy + dy * 80}, {cz}], [{cx}, {cy}, {cz}])")
+        time.sleep(0.3)
+        ox, oy = viewport_origin_of(page, canvas_sel)
+        pr = page.evaluate(f"([x, y, z]) => {view}.project(x, y, z)", [cx, cy, cz])
+        px = page.evaluate(f"([x, y]) => {view}.pixel(x, y)", [ox + pr["x"], oy + pr["y"]])
+        want = [int(want_hex[1 + 2 * i:3 + 2 * i], 16) for i in range(3)]
+        diff = [px[i] - want[i] for i in range(3)]
+        check_true(f"{view}: a pixel on the side's front-edge band reads within 8 per channel of {want_hex}",
+                   all(abs(d) <= 8 for d in diff), f"pixel {px}, off by {diff}")
+
+    # the Cabinets tab's view: cabinet 11 alone
+    page.click('nav [data-tab="cabinets"]')
+    page.evaluate("() => { selectCabinet(S.job.cabinets.findIndex((c) => c.number === 11), {isolate: false}); renderList(); }")
+    page.wait_for_function("() => typeof V3C === 'object' && V3C !== null", timeout=30000)
+    page.wait_for_function("() => !S.cabSceneStale && cabTimer === null && S.cab3dShown === 11", timeout=20000)
+    page.wait_for_function("() => V3C.idle()", timeout=10000)
+    time.sleep(0.4)
+    sc = page.evaluate("() => fetch('/api/scene-cabinet', {method: 'POST', headers: {'Content-Type': 'application/json'},"
+                       " body: JSON.stringify({job: S.job, number: 11})}).then((r) => r.json())")
+    band_read("V3C", "#c3dview canvas", next(i for i in sc["items"] if i["number"] == 11), sc["looks"])
+
+    # the 3D tab: the whole room, cabinet 11 where it stands
+    page.click('nav [data-tab="view3d"]')
+    page.wait_for_function("() => typeof V3D === 'object' && V3D !== null", timeout=30000)
+    page.wait_for_function("() => !S.sceneStale && sceneTimer === null", timeout=20000)
+    settle(page)
+    sc = page.evaluate("() => fetch('/api/scene', {method: 'POST', headers: {'Content-Type': 'application/json'},"
+                       " body: JSON.stringify({job: S.job})}).then((r) => r.json())")
+    item = next(i for i in sc["items"] if i["number"] == 11)
+    check("3D tab: cabinet 11 is placed, so it is drawn", item["placed"], True)
+    band_read("V3D", "#v3dview canvas", item, sc["looks"])
+    check("no console errors", errors, [])
+    browser.close()
+
+
 STAGES = {"f1": stage_f1, "f3": stage_f3, "f4": stage_f4, "f5": stage_f5, "f6": stage_f6,
-          "extras": stage_extras, "room": stage_room, "look": stage_look}
+          "extras": stage_extras, "room": stage_room, "look": stage_look, "bands": stage_bands}
 
 with sync_playwright() as pw:
     for name, fn in STAGES.items():

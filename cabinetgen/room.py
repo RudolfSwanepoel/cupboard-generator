@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from .model import (MATERIALS, Cabinet, PanelSpec, Placement, Room, Wall, hinge_side,
-                    material_thickness, resolve_board)
+                    material_thickness, resolve_board, tape_for)
 from .standard import STANDARD, Standard
 
 Point = Tuple[float, float]
@@ -2862,8 +2862,10 @@ def shelf_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List[
 @dataclass
 class Tape:
     """One banded edge of a Part, for drawing: which face of the box it is on
-    (SUPPORT_SIDES, in the Part's own frame), the board whose edging colour it
-    is, and the kind."""
+    (SUPPORT_SIDES, in the Part's own frame) — or, on a part whose outline is
+    not an axis-aligned rectangle (a mitre's blank or door), which outline
+    EDGE, as 'e<i>' for the edge from vertex i to vertex i + 1 (3 October
+    2026) — the board whose edging colour it is, and the kind."""
     side: str
     board: str
     kind: str
@@ -3033,13 +3035,27 @@ def drawer_parts(cab, std: Standard = STANDARD, materials: dict = None) -> List[
 def tape_solids(part: Part, tapes: List[Tape], band: float) -> List[Part]:
     """The bands a Part's tapes are drawn as: a thin box `band` deep INSIDE the
     finished size on each banded face, role 'tape', in the tape's board, its
-    kind as the label. Nothing is moved and nothing grows (hard rule 5)."""
+    kind as the label. Nothing is moved and nothing grows (hard rule 5).
+
+    A face named x0 / x1 / y0 / y1 is a slab of the part's bounding box; z0 /
+    z1 is the part's own outline `band` tall (the same thing on a rectangle,
+    the blank's own shape on a mitre's top); 'e<i>' is the outline edge from
+    vertex i to i + 1, offset `band` into the polygon (3 October 2026)."""
     xs = [x for x, _ in part.outline]
     ys = [y for _, y in part.outline]
     x0, x1, y0, y1, z0, z1 = min(xs), max(xs), min(ys), max(ys), part.z0, part.z1
     out = []
     for tp in tapes:
-        bx0, bx1, by0, by1, bz0, bz1 = x0, x1, y0, y1, z0, z1
+        if tp.side in ("z0", "z1"):
+            bz0, bz1 = (z0, z0 + band) if tp.side == "z0" else (z1 - band, z1)
+            out.append(Part("tape", tp.board, list(part.outline), bz0, bz1, None, tp.kind))
+            continue
+        if tp.side.startswith("e"):
+            quad = _edge_band(part.outline, int(tp.side[1:]), band)
+            if quad:
+                out.append(Part("tape", tp.board, quad, z0, z1, None, tp.kind))
+            continue
+        bx0, bx1, by0, by1 = x0, x1, y0, y1
         if tp.side == "x0":
             bx1 = x0 + band
         elif tp.side == "x1":
@@ -3048,13 +3064,165 @@ def tape_solids(part: Part, tapes: List[Tape], band: float) -> List[Part]:
             by1 = y0 + band
         elif tp.side == "y1":
             by0 = y1 - band
-        elif tp.side == "z0":
-            bz1 = z0 + band
-        elif tp.side == "z1":
-            bz0 = z1 - band
         else:
             continue
-        out.append(_box("tape", tp.board, bx0, bx1, by0, by1, bz0, bz1, None, tp.kind))
+        out.append(_box("tape", tp.board, bx0, bx1, by0, by1, z0, z1, None, tp.kind))
+    return out
+
+
+def _edge_band(outline: List[Point], i: int, band: float) -> Optional[List[Point]]:
+    """The quad `band` wide along outline edge i (vertex i to i + 1), lying
+    INSIDE the polygon: the edge itself and the edge moved `band` along the
+    inward normal, whichever side of the edge the polygon's area lies."""
+    n = len(outline)
+    if n < 3:
+        return None
+    (ax, ay), (bx, by) = outline[i % n], outline[(i + 1) % n]
+    L = math.hypot(bx - ax, by - ay)
+    if L <= 0:
+        return None
+    # the polygon's signed area says which way round it runs, hence which
+    # perpendicular points inward
+    area = sum(outline[k][0] * outline[(k + 1) % n][1] - outline[(k + 1) % n][0] * outline[k][1]
+               for k in range(n)) / 2.0
+    nx, ny = -(by - ay) / L, (bx - ax) / L            # the left-hand normal
+    if area < 0:
+        nx, ny = -nx, -ny
+    return [(ax, ay), (bx, by), (bx + nx * band, by + ny * band), (ax + nx * band, ay + ny * band)]
+
+
+# Which face of a pair a count of ONE bands, drawing only (Rudolf, 3 October
+# 2026, the rule `support_edges_for_counts` states): the FRONT of a front /
+# back pair (y1, towards the room), the left of a left / right pair (x0), and
+# the top of a top / bottom pair (z1). The second of each pair comes with a
+# count of two. No cut line reads this.
+_PAIR_ORDER = {"x": ("x0", "x1"), "y": ("y1", "y0"), "z": ("z1", "z0")}
+
+
+def part_tapes(cab, part: Part, std: Standard = STANDARD, materials: dict = None) -> List[Tape]:
+    """The banded edges of one of a cabinet's SOLID parts (`solid_parts` and
+    `back_part`), for the 3D view — ruling 6 of the cabinet round brief, 3
+    October 2026: every part that has a banded edge on its cut-list line shows
+    it, in both 3D views. Exactly what the engine bands, read off the same
+    resolvers it reads, and nothing on a part the engine does not band:
+
+    * a straight carcass's sides, top and bottom: the front edge (y1) in the
+      carcass edging — PVC in the exterior board's colour (`carcass_tape`);
+    * a door: all four edges in the door edging; a drawer face: all four in
+      the face edging; a blind panel: its one edge towards the opening;
+    * a mitre's boards by outline edge: each open-face side its front, each
+      wall panel its end towards its open face, the top and bottom blank its
+      mitre edge, the door its two ends and top and bottom;
+    * a solid back: its counts — long edges the pair along its Length (up the
+      board where it is grained), short the other pair — first of each pair
+      by `_PAIR_ORDER`; a Panel: its `edge_long` / `edge_short` the same way,
+      long being the pair along its longer finished extent;
+    * the backing board, a footprint-only carcass, and anything unedged: none.
+    Tape is a colour on a face and never moves a part (hard rule 5).
+    """
+    mats = MATERIALS if materials is None else materials
+    role = part.role
+    if role in ("side", "top", "bottom"):
+        tape = cab.carcass_tape(mats)
+        if not tape:
+            return []
+        board, kind = cab.exterior_board, "pvc"
+        if _axis_box(part):
+            return [Tape("y1", board, kind)]
+        # a mitre's boards (`_mitre_solid`): by the outline edge, which the
+        # hand's mirror leaves in place
+        if role in ("top", "bottom"):
+            return [Tape("e3", board, kind)]
+        return [Tape(_mitre_side_edge(cab, part, std), board, kind)]
+    if role == "door":
+        tape = cab.door_tape(mats)
+        if not tape:
+            return []
+        board, kind = cab.door_edge_colour_board, (cab.door_edge_kind or cab.exterior_tape)
+        if _axis_box(part):
+            return [Tape(s, board, kind) for s in ("x0", "x1", "z1", "z0")]
+        return [Tape(s, board, kind) for s in ("e1", "e3", "z1", "z0")]
+    if role == "drawer":
+        tape = cab.drawer_face_tape(mats)
+        if not tape:
+            return []
+        board = cab.drawer_face_edge_colour_board
+        kind = cab.drawer_edge_kind or cab.door_edge_kind or cab.exterior_tape
+        return [Tape(s, board, kind) for s in ("x0", "x1", "z1", "z0")]
+    if role == "blind":
+        tape = cab.blind_tape(mats)
+        if not tape:
+            return []
+        spans = blind_spans(cab, std)
+        if not spans:
+            return []
+        (_s0, _s1), (b0, b1), (d0, _d1) = spans
+        return [Tape("x1" if d0 >= b1 else "x0", cab.blind_panel_board, cab.blind_edge_thickness)]
+    if role == "solid_back":
+        tape = cab.solid_back_tape(mats)
+        if not tape:
+            return []
+        xs = [x for x, _ in part.outline]
+        bw, bh = max(xs) - min(xs), part.z1 - part.z0
+        up = part.grain == "z" or bh >= bw                 # its Length is its height
+        long_axis, short_axis = ("x", "z") if up else ("z", "x")
+        long, short = max(0, min(2, int(cab.solid_back_long or 0))), max(0, min(2, int(cab.solid_back_short or 0)))
+        board, kind = cab.solid_back_edge_colour_board, cab.solid_back_kind(mats)
+        return [Tape(s, board, kind) for s in _PAIR_ORDER[long_axis][:long] + _PAIR_ORDER[short_axis][:short]]
+    if role == "panel" and cab.is_panel:
+        spec = cab.panel_spec
+        kind = spec.edge_kind or ""
+        board = spec.edge_board or spec.board
+        if not kind or not tape_for(mats, board, kind):
+            return []
+        along = {"upright": ("x", "z"), "flat": ("x", "y"), "end": ("y", "z")}
+        a_axis, b_axis = along.get(spec.orientation, ("x", "z"))
+        a, b = int(spec.a or 0), int(spec.b or 0)
+        # long edges run along the longer finished extent and lie on the faces
+        # normal to the OTHER in-plane axis
+        long_faces, short_faces = (_PAIR_ORDER[b_axis], _PAIR_ORDER[a_axis]) if a >= b             else (_PAIR_ORDER[a_axis], _PAIR_ORDER[b_axis])
+        long, short = max(0, min(2, int(spec.edge_long or 0))), max(0, min(2, int(spec.edge_short or 0)))
+        return [Tape(s, board, kind) for s in long_faces[:long] + short_faces[:short]]
+    return []
+
+
+def _axis_box(part: Part) -> bool:
+    """Whether a part's outline is the axis-aligned rectangle `_box` makes."""
+    o = part.outline
+    if len(o) != 4:
+        return False
+    xs = sorted({round(x, 6) for x, _ in o})
+    ys = sorted({round(y, 6) for _, y in o})
+    return len(xs) == 2 and len(ys) == 2
+
+
+def _mitre_side_edge(cab, part: Part, std: Standard) -> str:
+    """Which outline edge of a mitre's side is banded: the open-face sides
+    their front, the wall panels the end towards their open face. Decided by
+    the part's place in `_mitre_solid`'s construction (the hand's mirror keeps
+    vertex order, so the edge index holds)."""
+    t, a_a, a_b, f_a, f_b = _mitre_parts(cab, std)
+    pts = part.outline if cab.hand != "L" else [(a_a - x, y) for x, y in part.outline]
+    xs = sorted({round(x, 6) for x, _ in pts})
+    ys = sorted({round(y, 6) for _, y in pts})
+    if xs[0] == 0 and ys[1] == f_a:            # open face, wall A: its front is y1
+        return "e2"
+    if ys[0] == 0 and xs[1] == a_a:            # wall A panel: its end towards the open face, x0
+        return "e3"
+    if xs[0] == a_a - f_b and ys[1] == a_b:    # open face, wall B: its front is x0
+        return "e3"
+    return "e2"                                # wall B panel: its end towards its open face, y1
+
+
+def banded_parts(cab, std: Standard = STANDARD, materials: dict = None) -> List[Tuple[Part, List[Tape]]]:
+    """`solid_parts` and `back_part`, each with its tapes (`part_tapes`), in
+    the order the scene has always listed them. The 3D view's one source for
+    the carcass, the fronts, the back and their bands."""
+    mats = MATERIALS if materials is None else materials
+    out = [(q, part_tapes(cab, q, std, mats)) for q in solid_parts(cab, std, mats)]
+    back = back_part(cab, std, mats)
+    if back is not None:
+        out.append((back, part_tapes(cab, back, std, mats)))
     return out
 
 

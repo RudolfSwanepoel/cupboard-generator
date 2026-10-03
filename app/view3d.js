@@ -3179,6 +3179,32 @@ function camera() {
   return {position: toRoom(p), target: toRoom(t), zoom: V.camera.zoom, ortho: V.ortho_on};
 }
 
+// For the checks only: put the camera here, looking at there (room frame, mm),
+// with no transition — so a check can read a 2 mm edging band up close.
+function cameraAt(position, target) {
+  const p = toRender(...position), t = toRender(...target);
+  V.controls.setLookAt(p.x, p.y, p.z, t.x, t.y, t.z, false);
+  V.controls.update(0);
+  draw();
+}
+
+// For the checks: the bands drawn on one part — each band's board, kind and
+// the colour its material carries (the edging board's swatch off the server).
+function bandInfo(id) {
+  const out = [];
+  for (const grp of [...V.groups.values(), V.roomParts].filter(Boolean)) {
+    for (const m of grp.children) {
+      if (m.userData.id !== id || !m.userData.tape) continue;
+      const mat = m.material[1];
+      out.push({board: m.userData.tape.board, kind: m.userData.tape.kind,
+                colour: mat.userData.colour !== undefined ? String(mat.userData.colour).toLowerCase()
+                                                          : "#" + mat.color.getHexString(),
+                z0: m.userData.tape.z0, z1: m.userData.tape.z1, outline: m.userData.tape.outline});
+    }
+  }
+  return out;
+}
+
 // Screen position of a world point — for the checks, which want to know that
 // a corner stayed under the cursor.
 function project(x, y, z) {
@@ -3330,5 +3356,5 @@ function dispose() {
   V.renderer = V.scene = V.camera = V.controls = null;
 }
 
-  return {mount, setVisible, update, select, setLayers, isolate, flyTo, idle, bounds, partInfo, debugCam, pickHandleAt, dragInfo, overlayInfo, groupIds, debugShell, memory, state, camera, project, unproject, dispose, resize, fitAll, viewHome, viewTop, viewWall, setProjection, setDisplay, wallAt, pixel, meanPixel, look, tune, frameTime};
+  return {mount, setVisible, update, select, setLayers, isolate, flyTo, idle, bounds, partInfo, bandInfo, debugCam, pickHandleAt, dragInfo, overlayInfo, groupIds, debugShell, memory, state, camera, cameraAt, project, unproject, dispose, resize, fitAll, viewHome, viewTop, viewWall, setProjection, setDisplay, wallAt, pixel, meanPixel, look, tune, frameTime};
 }
