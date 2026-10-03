@@ -434,7 +434,7 @@ class _Scanner:
                        and taken is not new else f"a different {b.name} is already here")
                 self.plan.items.append(Item("board", b.name, "renamed", to=cand, id=b.id,
                                             to_id=new.id,
-                                            note=(note_from + "; " if note_from else "") + why))
+                                            note=note_from or why))
             return new.id
         raise AssertionError("unreachable")
 

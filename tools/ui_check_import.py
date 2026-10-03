@@ -1,0 +1,224 @@
+"""Import project and the project Rename in the running app (brief of 3 October
+2026), with a real mouse (Playwright, optional).
+
+    python tools/ui_check_import.py [--port N] [--stage import|rename]
+
+Unlike the other ui_check scripts this one STARTS ITS OWN APP: Import writes
+jobs, boards, runners and pictures, and a check never writes live workshop
+data. So it copies the app (app/, cabinetgen/, run_app.py, the libraries and
+Pictures/) into a temp folder with tools/fixtures/Test_export.json as its
+Test.json, runs `run_app.py --no-window` there on its own port, and builds the
+old demo folder `check_import.py` builds beside it. Everything is deleted
+afterwards.
+
+Stages:
+  import  Import project with a typed path (the native folder dialog cannot be
+          driven headless, and under --no-window there is none: the dialog
+          says so and asks for the path): a folder that is not an app folder
+          refused, the preview, nothing written by it, Import, the report, the
+          renamed job in the list and opened, the renamed board on
+          Catalogue -> Boards.
+  rename  The project Rename beside the job name: a taken name (any case)
+          refused under the field and nothing written; a free name moves the
+          file and the output folder, and the job on screen follows; Save onto
+          another job's name refused.
+
+Screenshots into output/_checks/ui_check_import/.
+Playwright is the only third-party package anywhere near this app and only the
+ui_check scripts need it; without it this says so and exits 0.
+"""
+import argparse
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:                                            # pragma: no cover
+    print("playwright is not installed — skipping the browser check (pip install playwright)")
+    sys.exit(0)
+
+import check_import as CI                                      # noqa: E402  (the old folder)
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--port", type=int, default=0, help="default: a free one")
+ap.add_argument("--stage", default="", help="import | rename (default: both)")
+ap.add_argument("--headed", action="store_true")
+args = ap.parse_args()
+if not args.port:
+    # a port nothing holds — not even a socket of our own last run in TIME_WAIT,
+    # which run_app's exclusive bind refuses
+    import socket
+    with socket.socket() as _s:
+        _s.bind(("127.0.0.1", 0))
+        args.port = _s.getsockname()[1]
+URL = f"http://127.0.0.1:{args.port}/"
+SHOTS = os.path.join(ROOT, "output", "_checks", "ui_check_import")
+
+FAILS = []
+
+
+def check(label, got, want):
+    ok = got == want
+    print(f"  {'ok  ' if ok else 'FAIL'}  {label}: {got!r}" + ("" if ok else f"  (wanted {want!r})"))
+    if not ok:
+        FAILS.append(label)
+    return ok
+
+
+def tree(folder):
+    out = {}
+    for base, _d, files in os.walk(folder):
+        if "__pycache__" in base:
+            continue
+        for n in files:
+            p = os.path.join(base, n)
+            with open(p, "rb") as fh:
+                out[os.path.relpath(p, folder)] = hashlib.sha1(fh.read()).hexdigest()
+    return out
+
+
+def shot(page, name):
+    os.makedirs(SHOTS, exist_ok=True)
+    page.screenshot(path=os.path.join(SHOTS, name + ".png"))
+
+
+def make_app(top):
+    """A copy of the app to run, with its own jobs, libraries and pictures."""
+    here = os.path.join(top, "App")
+    ign = shutil.ignore_patterns("__pycache__", "_demo_build.py")
+    for d in ("app", "cabinetgen"):
+        shutil.copytree(os.path.join(ROOT, d), os.path.join(here, d), ignore=ign)
+    for f in ("run_app.py", "boards.json", "hardware.json"):
+        shutil.copyfile(os.path.join(ROOT, f), os.path.join(here, f))
+    shutil.copytree(os.path.join(ROOT, "Pictures"), os.path.join(here, "Pictures"))
+    os.makedirs(os.path.join(here, "jobs"))
+    for f in ("__init__.py", "wardrobe_oct2025.py"):
+        shutil.copyfile(os.path.join(ROOT, "jobs", f), os.path.join(here, "jobs", f))
+    shutil.copyfile(os.path.join(ROOT, "tools", "fixtures", "Test_export.json"),
+                    os.path.join(here, "jobs", "Test.json"))
+    shutil.copyfile(os.path.join(ROOT, "tools", "fixtures", "Test_Build.json"),
+                    os.path.join(here, "jobs", "Main.json"))
+    shutil.copyfile(os.path.join(CI.make_here(os.path.join(top, "ref")), "jobs", "Shared.json"),
+                    os.path.join(here, "jobs", "Shared.json"))
+    return here
+
+
+def start(here):
+    log = open(os.path.join(os.path.dirname(here), "app.log"), "w+")
+    proc = subprocess.Popen([sys.executable, "run_app.py", "--no-window", "--port", str(args.port)],
+                            cwd=here, stdout=log, stderr=subprocess.STDOUT)
+    for _ in range(150):
+        try:
+            urllib.request.urlopen(URL, timeout=1).read()
+            return proc
+        except OSError:
+            time.sleep(0.1)
+    proc.kill()
+    log.seek(0)
+    raise SystemExit(f"the copy of the app did not start on port {args.port}:\n{log.read()}")
+
+
+def stage_import(page, here, top, outer, app):
+    print("\nImport project: typed path, preview, Import, report")
+    page.click("#importproj")
+    page.wait_for_selector("#importdlg[open] #importpath", timeout=5000)
+    check("no window: the dialog says there is no folder picker and asks for the path",
+          "no folder picker" in page.inner_text("#importbody"), True)
+    plain = os.path.join(top, "Holiday photos")
+    os.makedirs(plain, exist_ok=True)
+    page.fill("#importpath", plain)
+    page.click("#importlook")
+    page.wait_for_function("() => $('importerr') && $('importerr').textContent.length > 0", timeout=5000)
+    err = page.inner_text("#importerr")
+    check("a folder that is not an app folder: says what it looked for",
+          all(w in err for w in ("jobs\\", "readable job", "Cupboard App Demo.exe")), True)
+
+    before_here, before_old = tree(here), tree(outer)
+    page.fill("#importpath", outer)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#importdlg #importgo", timeout=10000)
+    shot(page, "import_preview")
+    rows = page.evaluate("() => [...document.querySelectorAll('#importdlg [data-impitem]')]"
+                         ".map((r) => [r.dataset.impitem, r.children[2].textContent.trim()])")
+    got = dict(rows)
+    check("the preview lists every item", len(rows), 17)
+    check("  Test: a name taken here, comes in renamed",
+          got.get("job:Test"), "name taken here — comes in as Test (imported)")
+    check("  Shared: identical, skipped", got.get("job:Shared"), "identical — skipped")
+    check("  Broken: will not load", got.get("job:Broken"), "will not load — not imported")
+    check("  the board GREY: renamed",
+          got.get("board:STORMGREY"), "name taken here — comes in as STORMGREY (imported)")
+    check("the preview wrote nothing here", tree(here) == before_here, True)
+    check("  and nothing in the old folder", tree(outer) == before_old, True)
+
+    page.click("#importgo")
+    page.wait_for_selector("#importdlg #importreport", timeout=15000)
+    rep = page.input_value("#importreport")
+    shot(page, "import_report")
+    check("the report", rep.split("\n")[0].startswith(
+        "Imported 4 projects, 3 boards, 2 runners, 2 pictures. Skipped 5 identical. "
+        "Renamed: Test → Test (imported), STORMGREY → STORMGREY (imported)"), True)
+    check("  it names the job that would not load", "Not imported: Broken.json" in rep, True)
+    page.click("#importdlg [data-imp='copy']")
+    check("  Copy says so", page.inner_text("#toast").startswith("Report copied"), True)
+    check("the old folder is unchanged", tree(outer) == before_old, True)
+    page.click("#importdlg [data-imp='cancel']")
+
+    jobs = page.evaluate("() => [...$('joblist').options].map((o) => o.value)")
+    check("the renamed job is in the job list", "Test (imported).json" in jobs, True)
+    page.select_option("#joblist", "Test (imported).json")
+    page.click("#load")
+    page.wait_for_function("() => S.job && S.job.name === 'Test (imported)'", timeout=10000)
+    check("opened, it is shown under its new name", page.input_value("#jobname"), "Test (imported)")
+    boards = page.evaluate("() => Object.values(S.job.materials).map((m) => m.name)")
+    check("  and its board is the imported one", "STORMGREY (imported)" in boards, True)
+    page.click('nav [data-tab="catalogue"]')
+    page.wait_for_function("() => S.lib && S.lib.boards", timeout=10000)
+    check("Catalogue -> Boards lists the imported board",
+          "STORMGREY (imported)" in page.inner_text("#boards"), True)
+    shot(page, "import_boards")
+
+
+def main() -> int:
+    top = tempfile.mkdtemp(prefix="ui_check_import_")
+    proc = None
+    try:
+        here = make_app(top)
+        outer, app = CI.make_old(top)
+        proc = start(here)
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=not args.headed)
+            page = browser.new_page(viewport={"width": 1500, "height": 1000})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.on("dialog", lambda d: d.accept())
+            page.goto(URL)
+            page.wait_for_function("() => S.def !== null && S.res", timeout=15000)
+            if args.stage in ("", "import"):
+                stage_import(page, here, top, outer, app)
+            if args.stage in ("", "rename") and "stage_rename" in globals():
+                globals()["stage_rename"](page, here)
+            check("no script errors in the page", errors, [])
+            browser.close()
+    finally:
+        if proc is not None:
+            proc.terminate()
+            proc.wait(timeout=10)
+        shutil.rmtree(top, ignore_errors=True)
+    print(f"\n{len(FAILS)} failed" if FAILS else "\nall passed")
+    return 1 if FAILS else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -686,6 +686,25 @@
   dialog{border:1px solid var(--line);border-radius:var(--r-l);padding:16px 18px;min-width:300px;
          box-shadow:var(--shadow-2);color:var(--ink)}
   dialog::backdrop{background:rgba(25,28,26,.35)}
+  /* Import project: the preview and the report */
+  #importdlg{width:min(820px,92vw)}
+  #importdlg .imptable{max-height:52vh;overflow:auto;border:1px solid var(--line);
+    border-radius:var(--r-s);margin:8px 0 12px}
+  #importdlg table{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}
+  #importdlg th,#importdlg td{padding:4px 8px;border-bottom:1px solid var(--line);
+    text-align:left;vertical-align:top;overflow-wrap:anywhere;white-space:normal}
+  #importdlg th:nth-child(1){width:64px}
+  #importdlg th:nth-child(2){width:26%}
+  #importdlg th:nth-child(3){width:32%}
+  #importdlg th{background:var(--surface);position:sticky;top:0}
+  #importdlg td.act-new{color:var(--ok)}
+  #importdlg td.act-renamed{color:var(--warn)}
+  #importdlg td.act-broken{color:var(--crit)}
+  #importdlg td.act-identical{color:var(--muted)}
+  #importdlg textarea{width:100%;min-height:120px;font:12.5px/1.45 var(--font)}
+  #importdlg .row{display:flex;gap:8px;align-items:center}
+  #importdlg .row input{flex:1}
+  #importdlg .btns{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
   /* The hand, as two small plan pictures. A corner unit is the one thing in
      this editor where a word ("left") is genuinely ambiguous until you see it,
      so the picture is the control and the word is the label. */
@@ -738,6 +757,9 @@ libraries (Catalogue → Boards / Runners, pictures) — those write files at on
   <select id="joblist" title="saved jobs"></select>
   <button id="load">Load</button>
   <button id="jobdel" title="move the selected job to jobs/_deleted/">Delete</button>
+  <button id="importproj" title="Bring the jobs, boards, runners and pictures of another
+Cupboard App folder — an old demo's, or another laptop's — into this one. The old
+folder is only read, never changed. You see what will come in before anything is written.">Import project</button>
   <span id="dirty" class="dirty" hidden>unsaved changes</span>
   <button id="fixture" title="the October 2025 wardrobe regression fixture">Oct 2025</button>
   <span class="grow"></span>
@@ -932,6 +954,9 @@ libraries (Catalogue → Boards / Runners, pictures) — those write files at on
     </div>
   </form>
 </dialog>
+
+<!-- Import project (3 Oct 2026): the typed path, the preview, the report -->
+<dialog id="importdlg"><div id="importbody"></div></dialog>
 
 <script>
 "use strict";
@@ -9167,6 +9192,135 @@ async function runExport(walls) {
           r.accepted.map((i) => `${i.where} (${i.accepted})`).join(", ") : ""));
   S.lastExport = r;
 }
+
+/* ---------- Import project (3 October 2026) --------------------------------
+   One button, the same in the normal app and the demo. The folder is picked in
+   the native folder picker (/api/pick-folder); with no desktop window there is
+   none, and the dialog asks for the path typed instead. /api/import-scan lists
+   what is in the old folder and what will happen to each item — new,
+   identical (skipped), renamed "(imported)", or a job that will not load —
+   and writes nothing. Import writes (/api/import-run, which refuses if the
+   folder changed since the preview) and the report can be copied. Every
+   decision is cabinetgen/importer.py's; the old folder is only ever read.   */
+
+S.imp = null;      // {path, scan} while the dialog is open
+
+const IMP_KIND = {job: "Project", board: "Board", runner: "Runner", picture: "Picture"};
+
+function impWhat(i) {
+  if (i.action === "new") return "new — comes in";
+  if (i.action === "identical") return i.to && i.to !== i.name
+    ? `identical to ${esc(i.to)} here — skipped` : "identical — skipped";
+  if (i.action === "renamed") return `name taken here — comes in as <b>${esc(i.to)}</b>`;
+  return "will not load — not imported";
+}
+
+function impDraw(step, extra) {
+  const box = $("importbody");
+  const imp = S.imp || {};
+  if (step === "path") {
+    box.innerHTML = `<b>Import project</b>
+      <p class="note" style="margin:6px 0 8px">${extra && extra.why ? esc(extra.why) + " " : ""}Type the
+        path of the old Cupboard App folder — the demo's folder, or the one inside it.</p>
+      <div class="row"><input id="importpath" placeholder="C:\\Users\\…\\Cupboard App Demo"
+        value="${esc(imp.path || "")}"><button id="importlook" class="primary">Look</button></div>
+      <p class="note bad" id="importerr" style="margin:8px 0 0">${esc((extra && extra.error) || "")}</p>
+      <div class="btns"><button data-imp="cancel">Cancel</button></div>`;
+    setTimeout(() => { const f = $("importpath"); if (f) f.focus(); }, 0);
+    return;
+  }
+  if (step === "preview") {
+    const sc = imp.scan;
+    const c = sc.counts || {};
+    const coming = (c.new || 0) + (c.renamed || 0);
+    box.innerHTML = `<b>Import from</b> <span class="note">${esc(sc.source)}</span>
+      <p class="note" style="margin:6px 0 0">Nothing is written until you press Import, and the
+        old folder is only read. ${coming} item${coming === 1 ? "" : "s"} will come in;
+        ${c.identical || 0} identical skipped${c.broken ? `; ${c.broken} will not load` : ""}.</p>
+      <div class="imptable"><table><thead><tr><th>Kind</th><th>Name</th><th>What happens</th><th>Note</th></tr></thead>
+      <tbody>${sc.items.map((i) => `<tr data-impitem="${esc(i.kind)}:${esc(i.name)}">
+        <td>${IMP_KIND[i.kind] || esc(i.kind)}</td><td>${esc(i.name)}</td>
+        <td class="act-${esc(i.action)}">${impWhat(i)}</td>
+        <td class="note">${esc(i.note || "")}</td></tr>`).join("")
+        || `<tr><td colspan="4" class="note">The folder holds nothing to import.</td></tr>`}</tbody></table></div>
+      ${(sc.notes || []).map((n) => `<p class="note">${esc(n)}</p>`).join("")}
+      <div class="btns"><button data-imp="cancel">Cancel</button>
+        <button data-imp="run" class="primary" id="importgo"${coming ? "" : " disabled"}>Import</button></div>`;
+    return;
+  }
+  if (step === "report") {
+    box.innerHTML = `<b>Import project — done</b>
+      <textarea id="importreport" readonly>${esc(extra.text)}</textarea>
+      <div class="btns"><button data-imp="copy">Copy</button>
+        <button data-imp="cancel" class="primary">Close</button></div>`;
+  }
+}
+
+async function impScan(path) {
+  S.imp = {path: path};
+  const r = await post("/api/import-scan", {path: path});
+  if (!r.ok) { impDraw("path", {error: r.error}); return; }
+  S.imp.scan = r;
+  impDraw("preview");
+}
+
+$("importproj").addEventListener("click", async () => {
+  const dlg = $("importdlg");
+  S.imp = null;
+  const r = await post("/api/pick-folder", {});
+  if (r.cancelled) return;
+  if (!r.ok) {
+    impDraw("path", r.no_window
+      ? {why: "There is no folder picker in the browser."} : {error: r.error});
+    dlg.showModal();
+    return;
+  }
+  impDraw("path");
+  dlg.showModal();
+  await impScan(r.path);
+});
+
+$("importdlg").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.id === "importpath") { e.preventDefault(); $("importlook").click(); }
+});
+
+$("importdlg").addEventListener("click", async (e) => {
+  const t = e.target;
+  if (t.id === "importlook") {
+    const p = ($("importpath").value || "").trim();
+    if (!p) { $("importerr").textContent = "Type the folder's path first."; return; }
+    await impScan(p);
+    return;
+  }
+  const act = t.dataset && t.dataset.imp;
+  if (act === "cancel") { $("importdlg").close(); S.imp = null; return; }
+  if (act === "copy") {
+    const ta = $("importreport");
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
+    if (!ok) {
+      try { await navigator.clipboard.writeText(ta.value); ok = true; } catch (_) { ok = false; }
+    }
+    toast(ok ? "Report copied." : "Select the report and press Ctrl+C to copy it.", !ok);
+    return;
+  }
+  if (act === "run" && S.imp && S.imp.scan) {
+    t.disabled = true;
+    const r = await post("/api/import-run", {path: S.imp.path, signature: S.imp.scan.signature});
+    if (!r.ok) { toast(r.error, true); impDraw("path", {error: r.error}); return; }
+    S.imp.report = r.report;
+    impDraw("report", r.report);
+    await refreshJobs();
+    const first = (r.report.jobs || [])[0];
+    if (first) $("joblist").value = first + ".json";
+    S.lib = null;
+    S.rlib = null;
+    if (S.tab === "catalogue") {
+      if (S.catSub === "runners") await renderRunnersTab(); else await renderBoardsTab();
+    }
+  }
+});
 
 $("jobname").addEventListener("input", schedule);
 
