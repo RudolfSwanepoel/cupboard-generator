@@ -3,14 +3,20 @@ brief of 2 October 2026) in the running app, with a real mouse (Playwright,
 optional).
 
     python run_app.py --no-window --port 8766      # in another window
-    python tools/ui_check_walls.py [--port 8766] [--stage draw|one|flip|renumber|height|input|drag|3d|all]
+    python tools/ui_check_walls.py [--port 8766] [--stage draw|one|flip|renumber|height|input|drag|3d|
+        closure|layout|cornerdrag|walldrag|align|angle|label|typedraw|split|nook|flipall|all]
 
 Drives what check_room.py cannot: the toolbar, the Room card and the Wall card
 in the dock; Draw walls ADDING walls to a room and starting on an existing
 corner; a one-wall room that draws; Flip face on one wall; Renumber; a wall's
 height; a negative length and an angle out of range refused at the input; a
 cabinet dragged in the plan onto a wall at 45 degrees; and an L with a splay
-in 3D. Every job is built in the page (`adopt`), never loaded from jobs/ and
+in 3D. Phase 2 (3 October 2026): open / closed said the same by every display
+(closure), the cards fitting at 1360 x 900 and full HD (layout), a corner and
+a wall dragged with snaps (cornerdrag, walldrag, align, angle), a length typed
+on the plan (label), typed lengths while drawing (typedraw), a T-wall split
+(split), the Nook tool (nook), Flip room and Add back face (flipall); and
+Draw walls drawing ON the plan, one SVG before, during and after (draw). Every job is built in the page (`adopt`), never loaded from jobs/ and
 never saved. Screenshots go into output/_checks/ui_check_walls/.
 
 Playwright is the only third-party package anywhere near this app and only the
@@ -196,9 +202,9 @@ def stage_draw(pw):
     ctx, page = open_page(browser, errors, dialogs)
     adopt(page, empty_job("draw4"))
     room_plan(page)
-    check("the toolbar: Select on, Draw walls off",
+    check("the toolbar: Select on, Draw walls and Wall nook off",
           page.evaluate("() => [...document.querySelectorAll('#roomtools [data-tool]')].map((b) => [b.dataset.tool, b.classList.contains('on')])"),
-          [["select", True], ["draw", False]])
+          [["select", True], ["draw", False], ["nook", False]])
     check("with no room the dock shows the Room card, offering a room",
           (page.locator("#roomdock #room").is_visible(), page.locator("#room #roomadd").count()), (True, 1))
     check("no plan drawing before drawing (no room yet)", plan_svgs(page), 0)
@@ -1084,11 +1090,100 @@ def stage_split(pw):
     browser.close()
 
 
+def stage_nook(pw):
+    print("\nWall nook: click a wall, type width, depth and distance; the room stays closed")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    adopt(page, box_job("nook"))
+    room_plan(page)
+    before = page.evaluate("() => { const r = document.querySelector('#plan svg').getBoundingClientRect(); return [r.width, r.height]; }")
+    page.click("#toolnook")
+    page.wait_for_selector("#plan svg #drawlayer .drawgrid", state="attached", timeout=5000)
+    check("the Nook tool is on, a mode of the same plan (grid laid over it)",
+          [page.evaluate("() => $('toolnook').classList.contains('on')"), plan_svgs(page),
+           page.locator("#plan .drawgrid").count() > 0,
+           page.evaluate("() => { const r = document.querySelector('#plan svg').getBoundingClientRect(); return [r.width, r.height]; }") == before],
+          [True, 1, True, True])
+    click_mm(page, 1000, 0)
+    page.wait_for_selector("#nookbox", timeout=5000)
+    check("the box offers the distance clicked", abs(int(page.input_value("#nookat")) - 1000) <= 30, True)
+    page.fill("#nookw", "1200")
+    page.fill("#nookd", "500")
+    page.fill("#nookat", "1000")
+    shot(page, "nook_box", "#plancard")
+    page.click("#nookgo")
+    page.wait_for_function("() => S.job.room.walls.length === 8", timeout=10000)
+    computed(page)
+    check("a recess: the back and two returns, new letters, the room still closed",
+          [page.evaluate("() => S.res.room.walk"), page.evaluate("() => S.res.room.closure.text")],
+          [["A", "G", "E", "H", "F", "B", "C", "D"], "closed room"])
+    check("  the corners 270 / 90 / 90 / 270", [w[2] for w in walls(page)][:4], [270, 90, 90, 270])
+    check("  back on Select", page.evaluate("() => $('toolselect').classList.contains('on')"), True)
+    shot(page, "nook_done", "#plancard")
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
+def stage_flipall(pw):
+    print("\nFlip face on a closed room asks: Flip room / Flip just / Cancel; and Add back face")
+    browser = pw.chromium.launch(headless=not args.headed, args=LAUNCH)
+    errors, dialogs = [], []
+    ctx, page = open_page(browser, errors, dialogs)
+    adopt(page, box_job("flipall"))
+    room_plan(page)
+    start = points(page)
+    page.click('#room [data-wflip="B"]')
+    page.wait_for_selector("#flipdlg[open]", timeout=5000)
+    check("it asks, in the ruled words, with the three answers",
+          [page.inner_text("#flipq").replace("\n", " "),
+           [page.inner_text(f"#{b}") for b in ("flipall", "flipone", "flipcancel")]],
+          ["Flip the whole room? (the room side goes to the outside of every wall)",
+           ["Flip room", "Flip just B", "Cancel"]])
+    shot(page, "flipall_ask")
+    page.click("#flipcancel")
+    time.sleep(0.3)
+    check("Cancel: nothing changed", points(page), start)
+    page.click('#room [data-wflip="B"]')
+    page.wait_for_selector("#flipdlg[open]", timeout=5000)
+    page.click("#flipall")
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'A').x0 === 4000", timeout=10000)
+    computed(page)
+    check("Flip room: every wall turned, still closed, walked the other way",
+          [points(page), page.evaluate("() => [S.res.room.closure.text, S.res.room.walk]")],
+          [[["A", 4000, 0, 0, 0], ["D", 0, 0, 0, 3000], ["C", 0, 3000, 4000, 3000], ["B", 4000, 3000, 4000, 0]],
+           ["closed room", ["A", "D", "C", "B"]]])
+    page.click('#room [data-wflip="B"]')
+    page.wait_for_selector("#flipdlg[open]", timeout=5000)
+    page.click("#flipall")
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'A').x0 === 0", timeout=10000)
+    computed(page)
+    check("twice: back as it was", (points(page), page.evaluate("() => S.job.placements.map((p) => [p.cabinet, p.wall, p.x])")),
+          (start, [[1, "B", 2200], [2, "C", 500]]))
+    page.click('#room [data-wflip="B"]')
+    page.wait_for_selector("#flipdlg[open]", timeout=5000)
+    page.click("#flipone")
+    page.wait_for_function("() => S.job.room.walls.find((w) => w.id === 'B').y0 === 3000", timeout=10000)
+    computed(page)
+    check("Flip just B: B alone, the room an open run now", page.evaluate("() => S.res.room.closure.closed"), False)
+    click_wall(page, "A")
+    page.click('#wallcard [data-wback="A"]')
+    page.wait_for_function("() => S.job.room.walls.length === 5", timeout=10000)
+    computed(page)
+    check("Add back face on A: E, the other way, 110 behind, free",
+          [points(page)[-1], page.evaluate("() => S.res.room.walls.find((w) => w.id === 'E').free")],
+          [["E", 4000, -110, 0, -110], True])
+    check("no console errors", errors, [])
+    ctx.close()
+    browser.close()
+
+
 STAGES = {"draw": stage_draw, "one": stage_one, "flip": stage_flip, "renumber": stage_renumber,
           "height": stage_height, "input": stage_input, "drag": stage_drag, "3d": stage_3d,
           "closure": stage_closure, "layout": stage_layout, "cornerdrag": stage_cornerdrag,
           "walldrag": stage_walldrag, "align": stage_align, "angle": stage_angle, "label": stage_label,
-          "typedraw": stage_typedraw, "split": stage_split}
+          "typedraw": stage_typedraw, "split": stage_split, "nook": stage_nook, "flipall": stage_flipall}
 
 
 def main() -> int:

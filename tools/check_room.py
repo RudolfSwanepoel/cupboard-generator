@@ -26,6 +26,9 @@ closes are derived. So this check pins:
     one-wall room
   * `touching()` — a T-wall is not a crossing; a real crossing still is
   * `delete()` — placements unplaced, no orphan
+  * Phase 2 (3 October 2026): `closure_text()` — the one miss, its corner,
+    its text, and every reader agreeing; `corner_move()`, `wall_move()`,
+    `snaps()`, `split()`, `nook()`, `backface()`, `flip_all()`
 
 and keeps what it always pinned: a square room closes at exactly zero, a wall
 lengthened by 150 mm opens the chain, a job with `room=None` behaves as it did
@@ -59,6 +62,8 @@ from cabinetgen.room import renumber_walls, delete_wall, wall_height       # noq
 from cabinetgen.room import closure                                       # noqa: E402
 from cabinetgen.room import corner_move as room_corner_move, wall_move as room_wall_move, room_snaps  # noqa: E402
 from cabinetgen.room import split_wall as room_split_wall                  # noqa: E402
+from cabinetgen.room import wall_nook as room_nook, add_back_face as room_back_face  # noqa: E402
+from cabinetgen.room import flip_room as room_flip_all                    # noqa: E402
 from cabinetgen.scene import build as scene_build                         # noqa: E402
 from cabinetgen.render import _plan_room_side                             # noqa: E402
 from cabinetgen.store import job_from_dict, job_to_dict, room_from_dict    # noqa: E402
@@ -333,6 +338,9 @@ def main() -> int:
     wall_move()
     snaps()
     split()
+    nook()
+    backface()
+    flip_all()
 
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED: ' + str(FAILS)}")
     return 1 if FAILS else 0
@@ -1084,6 +1092,71 @@ def split():
     except ValueError:
         check("a split at an end is refused", True, True)
 
+def nook():
+    """Ruling 7: a recess (and a nib) inserted in a wall; a closed room stays
+    closed, the returns at 270 and 90."""
+    print("\nnook: a recess and a nib; the room stays closed")
+    job = Job(name="nook", room=rectangular(4000, 3000), cabinets=[
+        Cabinet(number=1, width=600, height=720, depth=560, kind="base")],
+        placements=[Placement(1, "A", 3000)])
+    rep = room_nook(job, "A", 1000, 1200, 500)
+    check("the walls round the recess, in order, new letters",
+          (rep["walls"], walk_order(job.room)), (["A", "G", "E", "H", "F"], ["A", "G", "E", "H", "F", "B", "C", "D"]))
+    check("  A to the mouth, a return back 500, the back 1200 wide, a return, the face on",
+          [pts(job.room)[i] for i in (0, 6, 4, 7, 5)],
+          [("A", 0, 0, 1000, 0), ("G", 1000, 0, 1000, -500), ("E", 1000, -500, 2200, -500),
+           ("H", 2200, -500, 2200, 0), ("F", 2200, 0, 4000, 0)])
+    check("  corners: 270 into the recess, 90 at its back, 90 back out, 270 to the face",
+          [corner_angle(job.room, w) for w in ("A", "G", "E", "H")], [270, 90, 90, 270])
+    check("  the room stays closed", closure(job.room)["text"], "closed room")
+    check("  cabinet 1 (x 3000) went to the face after the recess, x 800",
+          [[p.cabinet, p.wall, p.x] for p in job.placements], [[1, "F", 800]])
+    nib = Job(name="nib", room=rectangular(4000, 3000))
+    room_nook(nib, "B", 1000, 400, -300)
+    check("a negative depth is a nib: it stands into the room, corners 90 then 270",
+          ([corner_angle(nib.room, w) for w in walk_order(nib.room)][1:5], closure(nib.room)["closed"]),
+          ([90, 270, 270, 90], True))
+    for bad in ((0, 1200, 500), (3000, 1200, 500), (1000, 1200, 0)):
+        try:
+            room_nook(Job(name="b", room=rectangular(4000, 3000)), "A", *bad)
+            check(f"refused: {bad}", False, True)
+        except ValueError:
+            check(f"refused: {bad}", True, True)
+
+
+def backface():
+    """Ruling 8: the other face of a wall, joined to nothing."""
+    print("\nbackface: the same line, the other way, a thickness behind, joined to nothing")
+    rm = Room(name="p", walls=[Wall("A", 0, 0, 3000, 0)])
+    w = room_back_face(rm, "A")
+    check("B, the next letter: the same line reversed, 110 behind", pts(rm)[1], ("B", 3000, -110, 0, -110))
+    check("  its room side is the other side of the partition",
+          (wall_frames(rm)["A"][2], wall_frames(rm)["B"][2]), ((-0.0, 1.0), (-0.0, -1.0)))
+    check("  both free", (next_wall(rm, "B"), prev_wall(rm, "B"), next_wall(rm, "A")), (None, None, None))
+    rm.walls[0].thickness = 75
+    w2 = room_back_face(rm, "A")
+    check("  its own thickness where it has one", (w2.y0, w2.thickness), (-75, 75))
+
+
+def flip_all():
+    """Ruling 9: Flip room turns every wall of the chain; twice is identity."""
+    print("\nflip_room: every wall turned, still closed; twice gives the job back")
+    job = Job(name="fr", room=rectangular(4000, 3000), cabinets=[
+        Cabinet(number=1, width=600, height=720, depth=560, kind="base"),
+        Cabinet(number=2, width=600, height=720, depth=560, kind="base")],
+        placements=[Placement(1, "A", 500), Placement(2, "B", 300)],
+        gaps=[GapChoice("A", after=None, before=1, treatment="open")],
+        plinths=[PlinthChoice("A", first=1)])
+    start = job_to_dict(job)
+    turned = room_flip_all(job, "B")
+    check("every wall of the loop turned", sorted(turned), ["A", "B", "C", "D"])
+    check("  still closed, walked the other way", (closure(job.room)["closed"], walk_order(job.room)),
+          (True, ["A", "D", "C", "B"]))
+    check("  the room side is the outside now: A's normal points away",
+          wall_frames(job.room)["A"][2], (0.0, -1.0))
+    check("  each cabinet keeps its place along its wall, x from the other end", [p.x for p in job.placements], [2900, 2100])
+    room_flip_all(job, "B")
+    check("twice: the job back exactly", job_to_dict(job), start)
 
 
 if __name__ == "__main__":

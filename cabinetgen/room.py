@@ -965,6 +965,76 @@ def split_wall(job, wall_id: str, at: int, std: Standard = STANDARD) -> dict:
     return rep
 
 
+def wall_nook(job, wall_id: str, at: int, width: int, depth: int,
+              std: Standard = STANDARD) -> dict:
+    """A recess in a wall (ruling 7, 3 October 2026): `width` wide, `depth`
+    deep, starting `at` mm from the wall's start. The wall is split at both
+    sides of the mouth (`split_wall`); the middle part becomes the BACK of the
+    recess, `depth` behind the face, the same direction and length, so what
+    stood in the mouth keeps its x on it; two new returns join it to the face,
+    at 270 and 90 where a recess turns away from the room. A negative depth is
+    a projection — a nib — standing into the room, the corners the other way
+    round. New letters, nothing re-lettered; a closed room stays closed.
+    Says `{"walls": [face, return, back, return, face], "spanning": [...]}`."""
+    rm = job.room
+    w = _wall(rm, wall_id)
+    at, width, depth = int(round(at)), int(round(width)), int(round(depth))
+    if width <= 0:
+        raise ValueError("a nook's width is a positive number of mm")
+    if depth == 0:
+        raise ValueError("a nook's depth cannot be 0: positive is a recess, negative a projection")
+    if at <= 0 or at + width >= w.length:
+        raise ValueError(f"the nook must lie inside wall {wall_id}: from more than 0 to less "
+                         f"than {w.length} mm, with its width")
+    nx, ny = wall_normal(w)
+    one = split_wall(job, wall_id, at, std)
+    back = _wall(rm, one["second"])
+    two = split_wall(job, back.id, width, std)
+    face2 = _wall(rm, two["second"])
+    p1, p2 = (back.x0, back.y0), (back.x1, back.y1)
+    q1 = (int(round(p1[0] - nx * depth)), int(round(p1[1] - ny * depth)))
+    q2 = (int(round(p2[0] - nx * depth)), int(round(p2[1] - ny * depth)))
+    back.x0, back.y0, back.x1, back.y1 = q1[0], q1[1], q2[0], q2[1]
+    r1 = Wall(next_wall_id(rm), p1[0], p1[1], q1[0], q1[1], height=w.height,
+              thickness=w.thickness, drawn=w.drawn)
+    rm.walls.append(r1)
+    r2 = Wall(next_wall_id(rm), q2[0], q2[1], p2[0], p2[1], height=w.height,
+              thickness=w.thickness, drawn=w.drawn)
+    rm.walls.append(r2)
+    return {"walls": [w.id, r1.id, back.id, r2.id, face2.id],
+            "spanning": one["spanning"] + two["spanning"],
+            "openings": one["openings"] + two["openings"]}
+
+
+def add_back_face(rm: Room, wall_id: str, std: Standard = STANDARD) -> Wall:
+    """The other face of a wall (ruling 8): a new wall on the same line, the
+    opposite way, a wall's thickness behind it, joined to nothing — a
+    partition taking cupboards on both sides. The room side of each is its
+    own face. The next free letter, the same height and thickness.
+
+        add_back_face(rectangular(4000, 3000), 'A').y0  ->  -110
+    """
+    w = _wall(rm, wall_id)
+    t = w.thickness if w.thickness else std.wall_thickness
+    nx, ny = wall_normal(w)
+    new = Wall(next_wall_id(rm), int(round(w.x1 - nx * t)), int(round(w.y1 - ny * t)),
+               int(round(w.x0 - nx * t)), int(round(w.y0 - ny * t)),
+               height=w.height, thickness=w.thickness)
+    rm.walls.append(new)
+    return new
+
+
+def flip_room(job, wall_id: str, std: Standard = STANDARD) -> List[str]:
+    """Flip the whole room (ruling 9): every wall in the chain holding
+    `wall_id` turned round (`flip_face`), so the room side goes to the outside
+    of every wall and the loop is walked the other way, still closed.
+    Twice gives the job back exactly. Says which walls turned."""
+    chain = _chain_of(job.room, wall_id, std)
+    for wid in chain:
+        flip_face(job, wid, std)
+    return chain
+
+
 def corner_name(rm: Room, point, std: Standard = STANDARD) -> str:
     """How a corner is said: "D→E" where wall D ends and E starts on it,
     else "the end of C" / "the start of C"."""

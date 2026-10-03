@@ -597,13 +597,17 @@
   /* a wall's length on the plan, a text box styled as the label (ruling 5) */
   #plan .planlen{display:flex;align-items:center;justify-content:center;gap:3px;height:20px;
                  font:10.5px system-ui,sans-serif;color:var(--ink);white-space:nowrap}
-  #plan .planlen input{width:5.2ch;padding:0 2px;height:17px;font:inherit;text-align:center;border:1px solid transparent;
+  #plan .planlen input{width:4.6ch;padding:0 2px;height:17px;font:inherit;text-align:center;border:1px solid transparent;
                        background:transparent;box-shadow:none;border-radius:4px;color:inherit}
   #plan .planlen input:hover{border-color:var(--rule);background:var(--panel)}
   #plan .planlen input:focus{border-color:var(--accent);background:var(--panel);box-shadow:var(--focus);outline:none}
   #drawtype{position:absolute;z-index:6;background:var(--panel);border:1px solid var(--accent);
             border-radius:var(--r);padding:5px 8px;display:flex;gap:10px;font-size:11.5px;box-shadow:var(--shadow-2)}
   #drawtype input{width:62px;padding:2px 4px}
+  #nookbox{position:absolute;z-index:6;background:var(--panel);border:1px solid var(--accent);
+           border-radius:var(--r);padding:8px 10px;display:flex;flex-direction:column;gap:6px;
+           font-size:11.5px;box-shadow:var(--shadow-2);cursor:default}
+  #nookbox input{width:74px;padding:2px 4px;margin-left:4px}
   #plan .cornerhandle:hover,#plan .cornerhandle.dragging{fill-opacity:.25;stroke-opacity:1}
   #plan.drawing .cornerhandle{pointer-events:none}
   #plan.drawing,#plan.drawing svg{cursor:crosshair}
@@ -761,6 +765,8 @@
           title="select a wall, a cabinet or the room (Esc)">Select</button>
         <button data-tool="draw" id="drawwalls"
           title="sketch walls with the mouse — added to the room; lengths to be measured after">Draw walls</button>
+        <button data-tool="nook" id="toolnook"
+          title="click a wall, then type the recess's width, depth and distance from the wall's start">Wall nook</button>
       </div>
       <div id="roommain" style="flex:1;min-width:0">
         <div class="unplaced" id="unplaced-room"></div>
@@ -785,6 +791,11 @@
       </div>
       <!-- The dock shows what is selected: the Room card, a Wall card, or the
            one editor (appended here by dockEditor). -->
+      <!-- Flip face on a wall of a closed room (ruling 9) -->
+      <dialog id="flipdlg"><p id="flipq" style="margin:0 0 12px">Flip the whole room? (the room side goes
+        to the outside of every wall)</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end"><button id="flipall" class="primary">Flip room</button>
+          <button id="flipone">Flip just</button><button id="flipcancel">Cancel</button></div></dialog>
       <div class="dock" id="roomdock"><div class="dockstrip"><button class="docktog" title="collapse the editor">&#x276F;</button></div>
         <div class="dockcard card" id="room" hidden></div>
         <div class="dockcard card" id="wallcard" hidden></div>
@@ -1213,6 +1224,106 @@ $("roomsubs").addEventListener("click", (e) => {
   renderTab();
 });
 
+/* ---------- the Wall nook tool (room redo Phase 2, ruling 7) ----------------
+   A mode of the plan, as Draw walls is: the grid over it, cabinets ghosted.
+   Click a wall (the pointer projected onto its track, as a drag does), then
+   type the recess's width, depth and distance from the wall's start — negative
+   depth for a projection, a nib — and Insert: one server call
+   (`/api/wall-nook`) splits the wall and puts in the back and two returns.  */
+
+let NOOK = null;
+
+function startNook() {
+  if (S.tab !== "room" || S.roomSub !== "plan" || !S.job.room || !S.job.room.walls.length) {
+    toast("a nook goes into a wall — draw or add a room first", true);
+    return;
+  }
+  NOOK = {};
+  toolState();
+  $("drawhint").hidden = false;
+  $("drawhint").innerHTML = `Click a wall where the nook goes; then type its width, depth and
+    distance from the wall's start (mm). A negative depth is a projection (a nib). <b>Esc</b> goes back to Select.`;
+  window.addEventListener("keydown", nookKey);
+  renderPlan();
+}
+
+function endNook() {
+  NOOK = null;
+  const b = $("nookbox");
+  if (b) b.remove();
+  window.removeEventListener("keydown", nookKey);
+  toolState();
+  $("drawhint").hidden = true;
+  renderPlan();
+}
+
+function nookKey(e) {
+  if (e.key === "Escape" && NOOK) { e.preventDefault(); endNook(); }
+}
+
+function nookPaint() {
+  const m = planMap();
+  if (!m) return;
+  let g = m.svg.querySelector("#drawlayer");
+  if (!g) {
+    g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.id = "drawlayer";
+    g.setAttribute("pointer-events", "none");
+    m.svg.appendChild(g);
+  }
+  g.innerHTML = gridSvg(m);
+}
+
+$("plan").addEventListener("click", (e) => {
+  if (!NOOK || NOOK.box || e.target.closest("#nookbox")) return;
+  const pt = svgPoint(e);
+  let best = null;
+  for (const t of tracks()) {
+    const pr = project(t, pt.x, pt.y);
+    if (pr && pr.away <= 14 && (!best || pr.away < best.pr.away)) best = {t: t, pr: pr};
+  }
+  if (!best) { toast("click on a wall to put a nook in it", true); return; }
+  NOOK.box = true;
+  const box = document.createElement("div");
+  box.id = "nookbox";
+  const pr = $("plan").getBoundingClientRect();
+  box.style.left = (e.clientX - pr.left + $("plan").scrollLeft + 10) + "px";
+  box.style.top = (e.clientY - pr.top + $("plan").scrollTop + 10) + "px";
+  box.innerHTML = `<b>Nook in wall ${esc(best.t.wall)}</b>
+    <label>Width <input id="nookw" type="number" step="1" value="600"> mm</label>
+    <label>Depth <input id="nookd" type="number" step="1" value="300"> mm</label>
+    <label>From the start <input id="nookat" type="number" step="1" value="${best.pr.mm}"> mm</label>
+    <span><button id="nookgo" class="primary" data-wall="${esc(best.t.wall)}">Insert</button>
+      <button id="nookcancel">Cancel</button></span>`;
+  $("plan").appendChild(box);
+  $("nookw").focus();
+  $("nookw").select();
+});
+
+$("plan").addEventListener("click", async (e) => {
+  if (e.target.id === "nookcancel") { const b = $("nookbox"); if (b) b.remove(); if (NOOK) NOOK.box = false; return; }
+  if (e.target.id !== "nookgo") return;
+  const r = await post("/api/wall-nook", {job: S.job, wall: e.target.dataset.wall,
+    width: $("nookw").value, depth: $("nookd").value, at: $("nookat").value});
+  if (!r.ok) { toast(r.error, true); return; }
+  takeRoomReply(r);
+  endNook();
+  S.selWall = null;
+  renderRoomDock();
+  schedule();
+  const sp = (r.report && r.report.spanning) || [];
+  toast(`Nook in wall ${r.report.walls[0]}: walls ${r.report.walls.slice(1, 4).join(", ")} added, ` +
+        `${r.report.walls[4]} the face beyond it.` +
+        (sp.length ? ` ${sp.join(", ")} spans the nook's edge and stays on ${r.report.walls[0]}.` : ""), !!sp.length);
+});
+
+$("plan").addEventListener("keydown", (e) => {
+  if (!e.target.closest("#nookbox")) return;
+  e.stopPropagation();
+  if (e.key === "Enter") { e.preventDefault(); $("nookgo").click(); }
+  if (e.key === "Escape") { e.preventDefault(); endNook(); }
+});
+
 function showRoomSub() {
   const plan = S.roomSub === "plan";
   document.querySelectorAll("#roomsubs [data-roomsub]").forEach((x) =>
@@ -1222,6 +1333,7 @@ function showRoomSub() {
   $("roomtools").hidden = !plan;
   $("elevcard").hidden = plan;
   if (DRAW && !plan) endDraw();
+  if (NOOK && !plan) endNook();
 }
 
 /* ---------- Catalogue: Boards | Runners ---------------------------------------
@@ -5939,7 +6051,8 @@ function renderWallCard(id) {
           value="${w.thickness === null || w.thickness === undefined ? "" : w.thickness}"
           placeholder="${info.thickness}" title="drawing only — the band on the back of the face"></div>
       <div class="f"><label>Face</label>
-        <button data-wflip="${esc(id)}" title="put the room on the other side of this wall">Flip face</button></div>
+        <div style="display:flex;gap:6px"><button data-wflip="${esc(id)}" title="put the room on the other side of this wall">Flip face</button>
+        <button data-wback="${esc(id)}" title="a partition: the other face of this wall, a thickness behind it, joined to nothing">Add back face</button></div></div>
     </div>
     <div style="margin:10px 0 6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       ${info.free ? `<span class="pill" title="meets no other wall at either end">free wall</span>` : ""}
@@ -6134,7 +6247,7 @@ function refreshPlan() {
 async function renderPlan() {
   const rm = S.job.room;
   const box = $("plan");
-  if (!rm && !DRAW) {
+  if (!rm && !DRAW && !NOOK) {
     box.innerHTML = `<div class="empty">No room yet — add one below, or Draw walls.</div>`;
     $("layers").innerHTML = "";
     $("plannote").innerHTML = "";
@@ -6149,15 +6262,16 @@ async function renderPlan() {
   // mode of THIS drawing, so the drawing does not change when the mode does —
   // only the cabinets ghost while drawing, as the layer toggle ghosts them.
   const job = rm ? S.job : Object.assign({}, S.job, {room: {name: S.job.name || "room", walls: []}});
-  const r = await post("/api/plan", {job: job, show: DRAW ? [] : show,
-                                     ghost: DRAW ? allLayers() : ghost,
-                                     isolate: DRAW ? null : S.isolate, margin: true,
+  const mode = DRAW || NOOK;
+  const r = await post("/api/plan", {job: job, show: mode ? [] : show,
+                                     ghost: mode ? allLayers() : ghost,
+                                     isolate: mode ? null : S.isolate, margin: true,
                                      width: Math.max(300, box.clientWidth - 26),
                                      height: Math.max(240, box.clientHeight - 18)});
   if (!r.ok) { toast(r.error, true); return; }
   // A number the job no longer carries isolates nothing; the engine says so and
   // the pill catches up rather than naming a cabinet that has been deleted.
-  if (!DRAW && r.isolate !== S.isolate) { S.isolate = r.isolate; renderLayers(); }
+  if (!mode && r.isolate !== S.isolate) { S.isolate = r.isolate; renderLayers(); }
   const un = (S.res && S.res.room && S.res.room.unplaced) || [];
   // a length being typed on the plan survives the redraw (ruling 5)
   const ae = document.activeElement;
@@ -6168,10 +6282,11 @@ async function renderPlan() {
   box.innerHTML = r.svg + `<div id="dragreadout"></div>`;
   $("plannote").innerHTML = un.length ? `<div class="note" style="padding:4px 14px 8px">
         Not placed, so not drawn: ${un.join(", ")}</div>` : "";
-  box.classList.toggle("drawing", !!DRAW);
+  box.classList.toggle("drawing", !!mode);
   applyZoom("plan");
   markSelected();
   if (DRAW) drawPaint();
+  else if (NOOK) nookPaint();
   else planLengths();
 }
 
@@ -6195,10 +6310,13 @@ function planLengths() {
     const w = info.walls.find((x) => x.id === wid);
     if (!w) return;
     const x = +t.getAttribute("x"), y = +t.getAttribute("y");
+    // as wide as the label it stands for, and the "mm" beside it
+    let half = 50;
+    try { half = Math.max(40, t.getBBox().width / 2 + 16); } catch (err) { /* not laid out: the default */ }
     const fo = document.createElementNS(NS, "foreignObject");
-    fo.setAttribute("x", (x - 62).toFixed(1));
+    fo.setAttribute("x", (x - half).toFixed(1));
     fo.setAttribute("y", (y - 14).toFixed(1));
-    fo.setAttribute("width", "124");
+    fo.setAttribute("width", (2 * half).toFixed(1));
     fo.setAttribute("height", "20");
     fo.setAttribute("class", "planlenfo");
     fo.innerHTML = `<div xmlns="http://www.w3.org/1999/xhtml" class="planlen"><span>${esc(wid)} ·</span><input
@@ -6342,20 +6460,10 @@ function endDraw() {
   renderPlan();
 }
 
-// The draw layer over the plan, painted whole on every move: the grid, the
-// corners the room has, the walls drawn so far and the rubber band. A few
-// lines, and nothing to keep.
-function drawPaint() {
-  const m = planMap();
-  if (!DRAW || !m) return;
-  let g = m.svg.querySelector("#drawlayer");
-  if (!g) {
-    g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-    g.id = "drawlayer";
-    g.setAttribute("pointer-events", "none");
-    m.svg.appendChild(g);
-  }
-  // the grid covers the whole box on screen, past the drawing's edge when zoomed out
+// The grid laid over the plan while Draw walls or the Nook tool is on: every
+// 500 mm, every metre darker, over the whole box on screen — past the
+// drawing's edge when zoomed out.
+function gridSvg(m) {
   const vb = m.svg.viewBox.baseVal, sr = m.svg.getBoundingClientRect(), br = $("plan").getBoundingClientRect();
   const toVb = (cx, cy) => [vb.x + (cx - sr.left) * vb.width / sr.width, vb.y + (cy - sr.top) * vb.height / sr.height];
   const c0 = toVb(Math.min(br.left, sr.left), Math.min(br.top, sr.top));
@@ -6373,6 +6481,24 @@ function drawPaint() {
     L.push(`<line class="drawgrid" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y1}" stroke="var(--rule)"
       stroke-opacity="${gy % 1000 ? 0.35 : 0.7}" stroke-width="0.6"/>`);
   }
+  return L.join("");
+}
+
+// The draw layer over the plan, painted whole on every move: the grid, the
+// corners the room has, the walls drawn so far and the rubber band. A few
+// lines, and nothing to keep.
+function drawPaint() {
+  const m = planMap();
+  if (!DRAW || !m) return;
+  let g = m.svg.querySelector("#drawlayer");
+  if (!g) {
+    g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.id = "drawlayer";
+    g.setAttribute("pointer-events", "none");
+    m.svg.appendChild(g);
+  }
+  const P = (x, y) => mmToSvg(m, x, y).map((v) => v.toFixed(1));
+  const L = [gridSvg(m)];
   for (const [ex, ey] of DRAW.ends) {
     const [cx, cy] = P(ex, ey);
     L.push(`<circle class="drawend" cx="${cx}" cy="${cy}" r="4" fill="none" stroke="var(--muted)" stroke-width="1"/>`);
@@ -6979,7 +7105,7 @@ function svgPoint(evt) {
 }
 
 $("plan").addEventListener("pointerdown", async (e) => {
-  if (DRAW) return;                        // the drawing mode takes its own clicks
+  if (DRAW || NOOK) return;                // a mode of the plan takes its own clicks
   if (e.button !== 0) return;
   if (e.target.closest(".planlen")) return;       // a length being typed on the plan
   const handle = e.target.closest(".cornerhandle");
@@ -7540,6 +7666,21 @@ async function addRoom() {
   renderRoomDock(); schedule();
 }
 
+// Flip face on a wall of a closed room (ruling 9): Flip room / Flip just B /
+// Cancel, as "all" / "one" / "cancel".
+function askFlip(wid) {
+  return new Promise((resolve) => {
+    const dlg = $("flipdlg");
+    $("flipone").textContent = `Flip just ${wid}`;
+    const done = (v) => { dlg.close(); resolve(v); };
+    $("flipall").onclick = () => done("all");
+    $("flipone").onclick = () => done("one");
+    $("flipcancel").onclick = () => done("cancel");
+    dlg.oncancel = (e) => { e.preventDefault(); done("cancel"); };
+    dlg.showModal();
+  });
+}
+
 // What came back from a room edit that can move records: the room, and every
 // placement, gap, plinth, acceptance and corner hand it carried with it.
 function takeRoomReply(r) {
@@ -7608,10 +7749,28 @@ $("roomdock").addEventListener("click", async (e) => {
   }
   const flip = e.target.closest("[data-wflip]");
   if (flip && rm) {
-    const r = await post("/api/wall-flip", {job: S.job, wall: flip.dataset.wflip});
+    // on a wall of a CLOSED room it asks first (ruling 9): flip the room, or this wall
+    const wid = flip.dataset.wflip;
+    const wi = wallInfo(wid);
+    const choice = wi && wi.in_loop ? await askFlip(wid) : "one";
+    if (choice === "cancel") return;
+    const r = choice === "all"
+      ? await post("/api/room-flip-all", {job: S.job, wall: wid})
+      : await post("/api/wall-flip", {job: S.job, wall: wid});
     if (!r.ok) { toast(r.error, true); return; }
     takeRoomReply(r);
     renderRoomDock(); schedule();
+    if (choice === "all") toast(`Room flipped: walls ${r.turned.join(", ")} turned round — the room side is the outside of every wall.`);
+    return;
+  }
+  const back = e.target.closest("[data-wback]");
+  if (back && rm) {
+    const r = await post("/api/wall-backface", {room: rm, wall: back.dataset.wback});
+    if (!r.ok) { toast(r.error, true); return; }
+    S.job.room = r.room;
+    selectWall(r.added);
+    schedule();
+    toast(`Wall ${r.added} added: the back face of ${back.dataset.wback}, joined to nothing.`);
     return;
   }
   const add = e.target.closest("[data-wadd]");
@@ -7683,13 +7842,15 @@ $("roomdock").addEventListener("keydown", (e) => {
 $("roomtools").addEventListener("click", (e) => {
   const b = e.target.closest("[data-tool]");
   if (!b) return;
-  if (b.dataset.tool === "draw") { if (!DRAW) startDraw(); }
-  else if (DRAW) endDraw();
+  if (b.dataset.tool === "draw") { if (NOOK) endNook(); if (!DRAW) startDraw(); }
+  else if (b.dataset.tool === "nook") { if (DRAW) endDraw(); if (!NOOK) startNook(); }
+  else { if (DRAW) endDraw(); if (NOOK) endNook(); }
 });
 
 function toolState() {
+  const tool = DRAW ? "draw" : NOOK ? "nook" : "select";
   document.querySelectorAll("#roomtools [data-tool]").forEach((b) =>
-    b.classList.toggle("on", (b.dataset.tool === "draw") === !!DRAW));
+    b.classList.toggle("on", b.dataset.tool === tool));
 }
 
 /* ---------- gaps ---------------------------------------------------------- */

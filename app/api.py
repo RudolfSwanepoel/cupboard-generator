@@ -54,7 +54,8 @@ from cabinetgen.room import (LAYERS, add_wall, arm_shelf_depth, support_layout, 
                              closure_error, corner_angle, corner_points, crossing_walls,
                              closure as room_closure, room_snaps as room_room_snaps,
                              corner_move as room_corner_move, wall_move as room_wall_move,
-                             split_wall as room_split_wall,
+                             split_wall as room_split_wall, wall_nook as room_wall_nook,
+                             add_back_face, flip_room as room_flip_room, main_chain,
                              free_x, gaps as room_gaps, geometry, walls_from_points,
                              is_closed, next_wall, prev_wall, walk_order, wall_height,
                              corner_before, out_of_square, flip_face, renumber_walls,
@@ -1370,6 +1371,7 @@ def _wall_info(rm, std):
     it is free. Nothing here is worked out in the browser."""
     out = []
     order = walk_order(rm, std)
+    loop_ids, loop_closed = main_chain(rm, std)
     for wid in order:
         w = next(x for x in rm.walls if x.id == wid)
         prv, nxt = prev_wall(rm, wid, std), next_wall(rm, wid, std)
@@ -1381,6 +1383,8 @@ def _wall_info(rm, std):
             "thickness": w.thickness if w.thickness else std.wall_thickness,
             "drawn": bool(w.drawn),
             "free": prv is None and nxt is None,
+            # in the room's closed loop: Flip face asks whether to flip the room
+            "in_loop": bool(loop_closed and wid in loop_ids),
             "before": {"wall": prv, "angle": before,
                        "square": out_of_square(before, rm.offset_depth, std)},
             "after": {"wall": nxt, "angle": after,
@@ -2406,6 +2410,45 @@ def wall_split(payload):
     return dict(_room_reply(job), ok=True, report=rep)
 
 
+def wall_nook(payload):
+    """A recess (or, depth negative, a nib) in one wall (ruling 7): `at` mm
+    from its start, `width` wide, `depth` deep — one call, decided in
+    `room.wall_nook`: the wall split, the back and two returns inserted."""
+    job = _job(payload)
+    wid = str(payload.get("wall") or "")
+    if job.room is None or wid not in {w.id for w in job.room.walls}:
+        return {"ok": False, "error": f"the room has no wall {wid!r}"}
+    try:
+        rep = room_wall_nook(job, wid, int(round(float(payload.get("at")))),
+                             int(round(float(payload.get("width")))),
+                             int(round(float(payload.get("depth")))), job.std)
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc) if str(exc) else "width, depth and distance are numbers of mm"}
+    return dict(_room_reply(job), ok=True, report=rep)
+
+
+def wall_backface(payload):
+    """The other face of a wall (ruling 8, `room.add_back_face`): a new wall
+    on the same line, the other way, a thickness behind, joined to nothing."""
+    try:
+        rm = _room_only(payload)
+        w = add_back_face(rm, str(payload.get("wall") or ""), STANDARD)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "room": room_to_dict(rm), "added": w.id}
+
+
+def room_flip_all(payload):
+    """Flip the whole room (ruling 9, `room.flip_room`): every wall in the
+    chain holding `wall` turned round, everything on them kept in place."""
+    job = _job(payload)
+    wid = str(payload.get("wall") or "")
+    if job.room is None or wid not in {w.id for w in job.room.walls}:
+        return {"ok": False, "error": f"the room has no wall {wid!r}"}
+    turned = room_flip_room(job, wid, job.std)
+    return dict(_room_reply(job), ok=True, turned=turned)
+
+
 def wall_move(payload):
     """Drag a wall by its body (ruling 3): `offset` mm along its normal, into
     the room positive (`room.wall_move`); the walls at its ends stretch."""
@@ -2720,6 +2763,9 @@ ROUTES = {
     "/api/corner-move": corner_move,
     "/api/wall-move": wall_move,
     "/api/wall-split": wall_split,
+    "/api/wall-nook": wall_nook,
+    "/api/wall-backface": wall_backface,
+    "/api/room-flip-all": room_flip_all,
 }
 
 
