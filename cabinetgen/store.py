@@ -3,7 +3,7 @@ import json
 from dataclasses import asdict, fields
 
 from .model import (Acceptance, Cabinet, Drawer, GapChoice, Job, Obstruction, Opening, Panel,
-                    PanelSpec, Placement, PlinthChoice, Room, Support, Wall)
+                    PanelSpec, Placement, PlinthChoice, Room, Shelf, Support, Wall)
 
 
 def _only_known(cls, d: dict) -> dict:
@@ -74,6 +74,16 @@ def cabinet_to_dict(c: Cabinet) -> dict:
                           and (v is not None or k != "edges")}
                          for x in c.support_rows]
     d["bespoke"] = [panel_to_dict(x) for x in c.bespoke]
+    # Shelf rows (3 October 2026) only when there are any — a job that never
+    # heard of them is byte-identical — and within a row `height` only when
+    # typed, `kind` / `board` / `note` only when set.
+    if c.shelf_rows:
+        d["shelf_rows"] = [{k: v for k, v in asdict(x).items()
+                            if (v is not None or k != "height")
+                            and (v != "" or k not in ("kind", "board", "note"))}
+                           for x in c.shelf_rows]
+    else:
+        d.pop("shelf_rows", None)
     # Only written when this item actually is a panel, and `anchor` only when it
     # is set — so a job with no panels is byte-identical to one written before
     # they existed. The same discipline as `room` and `placements` above. The
@@ -107,6 +117,7 @@ def cabinet_from_dict(d: dict) -> Cabinet:
     d["drawers"] = [Drawer(**_only_known(Drawer, x)) for x in d.get("drawers", [])]
     d["support_rows"] = [Support(**_only_known(Support, x))
                          for x in d.get("support_rows", [])]
+    d["shelf_rows"] = [Shelf(**_only_known(Shelf, x)) for x in d.get("shelf_rows", [])]
     d["bespoke"] = [panel_from_dict(x) for x in d.get("bespoke", [])]
     d["panel"] = (PanelSpec(**_only_known(PanelSpec, d["panel"]))
                   if isinstance(d.get("panel"), dict) else None)

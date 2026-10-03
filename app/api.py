@@ -32,7 +32,7 @@ from cabinetgen.export_plaza import (effective_price, estimate_cost, summarise,
                                      write_csvs)
 from cabinetgen.model import (ALL_KINDS, BOARD_ALIASES, CODES, EXTERIOR_TAPES, Drawer,
                               MATERIALS, NO_COLOUR, PANEL_CODE,
-                              PANEL_ORIENTATIONS, PanelSpec, Placement, Room,
+                              PANEL_ORIENTATIONS, PanelSpec, Placement, Room, Shelf,
                               SUPPORT_EDGES, SUPPORT_DEFAULT_EDGES,
                               SUPPORT_EDGE_NAMES, SUPPORT_LONG_EDGES,
                               SUPPORT_TYPE_LABEL,
@@ -456,6 +456,13 @@ def _geometry_info(job, cab, std):
             "support_edging": {e: cab.support_tape(job.materials, e)
                                for e in SUPPORT_EDGES},
             "support_total": cab.support_total,
+            # The shelves as the engine reads them (3 October 2026): the rows
+            # — migrated from the two numbers where none are written, which is
+            # what the editor copies in on the first edit — each with what it
+            # resolves to: its depth, where it is drawn (`height`, the top face
+            # above the bottom panel's top face; `typed` when the row says so),
+            # its edging and the tape name. Shown, never worked out, in the editor.
+            "shelves": _shelf_info(cab, std, job.materials),
             "supports_migrated": not cab.support_rows,
             "supports_typed": cab.supports_typed,
             "support_types_offered": cab.support_types_offered,
@@ -2740,6 +2747,30 @@ def _cabinet_of(payload):
     return job, job.cabinets[int(payload.get("index") or 0)]
 
 
+def _shelf_info(cab, std, mats):
+    from cabinetgen.room import shelf_layout
+    rows = cab.shelf_list
+    lay = shelf_layout(cab, std, mats)
+    out = []
+    for i, r in enumerate(rows):
+        u = lay[i] if i < len(lay) else {}
+        d = asdict(r)
+        d.update({"depth": std.shelf_depth(cab.depth, back=cab.back, clearance=int(r.clearance)),
+                  "shown_height": u.get("height"), "typed": r.height is not None,
+                  "eff_kind": cab.shelf_kind(r), "eff_board": cab.shelf_board(r),
+                  "name": cab.shelf_tape(mats, r)})
+        out.append(d)
+    return {"rows": out, "migrated": not cab.shelf_rows,
+            "hidden": cab.is_panel or cab.corner_kind in ("mitre", "ell")}
+
+
+def shelf_new(payload):
+    """A fresh shelf row (`model.Shelf`'s defaults: clearance 4, the front
+    edge in the exterior PVC, no height — its equal-spacing slot), so the
+    defaults are decided in one place and the browser only writes the row."""
+    return {"ok": True, "row": asdict(Shelf())}
+
+
 def support_new(payload):
     """A fresh typed support row (`Cabinet.new_support`), so its defaults —
     cut from the carcass, the board's own edging kind, no edge ticked on a
@@ -2956,6 +2987,7 @@ ROUTES = {
     "/api/panel-detach": panel_detach,
     "/api/duplicate": duplicate,
     "/api/support-new": support_new,
+    "/api/shelf-new": shelf_new,
     "/api/support-reenter": support_reenter,
     "/api/support-edges": support_edges,
     "/api/inner-drawers": inner_drawers,

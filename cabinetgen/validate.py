@@ -270,7 +270,7 @@ def _cabinet_structure(cabinets, std):
                     f"{c.depth} mm deep is too shallow for any length of "
                     f"{rr.name or 'its runner'} (shortest is {rr.shortest}, needs "
                     f"{std.runner_clearance} behind)", check="runner-depth"))
-        if c.shelves and c.back == "none":
+        if c.shelf_list and c.back == "none":
             out.append(Issue(WARNING, str(c.number),
                              "shelves in a cabinet with no back — check the shelf depth is intentional"))
     return out

@@ -421,6 +421,39 @@ class Support:
 
 SUPPORT_EDGES = ("none", "front", "white")
 
+
+@dataclass
+class Shelf:
+    """One shelf of a straight carcass (the shelves brief, 3 October 2026).
+
+    Shelves are rows, like drawers; "fixed vs adjustable" is gone. A row says
+    where it is drawn, how far it stops short of the back, and what it is edged
+    in. It is always cut from the carcass board, across the internal width (or
+    `Cabinet.shelf_width`), code 05, role Shelve.
+
+    `height` — top face of the bottom panel to the top face of the shelf, mm.
+    DRAWING AND 3D ONLY: shelves are set at fitment, and a height never moves
+    a cut line. None means its equal-spacing slot (`room.shelf_layout`).
+    `clearance` — at the FACE, between the shelf's front edge and the carcass
+    front: depth = the distance from the carcass front to the front face of the
+    back, less this (`Standard.shelf_depth`). A smaller clearance is a deeper
+    shelf. The ruled 4 (adjustable) and 1 (fixed) are what a migrated row reads.
+    `kind` / `board` — its edging kind and colour board; blank is today's default,
+    PVC in the exterior board's colour (`Cabinet.carcass_tape`).
+    `long` / `short` — how many long edges (front and rear) and ends are banded:
+    long 1 is the front edge, 2 both; short 1 the left end, 2 both — the rule
+    `support_edges_for_counts` already states. The default is the front edge.
+    `note` — "fixed" on a row migrated from `fixed_shelves`, so the cut-list line
+    reads exactly as it did; typed rows carry none.
+    """
+    height: Optional[int] = None
+    clearance: int = 4
+    kind: str = ""
+    board: str = ""
+    long: int = 1
+    short: int = 0
+    note: str = ""
+
 # The three support types, in cut-list order, and where each is offered.
 # Front and Top Rear are flat rails at the top of a BASE unit, which has no top
 # panel to tie the sides at the top; a tall or wall unit has a top and takes
@@ -650,8 +683,13 @@ class Cabinet:
     edged_supports: int = 0      # front-edged, banded in the carcass tape
     white_supports: int = 0      # white-edged, banded in PVC WHITE
 
-    shelves: int = 0             # adjustable
-    fixed_shelves: int = 0       # fitted, slightly deeper
+    shelves: int = 0  # adjustable  — LEGACY: read only until shelf_rows is written
+    fixed_shelves: int = 0  # fitted, slightly deeper — LEGACY, as above
+    # The shelves as rows (3 October 2026): `Shelf` per shelf. Empty means the
+    # two numbers above are the shelves, read as rows at the ruled clearances
+    # (`shelf_list`); the editor writes the rows — and zeroes the numbers — the
+    # first time the section is touched, and never before.
+    shelf_rows: List[Shelf] = field(default_factory=list)
     shelf_width: Optional[int] = None    # override when the interior is split by a divider
 
     divider_height: Optional[int] = None
@@ -1243,6 +1281,49 @@ class Cabinet:
         """Which support types this cabinet may carry (`support_types_for`); a
         solid back takes the place of the Top Rear and the Backs."""
         return support_types_for(self.kind, self.corner_kind, self.solid_back)
+
+    # ---- shelves as rows (3 October 2026) ----------------------------------
+
+    @property
+    def shelf_list(self) -> List[Shelf]:
+        """The shelves that are cut and drawn, in order. The rows when any are
+        written; otherwise the migration — `fixed_shelves` rows first at
+        `Standard.shelf_gap_fixed` with note "fixed", then `shelves` rows at
+        `Standard.shelf_gap_adjustable` — which is exactly what the two numbers
+        cut before rows existed, line for line and in the same order. Nothing
+        is written here."""
+        if self.shelf_rows:
+            return list(self.shelf_rows)
+        return ([Shelf(clearance=STANDARD.shelf_gap_fixed, note="fixed")
+                 for _ in range(int(self.fixed_shelves or 0))] +
+                [Shelf(clearance=STANDARD.shelf_gap_adjustable)
+                 for _ in range(int(self.shelves or 0))])
+
+    def shelf_kind(self, row: Shelf) -> str:
+        """A shelf row's edging kind: its own, else PVC (today's carcass edging)."""
+        return row.kind or "pvc"
+
+    def shelf_board(self, row: Shelf) -> str:
+        """The board whose colour a shelf row is edged in: its own, else the
+        exterior board (today's rule, 14 September 2026)."""
+        return row.board or self.exterior_board
+
+    def shelf_tape(self, materials: dict, row: Shelf) -> str:
+        """The tape a shelf row orders: nothing with no edge counted, else its
+        kind in its colour board — the Boards tab's answer."""
+        if not (int(row.long or 0) or int(row.short or 0)):
+            return ""
+        return tape_for(materials, self.shelf_board(row), self.shelf_kind(row))
+
+    @staticmethod
+    def shelf_edge_counts(row: Shelf) -> tuple:
+        """(edge_l, edge_w) for a shelf line. A shelf's Length is always its
+        run across the cabinet (`shelf_width` or Wi) and its front edge runs
+        along that, so `long` (front, then rear) is `edge_l` and `short` (the
+        ends) is `edge_w` whatever the two sizes are — the October job's 400 x
+        481 shelves in cabinets 11 and 12 are deeper than they are wide and
+        band their front edge as edge_l, as they always did."""
+        return (max(0, min(2, int(row.long or 0))), max(0, min(2, int(row.short or 0))))
 
     # ---- the solid back (ruled 3 October 2026) ------------------------------
 

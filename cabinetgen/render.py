@@ -2005,7 +2005,7 @@ def _interior(c: Cabinet, x, y, w, h, scale, std: Standard, flip=None,
     # shelves, spread through whatever the doors cover. Their ink follows the
     # body's colour: a hairline in FAINT vanishes on a dark carcass.
     inside = muted_on(body["colour"])
-    n = c.shelves + c.fixed_shelves
+    n = len(c.shelf_list)
     if n and not stack:
         span = y + h - cursor if leaves else h
         base = cursor if leaves else y

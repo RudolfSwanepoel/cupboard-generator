@@ -280,15 +280,25 @@ def generate_cabinet(cab: Cabinet, std: Standard = STANDARD,
                        grain=grain_of(mats, sup_board)))
 
     # ---- shelves -----------------------------------------------------------
+    # One line per run of identical consecutive rows (depth, edging, note),
+    # its qty the run's length, in row order (3 October 2026). A job with no
+    # rows reads its two numbers as rows — fixed first at 1, then adjustable at
+    # 4 — so it cuts the two lines it always cut, in the same order, with the
+    # fixed line's note. A height is never read here: heights move no cut line.
     sw = cab.shelf_width or Wi
-    if cab.fixed_shelves > 0:
-        P.append(Panel(n, "05", "Shelve", carc, sw, std.shelf_depth(cab.depth, fixed=True, back=cab.back),
-                       cab.fixed_shelves, edge_l=1, edge_material=carc_tape,
-                       grain=carc_grain, note="fixed"))
-    if cab.shelves > 0:
-        P.append(Panel(n, "05", "Shelve", carc, sw, std.shelf_depth(cab.depth, back=cab.back),
-                       cab.shelves, edge_l=1, edge_material=carc_tape,
-                       grain=carc_grain))
+    run = None
+    for row in cab.shelf_list:
+        depth = std.shelf_depth(cab.depth, back=cab.back, clearance=int(row.clearance))
+        tape = cab.shelf_tape(mats, row)
+        el, ew = cab.shelf_edge_counts(row) if tape else (0, 0)
+        key = (depth, el, ew, tape, row.note or "")
+        if run is not None and run[0] == key:
+            run[1].qty += 1
+            continue
+        line = Panel(n, "05", "Shelve", carc, sw, depth, 1, edge_l=el, edge_w=ew,
+                     edge_material=tape, grain=carc_grain, note=row.note or "")
+        P.append(line)
+        run = (key, line)
 
     # ---- divider -----------------------------------------------------------
     if cab.divider_count > 0:

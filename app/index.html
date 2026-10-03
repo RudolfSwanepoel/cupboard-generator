@@ -50,6 +50,7 @@
     --sec-drawers:#f7ead2; --sec-drawers-line:#e6d5b4;
     --sec-corner:#ece5f3; --sec-corner-line:#d7cbe5;
     --sec-supports:#eaeee9; --sec-supports-line:#d3dad1;
+    --sec-shelves:#eef1e4; --sec-shelves-line:#d9dec6;
   }
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
@@ -414,6 +415,12 @@
   .sec.s-drawers{background:var(--sec-drawers);border-color:var(--sec-drawers-line)}
   .sec.s-corner{background:var(--sec-corner);border-color:var(--sec-corner-line)}
   .sec.s-supports{background:var(--sec-supports);border-color:var(--sec-supports-line)}
+  .sec.s-shelves{background:var(--sec-shelves);border-color:var(--sec-shelves-line)}
+  #shelfbox table.rows select{width:auto;font-size:11px;padding:1px 2px}
+  #shelfbox table.rows td{vertical-align:middle}
+  #shelfbox .shclr{display:flex;align-items:center;gap:2px}
+  #shelfbox .shclr button{padding:0 5px;line-height:16px}
+  #shelfbox .leaf{margin:0;flex-wrap:wrap;gap:4px}
   .sec input,.sec select{background:rgba(255,255,255,.85)}
   .sec input:focus,.sec select:focus{background:var(--panel)}
   .supblock{border-top:1px solid var(--sec-supports-line);padding:6px 0 4px}
@@ -1095,7 +1102,7 @@ function blankCabinet(number, kind) {
     // chosen — cut from the carcass, in that board's own edging.
     support_rows: [],
     supports: 0, edged_supports: 0, white_supports: 0,
-    shelves: 0, fixed_shelves: 0, shelf_width: null,
+    shelves: 0, fixed_shelves: 0, shelf_rows: [], shelf_width: null,
     divider_height: null, divider_count: 0,
     doors: 1, door_height: null, door_hinges: [], has_doors: null, door_boards: [],
     drawers: [], has_drawers: null,
@@ -1969,6 +1976,15 @@ const SECTIONS = [
   {key: "structure", name: "Structure", slot: "structurebox", when: notPanel,
    fields: []},
 
+  // Shelves as rows (3 October 2026), out of Structure: each says where it is
+  // drawn, its clearance at the face, and its edging. Heights are drawing and
+  // 3D only; the clearance is what moves the cut line.
+  {key: "shelves", name: "Shelves", slot: "shelfbox", when: notPanel,
+   hint: "One row per shelf, cut from the carcass board across the inside. Height " +
+         "is where it is drawn (shelves are set at fitment); Clearance is how far " +
+         "its front edge stops short of the carcass front, and sets its depth.",
+   fields: []},
+
   {key: "doors", name: "Doors", slot: "doorbox", when: notPanel,
    toggle: "has_doors", tick: "Has doors", fields: []},
 
@@ -2356,6 +2372,7 @@ function renderEditor() {
 function renderSections() {
   renderStructure();
   renderCorner();
+  renderShelves();
   renderDoors();
   renderDrawers();
   renderSupports();
@@ -2365,6 +2382,7 @@ function renderSections() {
   refreshSwing();
   refreshEdging();
   refreshSupports();
+  refreshShelves();
 }
 
 // What names a control well enough to find it again if a repaint replaced it.
@@ -2474,9 +2492,8 @@ $("editor").addEventListener("input", (e) => {
       has.push(`${c.drawers.length} drawer face(s)`);
     }
     if ((c.support_rows || []).length) has.push(`${c.support_rows.length} support row(s)`);
-    if ((c.shelves || 0) + (c.fixed_shelves || 0)) {
-      has.push(`${(c.shelves || 0) + (c.fixed_shelves || 0)} shelves`);
-    }
+    const nsh = (c.shelf_rows || []).length || (c.shelves || 0) + (c.fixed_shelves || 0);
+    if (nsh) has.push(`${nsh} shelves`);
     if ((c.bespoke || []).length) has.push(`${c.bespoke.length} hand-specified panel(s)`);
     if (has.length) {
       const ok = window.confirm(
@@ -2528,6 +2545,33 @@ $("editor").addEventListener("input", (e) => {
     // "" is not a tape name: it means hand it back to the boards
     c[tape] = e.target.value === "" ? null : e.target.value;
     schedule();                 // the value beside it is the engine's answer
+    return;
+  }
+
+  const sh = e.target.dataset.shelf;
+  if (sh !== undefined) {
+    // the first edit copies the engine's rows in and zeroes the two numbers
+    ensureShelfRows(c);
+    const row = c.shelf_rows[+sh];
+    if (!row) return;
+    const key = e.target.dataset.shk;
+    if (key === "height") {
+      row.height = e.target.value === "" ? null : Math.max(parseInt(e.target.value, 10) || 0, 0);
+    } else if (key === "clearance") {
+      row.clearance = Math.max(parseInt(e.target.value, 10) || 0, 0);
+    } else if (key === "long" || key === "short") {
+      row[key] = +e.target.value || 0;
+      renderShelves();
+    } else if (key === "kind") {
+      row.kind = e.target.value;
+      // the colour board no longer offers what this row asked for: back to the default colour
+      if (row.kind && row.board && !boardOffers(row.board, row.kind)) row.board = "";
+      renderShelves();
+    } else if (key === "board") {
+      row.board = e.target.value;
+      renderShelves();
+    }
+    schedule();                 // the depth and the tape name are the engine's answer
     return;
   }
 
@@ -2806,6 +2850,31 @@ $("editor").addEventListener("click", (e) => {
     // the count changed: inner heights go back to the auto spacing (ruled)
     if (wasInner) { setInner(c, true, c.drawers.length); return; }
     renderDrawers();
+    return;
+  }
+  if (e.target.id === "shadd") { addShelf(); return; }
+  if (e.target.id === "sheq") {
+    const c = S.job.cabinets[S.sel];
+    ensureShelfRows(c);
+    c.shelf_rows.forEach((r) => { r.height = null; });   // every height back to equal spacing
+    renderShelves(); schedule();
+    return;
+  }
+  const shd = e.target.closest("[data-shdel]");
+  if (shd) {
+    const c = S.job.cabinets[S.sel];
+    ensureShelfRows(c);
+    c.shelf_rows.splice(+shd.dataset.shdel, 1);
+    renderShelves(); schedule();
+    return;
+  }
+  const shc = e.target.closest("[data-shclr]");
+  if (shc) {
+    const [i, d] = shc.dataset.shclr.split(":").map(Number);
+    const c = S.job.cabinets[S.sel];
+    ensureShelfRows(c);
+    const r = c.shelf_rows[i];
+    if (r) { r.clearance = Math.max((+r.clearance || 0) + d, 0); renderShelves(); schedule(); }
     return;
   }
   if (e.target.id === "supretype") { reenterSupports(); return; }
@@ -3890,6 +3959,156 @@ async function addBackSupport() {
   schedule();
 }
 
+/* ---------- Shelves --------------------------------------------------------
+   Rows, like the drawer stack (3 October 2026). What is typed here is a height
+   (drawing only), a clearance at the face, and an edging; the depth each row
+   cuts to and the tape it orders are the engine's answer off /api/compute
+   (`geometry[n].shelves`), shown and never worked out here. A job saved with
+   the two old numbers shows the engine's migration of them — rows at 4 and at
+   1 — and nothing is written until the first edit, when `ensureShelfRows`
+   copies those rows in and zeroes the numbers.                               */
+
+// Shared edging selects (3 October 2026), used by the support rows and the
+// shelf rows alike: a kind the colour board offers, and a colour board that
+// offers the kind. `attrs` names the row (the data-* attributes).
+function edgeKindSelect(attrs, kind, colour, opts) {
+  const allKinds = S.def.edging_kinds || ["pvc", "1mm", "2mm"];
+  const pre = S.def.edging_prefix || {};
+  const offered = allKinds.filter((k) => boardOffers(colour, k));
+  const lost = kind && offered.indexOf(kind) < 0;
+  const none = opts && opts.none;
+  return `<select ${attrs} title="${esc((opts && opts.title) || "how thick")}">
+    ${none ? `<option value="${esc(none.value)}"${kind ? "" : " selected"}>${esc(none.label)}</option>` : ""}
+    ${lost ? `<option value="${esc(kind)}" selected>${esc(pre[kind] || kind)} (not offered)</option>` : ""}
+    ${offered.map((k) => `<option value="${esc(k)}"${k === kind ? " selected" : ""}>${
+      esc(pre[k] || k)}</option>`).join("")}</select>`;
+}
+function edgeColourSelect(attrs, kind, colour, opts) {
+  const keys = (S.res && S.res.boards) || [];
+  const usable = kind ? keys.filter((k) => boardOffers(k, kind)) : keys.slice();
+  const lost = colour && usable.indexOf(colour) < 0;
+  const blank = opts && opts.blank;
+  return `<select ${attrs} title="${esc((opts && opts.title) || "what colour the edging is")}"
+    ${opts && opts.disabled ? "disabled" : ""}>
+    ${blank ? `<option value="${esc(blank.value)}"${colour ? "" : " selected"}>${esc(blank.label)}</option>` : ""}
+    ${lost ? `<option value="${esc(colour)}" selected>${esc(edgeLabel(colour))} (not offered)</option>` : ""}
+    ${usable.map((k) => `<option value="${esc(k)}"${k === colour ? " selected" : ""}>${
+      esc(edgeLabel(k))}</option>`).join("")}</select>`;
+}
+
+function shelfInfo(c) {
+  const g = S.res && S.res.geometry && S.res.geometry[String(c.number)];
+  return (g && g.shelves) || {rows: [], migrated: true, hidden: false};
+}
+
+// The first edit to the section: the engine's rows (the migration of the two
+// numbers, or the stored rows read back) become the cabinet's own, and the two
+// numbers are zeroed so they are never read again. Nothing before that.
+function ensureShelfRows(c) {
+  if (c.shelf_rows && c.shelf_rows.length) return;
+  const rows = shelfInfo(c).rows || [];
+  c.shelf_rows = rows.map((r) => ({
+    height: r.height === undefined ? null : r.height, clearance: r.clearance,
+    kind: r.kind || "", board: r.board || "", long: r.long, short: r.short, note: r.note || ""}));
+  c.shelves = 0;
+  c.fixed_shelves = 0;
+}
+
+async function addShelf() {
+  const c = S.job.cabinets[S.sel];
+  const r = await post("/api/shelf-new", {});
+  if (!r.ok || S.job.cabinets[S.sel] !== c) return;
+  ensureShelfRows(c);
+  c.shelf_rows.push(r.row);
+  renderShelves();
+  schedule();
+}
+
+function renderShelves() {
+  const box = slot($("shelfbox"));
+  if (!box) return;
+  const c = S.job.cabinets[S.sel];
+  if (cornerShaped(c)) {
+    box.innerHTML = `<p class="off">A corner unit's shelves are the arm shelf and the mitred
+      shelf, both in <b>Corner Unit</b> above — its inside is not a rectangle, so a
+      straight shelf size would not fit it.</p>`;
+    return;
+  }
+  const info = shelfInfo(c);
+  const stored = c.shelf_rows && c.shelf_rows.length;
+  const rows = stored ? c.shelf_rows : (info.rows || []);
+  const eng = info.rows || [];
+  const pre = S.def.edging_prefix || {};
+  const countSel = (i, which, v) => `<select data-shelf="${i}" data-shk="${which}"
+      title="${which === "long" ? "long edges: 1 the front, 2 the front and the rear" : "short edges: 1 the left end, 2 both"}">${
+    [0, 1, 2].map((n) => `<option value="${n}"${n === (+v || 0) ? " selected" : ""}>${n}</option>`).join("")}</select>`;
+  const body = rows.map((r, i) => {
+    const e = eng[i] || {};
+    const typed = r.height !== null && r.height !== undefined;
+    const kind = r.kind || "";
+    const colour = r.board || "";
+    const shown = e.shown_height === undefined || e.shown_height === null ? "" : Math.round(e.shown_height);
+    return `<tr>
+      <td class="n">${i + 1}${r.note === "fixed" ? `<span class="note" title="was a fixed shelf (clearance 1)"> f</span>` : ""}</td>
+      <td><input type="number" step="1" min="0" data-shelf="${i}" data-shk="height"
+          value="${typed ? r.height : ""}" placeholder="${shown}"
+          title="top face of the bottom panel to the top face of this shelf — blank is equal spacing"></td>
+      <td><div class="shclr">
+        <button type="button" class="mini" data-shclr="${i}:-1" title="1 mm less clearance: 1 mm deeper">−</button>
+        <input type="number" step="1" min="0" data-shelf="${i}" data-shk="clearance" value="${r.clearance}">
+        <button type="button" class="mini" data-shclr="${i}:1" title="1 mm more clearance: 1 mm shallower">+</button></div></td>
+      <td class="mono" data-shdepth="${i}" title="carcass front to the front face of the back, less the clearance">${
+        e.depth === undefined ? "…" : e.depth}</td>
+      <td><div class="leaf">
+        ${edgeKindSelect(`data-shelf="${i}" data-shk="kind"`, kind, colour || c.exterior_board,
+                         {none: {value: "", label: `${pre.pvc || "PVC"} (default)`}})}
+        ${edgeColourSelect(`data-shelf="${i}" data-shk="board"`, kind || "pvc", colour,
+                           {blank: {value: "", label: `exterior (${edgeLabel(c.exterior_board)})`}})}
+        ${countSel(i, "long", r.long)} ${countSel(i, "short", r.short)}
+        <span class="note" data-shname="${i}">${esc(e.name || "unedged")}</span></div></td>
+      <td><button type="button" class="mini" data-shdel="${i}" title="remove this shelf">×</button></td>
+    </tr>`;
+  }).join("");
+  box.innerHTML = `<table class="rows shstack">
+    <thead><tr><th class="n">#</th>
+      <th title="from the top face of the bottom panel to the top face of the shelf">Height</th>
+      <th title="at the face: how far the front edge stops short of the carcass front">Clearance</th>
+      <th>Depth</th><th>Edging</th><th></th></tr></thead>
+    <tbody>${body || `<tr><td colspan="6" class="note">No shelves — add one.</td></tr>`}</tbody></table>
+    <span class="dhelp"><b>Height</b> is measured from the top face of the bottom panel to the
+      top face of the shelf, in mm, and is drawing and 3D only — shelves are set at fitment,
+      and a height never moves a cut line; blank is equal spacing. <b>Clearance</b> is at the
+      face: depth = the carcass front to the front face of the back (the backing board, or the
+      solid back) less the clearance, so a smaller clearance is a deeper shelf. <b>Edging</b>:
+      the kind, the colour, long edges (1 the front, 2 the rear too) and short (the ends).</span>
+    <div class="presets">
+      <button id="sheq" type="button" title="every height back to equal spacing">Equal</button>
+      <button id="shadd" type="button">+ Shelf</button></div>
+    <div class="dtot"><span>${rows.length} shel${rows.length === 1 ? "f" : "ves"}${
+      !stored && rows.length && info.migrated ? " — as the job stored them; the first edit writes the rows" : ""}</span></div>`;
+}
+
+// After a compute: the derived cells — depth, the equal-spacing height shown
+// as the placeholder, the tape name — off the engine's rows, without rebuilding
+// the controls (a focused field is never touched).
+function refreshShelves() {
+  const c = S.sel !== null && S.job.cabinets[S.sel];
+  if (!c) return;
+  const eng = shelfInfo(c).rows || [];
+  document.querySelectorAll("#shelfbox [data-shdepth]").forEach((td) => {
+    const e = eng[+td.dataset.shdepth];
+    td.textContent = e && e.depth !== undefined ? e.depth : "…";
+  });
+  document.querySelectorAll("#shelfbox [data-shname]").forEach((el) => {
+    const e = eng[+el.dataset.shname];
+    el.textContent = (e && e.name) || "unedged";
+  });
+  document.querySelectorAll('#shelfbox input[data-shk="height"]').forEach((inp) => {
+    const e = eng[+inp.dataset.shelf];
+    if (e && e.shown_height !== null && e.shown_height !== undefined) inp.placeholder = Math.round(e.shown_height);
+  });
+}
+
 function renderSupports() {
   const box = slot($("supportbox"));
   if (!box) return;
@@ -3914,28 +4133,11 @@ function renderSupports() {
       ${usable.map((k) => `<option value="${esc(k)}"${k === eff ? " selected" : ""}>${
         esc(k)}</option>`).join("")}</select>`;
   };
-  const kindSel = (r, i) => {
-    const colour = r.eff_board || "";
-    const kind = r.eff_kind || "";
-    const offered = allKinds.filter((k) => boardOffers(colour, k));
-    const lost = kind && offered.indexOf(kind) < 0;
-    return `<select data-sup="${i}" data-sk="kind" title="how thick, or none">
-      <option value=""${kind ? "" : " selected"}>not edged</option>
-      ${lost ? `<option value="${esc(kind)}" selected>${esc(pre[kind] || kind)} (not offered)</option>` : ""}
-      ${offered.map((k) => `<option value="${esc(k)}"${k === kind ? " selected" : ""}>${
-        esc(pre[k] || k)}</option>`).join("")}</select>`;
-  };
-  const colourSel = (r, i) => {
-    const kind = r.eff_kind || "";
-    const colour = r.eff_board || "";
-    const usable = kind ? keys.filter((k) => boardOffers(k, kind)) : keys.slice();
-    const lost = colour && usable.indexOf(colour) < 0;
-    return `<select data-sup="${i}" data-sk="board" title="what colour the edging is"
-      ${kind ? "" : "disabled"}>
-      ${lost ? `<option value="${esc(colour)}" selected>${esc(edgeLabel(colour))} (not offered)</option>` : ""}
-      ${usable.map((k) => `<option value="${esc(k)}"${k === colour ? " selected" : ""}>${
-        esc(edgeLabel(k))}</option>`).join("")}</select>`;
-  };
+  // the shared selects (3 October 2026): the same markup these two always made
+  const kindSel = (r, i) => edgeKindSelect(`data-sup="${i}" data-sk="kind"`, r.eff_kind || "", r.eff_board || "",
+                                           {none: {value: "", label: "not edged"}, title: "how thick, or none"});
+  const colourSel = (r, i) => edgeColourSelect(`data-sup="${i}" data-sk="board"`, r.eff_kind || "", r.eff_board || "",
+                                               {disabled: !(r.eff_kind || "")});
 
   if (!supportsTyped(c)) {
     // AS QUOTED: read-only, exactly what the engine cuts. The rows are the
@@ -4705,22 +4907,6 @@ function renderStructure() {
         <span class="note">what the backing board is grooved into, whether one
         is cut at all, or a solid back instead</span></div>`}
       ${!shaped && c.back === "solid" ? solidBackHTML(c, gb) : ""}
-      ${shaped
-        ? `<div class="f wide"><label>Shelves</label>
-             <p class="off">A corner unit's shelves are the arm shelf and the mitred
-             shelf, both in <b>Corner Unit</b> below — its inside is not a rectangle,
-             so a straight shelf size would not fit it.</p></div>`
-        : `<div class="f"><label>Shelves</label>
-        <input type="number" step="1" min="0" data-k="shelves" data-t="int"
-               value="${c.shelves || 0}">
-        <span class="note">Adjustable — they sit on shelf pegs and can be moved up
-        or down. Cut ${std.shelf_gap_adjustable} mm clear of the back so they
-        lift out.</span></div>
-      <div class="f"><label>Fixed shelves</label>
-        <input type="number" step="1" min="0" data-k="fixed_shelves" data-t="int"
-               value="${c.fixed_shelves || 0}">
-        <span class="note">Permanently fixed in place — they do not move. Cut
-        ${std.shelf_gap_fixed} mm clear of the back, so a little deeper.</span></div>`}
       ${unavailableField("Shelf width", c.shelf_width,
         "Greyed out: a shelf width only means something once a divider splits " +
         "the inside into bays, and dividers are not available yet.")}

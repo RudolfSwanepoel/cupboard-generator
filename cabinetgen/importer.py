@@ -83,7 +83,7 @@ from . import boards as B
 from . import hardware as H
 from . import pictures as PIC
 from .model import (Acceptance, Cabinet, Drawer, GapChoice, Job, Obstruction, Opening,
-                    Panel, PanelSpec, Placement, PlinthChoice, Room, Support, Wall,
+                    Panel, PanelSpec, Placement, PlinthChoice, Room, Shelf, Support, Wall,
                     material_record)
 from .store import job_from_dict, job_to_dict
 
@@ -260,6 +260,7 @@ _NESTED = {
     (Job, "placements"): Placement, (Job, "gaps"): GapChoice,
     (Job, "plinths"): PlinthChoice, (Job, "acceptances"): Acceptance,
     (Cabinet, "drawers"): Drawer, (Cabinet, "support_rows"): Support,
+    (Cabinet, "shelf_rows"): Shelf,
     (Cabinet, "bespoke"): Panel, (Cabinet, "panel"): PanelSpec,
     (Room, "walls"): Wall, (Wall, "openings"): Opening, (Wall, "obstructions"): Obstruction,
 }

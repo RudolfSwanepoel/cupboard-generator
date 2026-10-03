@@ -2821,14 +2821,20 @@ def back_supports_fit(cab, std: Standard = STANDARD, materials: dict = None) -> 
 
 
 def shelf_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List[dict]:
-    """Where each shelf is DRAWN: spaced evenly from the top face of the bottom
-    panel to the top of the sides, fixed shelves listed first. Display only —
-    real heights are set at fitment and nothing validates them. Per entry
-    `fixed`, `z0`, `z1`, `depth` (the engine's, off Standard) and `width`."""
+    """Where each shelf is DRAWN, one entry per row of `Cabinet.shelf_list` in
+    order. A row with no height typed takes its equal-spacing slot — spaced
+    evenly from the top face of the bottom panel to the top of the sides, the
+    rule since 27 September 2026, so an unedited job's 3D does not move; a row
+    with a height is drawn with its top face that far above the top face of the
+    bottom panel (3 October 2026). Display only — real heights are set at
+    fitment and nothing validates them. Per entry `fixed` (a migrated fixed
+    row), `z0`, `z1`, `depth` (the engine's, off Standard and the row's
+    clearance and the back chosen), `width`, `height` (as shown: the top face
+    above the bottom panel's top face), `clearance` and `typed`."""
     if cab.is_panel or cab.template == "none" or cab.corner_kind in ("mitre", "ell"):
         return []
-    n_fixed, n_adj = int(cab.fixed_shelves or 0), int(cab.shelves or 0)
-    if n_fixed + n_adj <= 0:
+    rows = cab.shelf_list
+    if not rows:
         return []
     mats = MATERIALS if materials is None else materials
     parts = solid_parts(cab, std, mats)
@@ -2837,15 +2843,19 @@ def shelf_layout(cab, std: Standard = STANDARD, materials: dict = None) -> List[
     g = geometry(cab, std, mats)
     xs = [x for x, _ in g.footprint]
     W, D, H, t = max(xs) - min(xs), g.depth, g.height, std.board_t
-    n = n_fixed + n_adj
+    n = len(rows)
     gap = (H - t - n * t) / (n + 1)
     out = []
-    for k in range(n):
-        fixed = k < n_fixed
-        z0 = t + gap * (k + 1) + t * k
-        out.append(dict(fixed=fixed, z0=round(z0, 1), z1=round(z0 + t, 1),
-                        depth=std.shelf_depth(D, fixed=fixed, back=cab.back),
-                        width=cab.shelf_width or std.internal_width(W)))
+    for k, row in enumerate(rows):
+        if row.height is None:
+            z0 = t + gap * (k + 1) + t * k
+        else:
+            z0 = t + int(row.height) - t          # top face at `height` above the bottom panel's top face
+        out.append(dict(fixed=(row.note == "fixed"), z0=round(z0, 1), z1=round(z0 + t, 1),
+                        depth=std.shelf_depth(D, back=cab.back, clearance=int(row.clearance)),
+                        width=cab.shelf_width or std.internal_width(W),
+                        height=round(z0, 1), clearance=int(row.clearance),
+                        typed=row.height is not None, row=row))
     return out
 
 
@@ -2900,9 +2910,23 @@ def interior_parts(cab, std: Standard = STANDARD, materials: dict = None) -> Lis
     for sh in shelves:
         part = _box("shelf", cab.carcass_board, t, t + sh["width"], D - sh["depth"], D,
                     sh["z0"], sh["z1"], "x", "fixed" if sh["fixed"] else "")
-        tapes = [Tape("y1", cab.exterior_board, "pvc")] if cab.carcass_tape(mats) else []
-        out.append((part, tapes))
+        # the row's own edging (3 October 2026): its kind in its colour board on
+        # the edges its counts mean — front, then rear; left end, then right
+        out.append((part, _shelf_tapes(cab, sh, mats)))
     return out + _drawer_tapes(cab, drawers, std, mats)
+
+
+def _shelf_tapes(cab, sh: dict, mats: dict) -> List[Tape]:
+    """A drawn shelf's bands, off its row: `long` 1 is the front edge (y1 in
+    the Part frame, towards the room), 2 the rear as well; `short` 1 the left
+    end (x0), 2 both. Nothing when the row orders no tape."""
+    row = sh.get("row")
+    if row is None or not cab.shelf_tape(mats, row):
+        return []
+    board, kind = cab.shelf_board(row), cab.shelf_kind(row)
+    long, short = max(0, min(2, int(row.long or 0))), max(0, min(2, int(row.short or 0)))
+    sides = ["y1", "y0"][:long] + ["x0", "x1"][:short]
+    return [Tape(s, board, kind) for s in sides]
 
 
 def _drawer_tapes(cab, drawers: List[Part], std: Standard, mats: dict):
