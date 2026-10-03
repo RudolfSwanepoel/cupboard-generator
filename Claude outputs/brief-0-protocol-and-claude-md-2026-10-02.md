@@ -1,7 +1,7 @@
 # Brief 0 — The brief protocol, and CLAUDE.md slimmed
 
 Written 2 October 2026, brought up to date 3 October 2026 against master at
-427f68b (room touch-ups round 2 and Undo). From Cowork, agreed with Rudolf.
+3239722 (Import project and project renaming). From Cowork, agreed with Rudolf.
 Run ALONE, as the only session on the repo, from current master. No code
 changes: the benchmark and every check must come out exactly as they went in.
 
@@ -10,8 +10,8 @@ changes: the benchmark and every check must come out exactly as they went in.
 Anthropic's own guidance for Claude Code: the context window is the one
 constraint behind every other practice, performance degrades as it fills, and a
 bloated CLAUDE.md "causes Claude to ignore your actual instructions". Ours is
-the whole project history — 50,113 words at 427f68b, 21,023 of them the Status
-section — read in full at the start of every session before a line of work is
+the whole project history — over 50,000 words, more than 21,000 of them the
+Status section — read in full at the start of every session before a line of work is
 done. The hard rules are not in it as a list at all. This brief moves the
 history and the explanations out, keeps what a session must know, and writes
 down once how every brief from now on is run.
@@ -57,7 +57,8 @@ anything moved listed.
 ## Part 2 — CLAUDE.md slimmed
 
 Target: **under 3,500 words** (measured at 427f68b, the sections that stay
-come to about 2,350 words as they stand; the additions below about 700 more).
+came to about 2,350 words as they stand; the additions below about 700 more;
+the import brief added a little to Demo build and Layout since).
 The test for every NEW line is Anthropic's: "would removing this cause Claude
 to make mistakes?" Sections that stay are kept as they are — this brief does
 not reword them. What CLAUDE.md holds, in this order:
@@ -100,7 +101,7 @@ not reword them. What CLAUDE.md holds, in this order:
 4. **Status: at most ten lines**, one per area with its latest date (core and
    cut list; boards; panels and attached panels; corner units; supports,
    drawers and runners; 3D; UI; room — redo Phases 1–2, touch-ups, Undo; demo
-   build; Import project, if its session has merged by then), then: "History and the reasoning behind each decision:
+   build; Import project and project renaming), then: "History and the reasoning behind each decision:
    `docs/HISTORY.md`." Every line is read off the current Status entries, not
    written from memory.
 5. **Layout** — the table as is, plus lines for `docs/BRIEF-PROTOCOL.md`,
@@ -151,8 +152,7 @@ not reword them. What CLAUDE.md holds, in this order:
 
 Everything else moves, whole and unedited, into two new files:
 
-- **`docs/HISTORY.md`** — the whole old `## Status` section (lines 115 to
-  1931 at 427f68b) in the order it is in now, newest first, each entry under
+- **`docs/HISTORY.md`** — the whole old `## Status` section in the order it is in now, newest first, each entry under
   its own heading with its date — EXCEPT the "Where every moved function lives
   now" table, which goes to HOW-IT-WORKS. Nothing is cut: these are the
   reasons and the measured figures. At the top, a short index of
@@ -193,8 +193,8 @@ working tree's line endings.
   lines in `ROOM-LAYOUT-SPEC.md`). Nothing under `cabinetgen/`, `app/`,
   `tools/`, `jobs/`, `tools/fixtures/` or `Claude outputs/` — `git diff --stat
   --ignore-space-at-eol` quoted.
-- `python tools/check_all.py` the same count as on the tree before (23 of 23
-  at 427f68b) — quote it; benchmark 272 / 59 / 30, 92 pot holes, 18 / 9 / 6,
+- `python tools/check_all.py` the same count as on the tree before (24 of 24
+  at 3239722) — quote it; benchmark 272 / 59 / 30, 92 pot holes, 18 / 9 / 6,
   R28,363.50; `snapshot.py --compare` identical.
 - One commit, pushed to master. Report back with the heading map and the word
   counts.
