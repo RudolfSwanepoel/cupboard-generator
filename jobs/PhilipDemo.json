@@ -155,7 +155,7 @@
     "walls": [
       {
         "id": "B",
-        "x0": 0,
+        "x0": 430,
         "y0": 0,
         "x1": 3000,
         "y1": 0,
@@ -167,12 +167,78 @@
         "x0": 3000,
         "y0": 0,
         "x1": 3000,
+        "y1": 1614,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "A",
+        "x0": 3300,
+        "y0": 1614,
+        "x1": 3300,
+        "y1": 2664,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "D",
+        "x0": 3000,
+        "y0": 2664,
+        "x1": 3000,
         "y1": 3000,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "E",
+        "x0": 3000,
+        "y0": 1614,
+        "x1": 3300,
+        "y1": 1614,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "F",
+        "x0": 3300,
+        "y0": 2664,
+        "x1": 3000,
+        "y1": 2664,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "G",
+        "x0": 3000,
+        "y0": 3000,
+        "x1": 839,
+        "y1": 2312,
+        "drawn": true,
+        "openings": [],
+        "obstructions": []
+      },
+      {
+        "id": "I",
+        "x0": 430,
+        "y0": 0,
+        "x1": 839,
+        "y1": 2312,
+        "drawn": true,
         "openings": [],
         "obstructions": []
       }
     ]
   },
+  "placements": [
+    {
+      "cabinet": 1,
+      "wall": "B",
+      "x": 1762,
+      "z": 0,
+      "flip": false,
+      "layer": null
+    }
+  ],
   "runners": {
     "GELMAR45": {
       "id": "GELMAR45",
