@@ -76,7 +76,7 @@ any angle and Draw walls (stages `draw`, `ell`, `corner`, `input`, `drag`, `3d`)
 screenshots into `output/_checks/ui_check_walls/`, and `python tools/ui_check_undo.py`
 Undo and Redo (four edits undone back to the loaded job and redone, one step
 per edit, Ctrl+Z in a text field left to the field), and `python tools/ui_check_import.py`
-Import project and the project Rename (stages `import`, `rename`) — this one STARTS
+Import project and the project Rename (stages `import`, `rename`, `shipped`) — this one STARTS
 ITS OWN COPY of the app in a temp folder on a free port, because Import writes jobs
 and libraries, so it needs no app running and never touches the live files;
 screenshots into `output/_checks/ui_check_import/`. All seven are optional —
@@ -146,8 +146,9 @@ cabinetgen/room.py         walls as positioned segments (2 Oct 2026): connection
                            flip_room. The only trigonometry.
 cabinetgen/store.py        job files: JSON save / load
 cabinetgen/importer.py     Import project: which folder is an app folder, the preview (scan),
-                           identical / renamed "(imported n)" / broken, the re-pointing, and
-                           writing it (run). Reads the old folder only
+                           identical / renamed "(imported n)" / broken / shipped (the jobs a
+                           demo's jobs/shipped-jobs.json lists, left out), the re-pointing,
+                           and writing it (run). Reads the old folder only
 cabinetgen/export_plaza.py Plazaboard CSV + costing off the real rate card
 run_app.py                 starts the local server, opens the window (maximised); under
                            pythonw logs to output/app.log and says in a message box
@@ -237,7 +238,7 @@ tools/check_import.py      Import project and the renames, on temp folders only:
                            the cost loaded there and here, twice brings nothing, every rename
                            and every taken name
 tools/ui_check_import.py   Import project and Rename in the running app (Playwright) — starts its
-                           OWN copy of the app in a temp folder; stages import, rename
+                           OWN copy of the app in a temp folder; stages import, rename, shipped
 tools/ui_check_undo.py     Undo and Redo in the running app (Playwright): a plan drag, a typed wall
                            length, a delete, a drawer face, undone back to the loaded job and redone;
                            a new edit clears Redo; Ctrl+Z in a field is the field's; the Placements pick
