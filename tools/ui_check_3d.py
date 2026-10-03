@@ -1113,22 +1113,28 @@ def stage_room(pw):
     placed = page.evaluate(f"() => S.job.placements.find((p) => p.cabinet === {number})")
     check("placed on wall A from the Placements table", placed and placed["wall"], "A")
 
-    # drag it along wall A in the plan, with a real mouse
+    # drag it along wall A in the plan, with a real mouse: 1000 mm at the plan's
+    # own scale. A fixed 120 px drag ran off the end of the 4000 mm wall once
+    # Placements stood beside the plan and the plan was ~300 px wide (touch-ups,
+    # 3 Oct 2026), and the cabinet landed on wall B at x 0, so x never moved.
     page.wait_for_selector(f'#plan svg [data-cab="{number}"]', timeout=15000)
     time.sleep(0.4)
     box = page.locator(f'#plan svg [data-cab="{number}"]').first.bounding_box()
     x0 = placed["x"]
+    px_per_mm = page.evaluate("() => 1 / mmPerPx(planMap())")
     sx, sy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
     page.mouse.move(sx, sy)
     page.mouse.down()
     for i in range(1, 13):
-        page.mouse.move(sx + i * 10, sy)
+        page.mouse.move(sx + 1000 * px_per_mm * i / 12, sy)
         time.sleep(0.02)
     page.mouse.up()
     page.wait_for_function(f"() => S.job.placements.find((p) => p.cabinet === {number}).x !== {x0}",
                            timeout=15000)
-    x1 = page.evaluate(f"() => S.job.placements.find((p) => p.cabinet === {number}).x")
-    check_true("dragged along wall A in the plan", x1 > x0, f"{x0} -> {x1}")
+    p1 = page.evaluate(f"() => S.job.placements.find((p) => p.cabinet === {number})")
+    x1 = p1["x"]
+    check_true("dragged along wall A in the plan", p1["wall"] == "A" and x1 > x0,
+               f"{x0} -> {p1['wall']} {x1}")
 
     # and in 3D, on its wall arrow
     open_3d(page)

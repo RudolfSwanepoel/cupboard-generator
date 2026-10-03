@@ -6759,7 +6759,9 @@ $("plan").addEventListener("keydown", (e) => {
   const wid = inp.dataset.planlen;
   const w = ((roomInfo() || {}).walls || []).find((x) => x.id === wid);
   const was = w ? String(w.length) : inp.defaultValue;
-  if (e.key === "Escape") { e.preventDefault(); inp.value = was; inp.blur(); return; }
+  // Esc puts the figure back AND its box: a value set here fires no input event
+  // (ui_check_walls, 3 Oct 2026: the box stayed six digits wide over G's label)
+  if (e.key === "Escape") { e.preventDefault(); inp.value = was; planLenFit(inp); inp.blur(); return; }
   if (e.key === "Enter" || e.key === "Tab") {
     e.preventDefault();
     const next = e.key === "Tab" ? planLenNext(wid) : null;
